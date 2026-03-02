@@ -52,6 +52,8 @@ SchemeStubs ("IncompleteGamma")
 ExportSchemeStubs ("diesplit")
 importSchemeStubs()
 
+c_source ("compat")
+
 implementation ("Main")
 
 program ("diesplit")

@@ -36,7 +36,7 @@
     static doublereal sp, ss, sum, tot, acca, accb, beta;
     static integer nact, icon, mcon;
     static doublereal temp, step;
-    static integer iout;
+    static integer iout __attribute__((unused));
     static doublereal alpha, tempa;
     static integer isave;
     static doublereal spabs;

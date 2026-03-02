@@ -26,6 +26,8 @@ if [  "x$OS" = "xFreeBSD" ]; then
       M3ARCH="FreeBSD4"
     fi
   fi
+elif [ "x$OS" = "xDarwin" -a "x$PROCESSOR" = "xarm64" ]; then
+  M3ARCH="ARM64_DARWIN"
 elif [ "x$OS$PROCESSOR2" = "xDarwini386" ]; then
   M3ARCH="I386_DARWIN"
 elif [ "x$OS$PROCESSOR2" = "xDarwinpowerpc" ]; then

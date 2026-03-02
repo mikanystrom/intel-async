@@ -2,8 +2,14 @@
 # Copyright (c) 2025 Intel Corporation.  All rights reserved.  See the file COPYRIGHT for more information.
 # SPDX-License-Identifier: Apache-2.0
 
+# Use GNU sed if available (needed for \U uppercase on macOS)
+if command -v gsed >/dev/null 2>&1; then
+  SED=gsed
+else
+  SED=sed
+fi
 
-DERIV=../AMD64_LINUX
+DERIV=../$(../../../m3arch.sh)
 
 #rm -rf ${DERIV}
 mkdir ${DERIV} || echo
@@ -73,7 +79,7 @@ EOF
 camelize()
 {
     in=$1;
-    echo $in | sed 's/\.dat$//' | sed  -e 's/_\(.\)/\U\1/g' -e 's/^\(.\)/Rdl\U\1/'
+    echo $in | $SED 's/\.dat$//' | $SED  -e 's/_\(.\)/\U\1/g' -e 's/^\(.\)/Rdl\U\1/'
 }
 
 mk_e_fragment()
@@ -110,6 +116,6 @@ for file in *.dat; do
   mk_e_fragment ${file} ${base} ${intf}
 done
 
-cpp -P -I${DERIV} rdlParseExt.ee -o rdlParseExt.e
+cc -E -P -x c -I${DERIV} rdlParseExt.ee -o rdlParseExt.e
 
 
