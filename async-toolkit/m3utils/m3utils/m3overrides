@@ -217,6 +217,7 @@ override("parseliberty", TOP & "/liberty")
 
 override("cspsimlib", TOP & "/csp")
 override("cspgrammar", TOP & "/csp")
+override("cspparse", TOP & "/csp")
 
 override("mpz", TOP & "/gmp")
 

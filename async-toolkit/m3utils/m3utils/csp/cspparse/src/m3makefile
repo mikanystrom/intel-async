@@ -1,0 +1,16 @@
+% Copyright (c) 2025 Intel Corporation.  All rights reserved.  See the file COPYRIGHT for more information.
+% SPDX-License-Identifier: Apache-2.0
+
+import ("libm3")
+import ("cit_util")
+import ("parserlib")
+
+Token("csp")
+Lexer("csp","csp")
+Parser("csp","csp")
+
+Extended("cspLexExt")
+Extended("cspParseExt")
+
+implementation ("Main")
+program ("cspfe")
