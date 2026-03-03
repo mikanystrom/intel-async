@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+#
+# macho-set-stacksize -- patch LC_MAIN.stacksize in a Mach-O 64-bit binary.
+#
+# The Apple linker (ld) enforces a 512 MB maximum for -stack_size on arm64.
+# The kernel itself honours any value in the LC_MAIN load command, so we
+# can bypass the linker limit by patching the binary directly.
+#
+# Usage:  macho-set-stacksize <binary> [size_in_bytes]
+#
+# Default size is 8 GB (0x200000000).  After patching, the binary is
+# re-signed ad-hoc so macOS will still load it.
+#
+
+import struct
+import subprocess
+import sys
+
+def main():
+    if len(sys.argv) < 2:
+        print(f"usage: {sys.argv[0]} <binary> [size_in_bytes]", file=sys.stderr)
+        sys.exit(1)
+
+    binary = sys.argv[1]
+    stacksize = int(sys.argv[2], 0) if len(sys.argv) > 2 else 0x200000000  # 8 GB
+
+    with open(binary, 'rb') as f:
+        data = bytearray(f.read())
+
+    magic = struct.unpack_from('<I', data, 0)[0]
+    if magic != 0xFEEDFACF:
+        print(f"{binary}: not a Mach-O 64-bit binary (magic={magic:#x})", file=sys.stderr)
+        sys.exit(1)
+
+    ncmds = struct.unpack_from('<I', data, 16)[0]
+    offset = 32  # skip mach_header_64
+
+    for _ in range(ncmds):
+        cmd, cmdsize = struct.unpack_from('<II', data, offset)
+        if cmd == 0x80000028:  # LC_MAIN
+            old = struct.unpack_from('<Q', data, offset + 16)[0]
+            struct.pack_into('<Q', data, offset + 16, stacksize)
+            with open(binary, 'wb') as f:
+                f.write(data)
+            subprocess.check_call(['codesign', '--force', '--sign', '-', binary])
+            print(f"{binary}: LC_MAIN stacksize {old:#x} -> {stacksize:#x}")
+            return
+        offset += cmdsize
+
+    print(f"{binary}: LC_MAIN load command not found", file=sys.stderr)
+    sys.exit(1)
+
+if __name__ == '__main__':
+    main()

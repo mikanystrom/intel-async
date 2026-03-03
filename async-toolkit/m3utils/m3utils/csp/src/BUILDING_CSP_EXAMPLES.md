@@ -32,37 +32,28 @@ export PATH="$HOME/cm3/install/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH"
 Make sure `cspc` has been built (`make std` or `cm3 -build -override`
 in `csp/src`).
 
-### Stack size fix for complex examples
+### Stack size on macOS
 
 The Scheme compiler uses deep recursion during AST processing and
 function inlining.  Complex processes (e.g. Collatz WORKER with struct
 pack/unpack) exhaust the default 8 MB macOS stack, causing segfaults.
 
-The fix is to patch the `cspc` binary's Mach-O header to request a
-4 GB main-thread stack:
-
-```python
-python3 -c "
-import struct
-with open('csp/ARM64_DARWIN/cspc', 'rb') as f:
-    data = bytearray(f.read())
-offset = 32  # skip Mach-O 64-bit header
-ncmds = struct.unpack_from('<I', data, 16)[0]
-for i in range(ncmds):
-    cmd, cmdsize = struct.unpack_from('<II', data, offset)
-    if cmd == 0x80000028:  # LC_MAIN
-        struct.pack_into('<Q', data, offset + 16, 0x100000000)  # 4 GB
-        break
-    offset += cmdsize
-with open('csp/ARM64_DARWIN/cspc', 'wb') as f:
-    f.write(data)
-"
-codesign --force --sign - csp/ARM64_DARWIN/cspc
-```
-
-On Linux this is not needed — `ulimit -s unlimited` works there.
+On Linux this is not a problem — `ulimit -s unlimited` works there.
 On macOS the kernel hard-limits `ulimit -s` to ~64 MB, which is still
-not enough, so the Mach-O `LC_MAIN.stacksize` field must be used.
+not enough.  The Apple linker's `-stack_size` flag caps out at 512 MB
+on arm64, but the kernel honours any value in the Mach-O
+`LC_MAIN.stacksize` field.
+
+The CM3 ARM64\_DARWIN config sets 512 MB via the linker flag.  The
+`csp/src/m3makefile` then runs `bin/macho-set-stacksize` as a
+post-link step to bump `cspc` to 8 GB.  This happens automatically
+during `cm3 -build -override` — no manual patching is needed.
+
+The `bin/macho-set-stacksize` script can also be used standalone:
+
+```sh
+bin/macho-set-stacksize <binary> [size_in_bytes]   # default: 8 GB
+```
 
 ## Quick start: HELLOWORLD
 
@@ -162,9 +153,6 @@ cm3 -build -override
 ../ARM64_DARWIN/sim
 ```
 
-**Note:** This requires the stack size fix described above.  Without
-it, `cspc` segfaults during compilation of the WORKER process.
-
 The simulation runs 20 workers computing Collatz sequences for odd
 numbers up to 2^44, reporting longest chains as they are found.
 It runs until all phases complete (takes a while).
@@ -197,7 +185,7 @@ environment provides `(go)` to retrieve the process table.
 | Example | Status |
 |---------|--------|
 | `simple.HELLOWORLD` | Compiles, builds, and runs end-to-end |
-| `collatz.COLLATZ(20,44)` | Compiles, builds, and runs (requires stack fix) |
+| `collatz.COLLATZ(20,44)` | Compiles, builds, and runs |
 | `first.SYSTEM` | Not yet tested (4096 processes, large) |
 
 ## Notes

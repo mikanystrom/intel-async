@@ -110,4 +110,9 @@ implementation ("Main")
 
 program ("cspc")
 
-
+% The Apple linker caps -stack_size at 512 MB on arm64, but the CSP
+% compiler's Scheme interpreter needs more for complex processes.
+% Patch LC_MAIN.stacksize directly in the Mach-O binary to 8 GB.
+if IsTargetDarwin()
+  exec("python3 ../../bin/macho-set-stacksize ../" & BUILD_DIR & "/cspc")
+end
