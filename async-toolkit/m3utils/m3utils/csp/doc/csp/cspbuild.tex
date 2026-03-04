@@ -1,0 +1,406 @@
+% Copyright (c) 2025 Intel Corporation.  All rights reserved.  See the file COPYRIGHT for more information.
+% SPDX-License-Identifier: Apache-2.0
+
+\documentclass[11pt]{article}
+
+% Page layout
+\usepackage[letterpaper, margin=1in]{geometry}
+\setlength{\headheight}{14pt}
+\usepackage{parskip}
+\setlength{\parindent}{0pt}
+
+% Typography
+\usepackage{fancyvrb}
+\usepackage{booktabs}
+
+% Code listings
+\usepackage{listings}
+\lstset{
+    basicstyle=\ttfamily\small,
+    columns=fullflexible,
+    keepspaces=true,
+    showstringspaces=false,
+    breaklines=true,
+    frame=none,
+    xleftmargin=2em,
+}
+
+% For BNF-style syntax rules
+\usepackage{syntax}
+\setlength{\grammarparsep}{4pt}
+\setlength{\grammarindent}{11em}
+
+% Hyperlinks
+\usepackage[colorlinks=true, linkcolor=blue, urlcolor=blue, citecolor=blue]{hyperref}
+
+% Headers and footers
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\textit{The cspbuild System Builder}}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% Custom commands (matching csp.tex)
+\newcommand{\keyword}[1]{\texttt{\textbf{#1}}}
+\newcommand{\nonterminal}[1]{\textit{#1}}
+
+\title{\textbf{The cspbuild System Builder} \\[0.5em]
+\large User Manual for the \texttt{.sys} Format}
+\author{Mika Nystr\"om \\
+  Neuromorphic Computing Laboratory \\
+  Intel Corporation}
+\date{DRAFT Version 0.1\\
+\today}
+
+\begin{document}
+
+\maketitle
+
+\vspace{1em}
+
+\noindent
+ Copyright \copyright\ 2025 Intel Corporation
+
+ Licensed under the Apache License, Version 2.0 (the ``License'');
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+ {\tt http://www.apache.org/licenses/LICENSE-2.0}
+
+\section{Introduction}
+
+The \texttt{cspbuild} system builder automates the construction of
+multi-process CSP simulations.  It replaces the manual workflow of
+running \texttt{cspfe}, writing \texttt{.procs} files, patching
+cellinfo, and invoking \texttt{drive!}\ with a single command.
+
+The input is a \texttt{.sys} file that declares the channels, process
+types, and instances of a system.  Each process type refers to a
+\texttt{.csp} source file (or contains inline CSP code).  The builder
+parses and validates the system description, runs \texttt{cspfe} on
+each process, patches the resulting S-expression files with channel
+port definitions, writes the \texttt{.procs} file, and calls
+\texttt{drive!}\ and \texttt{cm3} to produce a simulator binary.
+
+\section{Quick Start}
+
+\subsection{A single-process system}
+
+Create a file \texttt{hello.csp}:
+\begin{Verbatim}[samepage=true]
+print("hello, world!")
+\end{Verbatim}
+
+Create a file \texttt{hello.sys}:
+\begin{Verbatim}[samepage=true]
+system Hello;
+  process HELLO = "hello.csp";
+begin
+  var x : HELLO;
+end.
+\end{Verbatim}
+
+Build and run:
+\begin{Verbatim}[samepage=true]
+$ cspc -scm /dev/stdin <<'EOF'
+(load "$M3UTILS/csp/src/setup.scm")
+(load "$M3UTILS/csp/src/cspbuild.scm")
+(build-system! "hello.sys")
+(exit 0)
+EOF
+$ build/ARM64_DARWIN/sim
+1: x.x: hello, world!
+\end{Verbatim}
+
+\subsection{A producer-consumer system}
+
+Create \texttt{producer.csp}:
+\begin{Verbatim}[samepage=true]
+int x;
+*[ R!x ; x = x + 1 ]
+\end{Verbatim}
+
+Create \texttt{consumer.csp}:
+\begin{Verbatim}[samepage=true]
+int x;
+*[ L?x ; print(x) ]
+\end{Verbatim}
+
+Create \texttt{prodcons.sys}:
+\begin{Verbatim}[samepage=true]
+system ProdCons;
+  var c : channel(32);
+
+  process Producer = "producer.csp"
+    port out R : channel(32);
+
+  process Consumer = "consumer.csp"
+    port in L : channel(32);
+begin
+  var p : Producer(R => c);
+  var q : Consumer(L => c);
+end.
+\end{Verbatim}
+
+Build and run:
+\begin{Verbatim}[samepage=true]
+$ cspc -scm /dev/stdin <<'EOF'
+(load "$M3UTILS/csp/src/setup.scm")
+(load "$M3UTILS/csp/src/cspbuild.scm")
+(build-system! "prodcons.sys")
+(exit 0)
+EOF
+$ build/ARM64_DARWIN/sim
+3: x.q: 0x0
+4: x.q: 0x1
+5: x.q: 0x2
+...
+\end{Verbatim}
+
+\section{The \texttt{.sys} File Format}
+
+A \texttt{.sys} file describes a system of communicating CSP processes.
+It declares the channels that connect them, the process types (each
+backed by a \texttt{.csp} source file or an inline body), and the
+instances that make up the system.
+
+\subsection{Overall structure}
+
+\begin{Verbatim}[samepage=true]
+system <name>;
+  <declarations>
+begin
+  <instances>
+end.
+\end{Verbatim}
+
+The system name is used as a prefix for process type names in the
+generated files.  For a system named \texttt{Hello} with a process
+\texttt{HELLO}, the cell name becomes \texttt{Hello.HELLO} and the
+escaped filename becomes \texttt{Hello\_46\_HELLO.scm}.
+
+\subsection{Comments}
+
+Two comment styles are supported:
+\begin{itemize}
+\item Line comments: \verb!// comment to end of line!
+\item Block comments: \verb!(* comment *)!, which may be nested
+\end{itemize}
+
+\subsection{Declarations}
+
+Declarations appear between \keyword{system} and \keyword{begin}.
+There are two kinds: channel declarations and process declarations.
+
+\subsubsection{Channel declarations}
+
+\begin{Verbatim}[samepage=true]
+var <name> : channel(<width>);
+var <name> : channel(<width>) slack <depth>;
+\end{Verbatim}
+
+Declares a channel of the given bit width.  The optional
+\keyword{slack} clause sets the channel buffer depth (default~1).
+
+Examples:
+\begin{Verbatim}[samepage=true]
+var c : channel(32);            // 32-bit channel, slack 1
+var wide : channel(64) slack 4; // 64-bit channel, slack 4
+\end{Verbatim}
+
+\subsubsection{Process declarations}
+
+\begin{Verbatim}[samepage=true]
+process <name> = <body> <port-declarations>;
+\end{Verbatim}
+
+The body is either a string literal naming an external \texttt{.csp} file:
+\begin{Verbatim}[samepage=true]
+process Producer = "producer.csp"
+    port out R : channel(32);
+\end{Verbatim}
+
+or an inline CSP body enclosed in \keyword{begin}\ldots\keyword{end}:
+\begin{Verbatim}[samepage=true]
+process HELLO = begin print("hello!") end;
+\end{Verbatim}
+
+Inline bodies are written to a temporary file and passed to
+\texttt{cspfe}.  They may contain nested
+\keyword{begin}\ldots\keyword{end} blocks.
+
+\subsubsection{Port declarations}
+
+Port declarations follow the process body (before the terminating
+semicolon) and declare the channels that the process communicates on.
+Each port has a direction (\keyword{in} or \keyword{out}) and a
+channel width that must match the channel it is bound to.
+
+\begin{Verbatim}[samepage=true]
+port in <name> : channel(<width>)
+port out <name> : channel(<width>)
+\end{Verbatim}
+
+The port name must match the channel variable used inside the
+\texttt{.csp} source.  For example, if the CSP code contains
+\verb!L?x! and \verb!R!x!, the process declaration should have
+\verb!port in L! and \verb!port out R!.
+
+A process with no ports (such as a standalone ``hello world'' process)
+simply has no port declarations.
+
+\subsection{Instances}
+
+Instances appear between \keyword{begin} and \keyword{end}.
+Each instance creates one copy of a process type and binds its
+ports to channels.
+
+\begin{Verbatim}[samepage=true]
+var <instance-name> : <process-name>;
+var <instance-name> : <process-name>(<bindings>);
+\end{Verbatim}
+
+Bindings are comma-separated \nonterminal{port} \verb!=>!
+\nonterminal{channel} pairs:
+
+\begin{Verbatim}[samepage=true]
+var p : Producer(R => c);
+var q : Consumer(L => c);
+\end{Verbatim}
+
+The binding \verb!R => c! connects the process's port \texttt{R}
+to the system-level channel~\texttt{c}.  Every port declared on
+the process type must be bound in every instance.
+
+\section{Formal Syntax}
+
+\begin{grammar}
+<system-file> ::= \keyword{system} \nonterminal{IDENT} ``;'' \{ <declaration> \}
+\keyword{begin} <instance-list> \keyword{end} ``.''
+
+<declaration> ::= <channel-decl> | <process-decl>
+
+<channel-decl> ::= \keyword{var} \nonterminal{IDENT} ``:'' \keyword{channel}
+``('' \nonterminal{INTEGER} ``)'' [ \keyword{slack} \nonterminal{INTEGER} ] ``;''
+
+<process-decl> ::= \keyword{process} \nonterminal{IDENT} ``='' <process-body>
+\{ <port-decl> \} ``;''
+
+<process-body> ::= \nonterminal{STRING} | \keyword{begin} \nonterminal{csp-text} \keyword{end}
+
+<port-decl> ::= \keyword{port} <direction> \nonterminal{IDENT} ``:'' \keyword{channel}
+``('' \nonterminal{INTEGER} ``)''
+
+<direction> ::= \keyword{in} | \keyword{out}
+
+<instance-list> ::= \{ \keyword{var} \nonterminal{IDENT} ``:'' \nonterminal{IDENT}
+[ ``('' <binding-list> ``)'' ] ``;'' \}
+
+<binding-list> ::= <binding> \{ ``,'' <binding> \}
+
+<binding> ::= \nonterminal{IDENT} ``\verb!=>!'' \nonterminal{IDENT}
+\end{grammar}
+
+\section{The \texttt{build-system!}\ Procedure}
+
+\subsection{Synopsis}
+
+\begin{Verbatim}[samepage=true]
+(build-system! <sys-file> [option value] ...)
+\end{Verbatim}
+
+\subsection{Options}
+
+\begin{tabular}{lll}
+\toprule
+Option & Default & Description \\
+\midrule
+\texttt{'slack} & \texttt{*default-slack*} & Channel buffer depth \\
+\texttt{'run} & \texttt{\#f} & Run the simulator after building \\
+\texttt{'verbose} & \texttt{\#f} & Print extra progress information \\
+\bottomrule
+\end{tabular}
+
+\bigskip
+
+Examples:
+\begin{Verbatim}[samepage=true]
+(build-system! "hello.sys")
+(build-system! "prodcons.sys" 'slack 2 'verbose #t)
+(build-system! "prodcons.sys" 'run #t)
+\end{Verbatim}
+
+\subsection{Other useful entry points}
+
+The \texttt{cspbuild} library also exposes lower-level procedures for
+use in interactive \texttt{cspc} sessions:
+
+\begin{description}
+\item[\texttt{(parse-sys-file \nonterminal{filename})}]
+  Parse a \texttt{.sys} file and return its abstract syntax tree
+  as a Scheme list.  Useful for debugging.
+
+\item[\texttt{(validate-system! \nonterminal{sys})}]
+  Check that all instances reference declared process types,
+  all bindings reference declared ports and channels, all port
+  widths match channel widths, and every port is bound.
+  Raises an error on the first violation found.
+
+\item[\texttt{(escape-name \nonterminal{string})}]
+  Escape special characters in a name for use as a filename,
+  matching the encoding used by \texttt{M3Ident.Escape}:
+  \texttt{.}~$\to$~\texttt{\_46\_},
+  \texttt{(}~$\to$~\texttt{\_40\_},
+  \texttt{)}~$\to$~\texttt{\_41\_},
+  \texttt{,}~$\to$~\texttt{\_44\_}.
+\end{description}
+
+\section{Build Pipeline}
+
+The \texttt{build-system!}\ procedure executes the following steps:
+
+\begin{enumerate}
+\item \textbf{Parse} the \texttt{.sys} file into an abstract syntax tree.
+\item \textbf{Validate} the system: check that all references are
+  consistent and all ports are bound.
+\item \textbf{Generate \texttt{.scm} files}: for each process type,
+  run \texttt{cspfe -{}-scm -{}-name \nonterminal{cellname}
+  \nonterminal{source.csp}} to produce an S-expression file.
+  For processes with channel ports, read the file back, replace the
+  cellinfo's port-definition list with one that includes the proper
+  channel port definitions (sub-ports \texttt{C}, \texttt{q},
+  \texttt{a}, \texttt{D}), and write it out again.
+\item \textbf{Generate \texttt{.procs} file}: write one line per
+  instance with its cell type, escaped name, and port-to-channel
+  bindings.
+\item \textbf{Compile}: call \texttt{drive!}\ (from
+  \texttt{driver.scm}), which reads the \texttt{.procs} file,
+  compiles all \texttt{.scm} files to Modula-3 via
+  \texttt{compile-csp!}, and generates \texttt{SimMain.m3} and the
+  \texttt{m3makefile}.
+\item \textbf{Build}: run \texttt{cm3 -build -override} in the
+  generated \texttt{build/src} directory to produce the simulator
+  binary.
+\item \textbf{Run} (optional): if the \texttt{'run} option is set,
+  execute the simulator.
+\end{enumerate}
+
+\section{Limitations}
+
+\begin{itemize}
+\item All \texttt{.csp} files referenced by external process bodies
+  must be accessible from the working directory where
+  \texttt{build-system!}\ is invoked.
+\item The \texttt{cspfe} binary must be built for the current platform.
+  Its path is derived from the \texttt{M3UTILS} environment variable
+  as \texttt{\$M3UTILS/csp/cspparse/ARM64\_DARWIN/cspfe}.
+\item Channel types are currently limited to bundled-data channels
+  (\texttt{standard.channel.bd}).
+\item The \texttt{.sys} format does not support parameterized process
+  types (as CAST does with e.g.\ \texttt{P0(int WIDTH)}).
+  Each distinct parameterization requires a separate process
+  declaration.
+\end{itemize}
+
+\end{document}
