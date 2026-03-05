@@ -43,9 +43,10 @@ description: { val : TEXT; cnt : INTEGER; }
   param      { $$.val := $1 }
   localparam { $$.val := $1 }
   directive  { $$.val := "" }
+  null       { $$.val := "" }
 
 package_declaration: { val : TEXT; cnt : INTEGER; }
-  x  { $$.val := "(package " & $1 & " " & $2 & ")" }
+  x  { $$.val := "(package " & $1 & " " & $2 & " " & $3 & ")" }
 
 package_body: { val : TEXT; cnt : INTEGER; }
   empty  { $$.val := "" }
@@ -88,9 +89,21 @@ param_port_list: { val : TEXT; cnt : INTEGER; }
   cons    { $$.val := $1 & " " & $2 }
 
 param_port_decl: { val : TEXT; cnt : INTEGER; }
-  param      { $$.val := "(parameter " & $1 & " " & $2 & " " & $3 & ")" }
-  localparam { $$.val := "(localparam " & $1 & " " & $2 & " " & $3 & ")" }
-  bare_id    { $$.val := "(parameter " & $1 & " " & $2 & " " & $3 & ")" }
+  param_typed      { $$.val := "(parameter " & $1 & " " & $2 & " " & $3 & ")" }
+  param_bare       { $$.val := "(parameter " & $1 & $2 & ")" }
+  param_range      { $$.val := "(parameter " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
+  localparam_typed { $$.val := "(localparam " & $1 & " " & $2 & " " & $3 & ")" }
+  localparam_bare  { $$.val := "(localparam " & $1 & $2 & ")" }
+  localparam_range { $$.val := "(localparam " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
+  bare_typed       { $$.val := "(parameter " & $1 & " " & $2 & " " & $3 & ")" }
+  bare_range       { $$.val := "(parameter " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
+  bare_bare        { $$.val := "(parameter " & $1 & $2 & ")" }
+  param_type       { $$.val := "(parameter-type " & $1 & " " & $2 & ")" }
+
+param_ident_rest: { val : TEXT; cnt : INTEGER; }
+  scoped      { $$.val := "::" & $1 & " " & $2 & " " & $3 }
+  user_typed  { $$.val := " " & $1 & " " & $2 }
+  plain       { $$.val := " () " & $1 }
 
 opt_port_list: { val : TEXT; cnt : INTEGER; }
   yes           { $$.val := "(ports " & $1 & ")" }
@@ -106,13 +119,24 @@ port_decl: { val : TEXT; cnt : INTEGER; }
   reg         { $$.val := "(port " & $1 & " reg " & $2 & " " & $3 & " " & $4 & ")" }
   logic       { $$.val := "(port " & $1 & " logic " & $2 & " " & $3 & " " & $4 & ")" }
   integer     { $$.val := "(port " & $1 & " integer " & $2 & ")" }
+  int         { $$.val := "(port " & $1 & " int " & $2 & " " & $3 & ")" }
   user_typed  { $$.val := "(port " & $1 & " " & $2 & " (id " & $3 & " " & $4 & "))" }
-  dir_only    { $$.val := "(port " & $1 & " (id " & $2 & " " & $3 & "))" }
+  dir_only    { $$.val := "(port " & $1 & " " & $2 & $3 & ")" }
   implicit_dims { $$.val := "(port " & $1 & " logic " & $2 & " " & $3 & ")" }
+  scoped_typed { $$.val := "(port " & $1 & " " & $2 & "::" & $3 & " (id " & $4 & " " & $5 & "))" }
+  scoped_only  { $$.val := "(port " & $1 & "::" & $2 & " (id " & $3 & " " & $4 & "))" }
+
+  user_typed_bare { $$.val := "(port " & $1 & " (id " & $2 & " " & $3 & "))" }
   interface_port { $$.val := "(port-if " & $1 & "." & $2 & " (id " & $3 & " " & $4 & "))" }
   dotnamed    { $$.val := "(port-named " & $1 & " " & $2 & ")" }
   dotstar     { $$.val := "(port-dotstar)" }
   ident_only  { $$.val := "(port-ident " & $1 & ")" }
+
+dir_only_rest: { val : TEXT; cnt : INTEGER; }
+  bare        { $$.val := " (id )" }
+  dims        { $$.val := " (id  " & $1 & ")" }
+  dims_ident  { $$.val := " " & $1 & " " & $2 }
+  assign      { $$.val := " (id  " & $1 & ")" }
 
 port_direction: { val : TEXT; cnt : INTEGER; }
   input   { $$.val := "input" }
@@ -177,6 +201,10 @@ module_item: { val : TEXT; cnt : INTEGER; }
   function_item   { $$.val := $1 }
   task_item       { $$.val := $1 }
   directive       { $$.val := "" }
+  attribute       { $$.val := $2 }
+  if_gen          { $$.val := "(if-generate " & $1 & " " & $2 & " " & $3 & ")" }
+  for_gen         { $$.val := "(for-generate " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
+  begin_block     { $$.val := "(begin " & $1 & " " & $2 & " " & $3 & ")" }
 
 ident_item_tail: { val : TEXT; cnt : INTEGER; }
   inst_hash        { $$.val := "(instance (params " & $1 & ") " & $2 & ")" }
@@ -197,10 +225,23 @@ port_direction_declaration: { val : TEXT; cnt : INTEGER; }
   user_type  { $$.val := "(decl " & $1 & " " & $2 & " " & $3 & ")" }
 
 net_declaration: { val : TEXT; cnt : INTEGER; }
-  typed        { $$.val := Wrap2("decl", $1, $2) }
-  wire_decl    { $$.val := "(decl wire " & $1 & " " & $2 & " " & $3 & ")" }
-  genvar       { $$.val := "(genvar " & $1 & ")" }
-  user_type    { $$.val := "(decl " & $1 & " " & $2 & ")" }
+  typed          { $$.val := Wrap2("decl", $1, $2) }
+  wire_signed    { $$.val := "(decl wire signed " & $1 & " " & $2 & ")" }
+  wire_unsigned  { $$.val := "(decl wire unsigned " & $1 & " " & $2 & ")" }
+  wire_range     { $$.val := "(decl wire " & $1 & " " & $2 & ")" }
+  wire_ident     { $$.val := "(decl wire " & $1 & " " & $2 & ")" }
+  genvar         { $$.val := "(genvar " & $1 & ")" }
+  user_type      { $$.val := "(decl " & $1 & " " & $2 & ")" }
+  user_type_dims { $$.val := "(decl " & $1 & " " & $2 & " " & $3 & ")" }
+
+wire_ident_rest: { val : TEXT; cnt : INTEGER; }
+  user_type    { $$.val := $1 }
+  assign       { $$.val := "(id  " & $1 & ")" }
+  dims         { $$.val := "(id  " & $1 & ")" }
+  dims_assign  { $$.val := "(id  " & $1 & " " & $2 & ")" }
+  dims_list    { $$.val := "(id  " & $1 & ") " & $2 }
+  list         { $$.val := "(id ) " & $1 }
+  bare         { $$.val := "(id )" }
 
 data_type: { val : TEXT; cnt : INTEGER; }
   logic     { $$.val := "(logic " & $1 & " " & $2 & ")" }
@@ -215,6 +256,7 @@ data_type: { val : TEXT; cnt : INTEGER; }
   void      { $$.val := "void" }
   enum      { $$.val := $1 }
   struct    { $$.val := $1 }
+  scoped    { $$.val := "(" & $1 & "::" & $2 & ")" }
 
 enum_type: { val : TEXT; cnt : INTEGER; }
   x  { $$.val := "(enum " & $1 & " " & $2 & ")" }
@@ -241,19 +283,22 @@ enum_name_decl: { val : TEXT; cnt : INTEGER; }
   ranged_assigned  { $$.val := "(" & $1 & "[" & $2 & "] " & $3 & ")" }
 
 struct_type: { val : TEXT; cnt : INTEGER; }
-  x  { $$.val := "(struct " & $1 & " " & $2 & ")" }
+  packed    { $$.val := "(struct packed " & $1 & " " & $2 & ")" }
+  unpacked  { $$.val := "(struct " & $1 & ")" }
 
 struct_member_list: { val : TEXT; cnt : INTEGER; }
   single  { $$.val := $1 }
   cons    { $$.val := $1 & " " & $2 }
 
 struct_member: { val : TEXT; cnt : INTEGER; }
-  x  { $$.val := Wrap2("member", $1, $2) }
+  typed      { $$.val := Wrap2("member", $1, $2) }
+  user_type  { $$.val := "(member " & $1 & " " & $2 & ")" }
 
 typedef_declaration: { val : TEXT; cnt : INTEGER; }
   data    { $$.val := "(typedef " & $1 & " " & $2 & " " & $3 & ")" }
   enum    { $$.val := "(typedef " & $1 & " " & $2 & ")" }
   struct  { $$.val := "(typedef " & $1 & " " & $2 & ")" }
+  alias   { $$.val := "(typedef " & $1 & " " & $2 & ")" }
 
 ident_decl_list: { val : TEXT; cnt : INTEGER; }
   single  { $$.val := $1 }
@@ -268,15 +313,21 @@ genvar_id_list: { val : TEXT; cnt : INTEGER; }
   cons    { $$.val := $1 & " " & $2 }
 
 parameter_declaration: { val : TEXT; cnt : INTEGER; }
-  x  { $$.val := "(parameter " & $1 & " " & $2 & ")" }
+  typed        { $$.val := "(parameter " & $1 & " " & $2 & ")" }
+  range        { $$.val := "(parameter " & $1 & " " & $2 & " " & $3 & ")" }
+  ident_start  { $$.val := "(parameter " & $1 & " " & $2 & ")" }
 
 localparam_declaration: { val : TEXT; cnt : INTEGER; }
-  x  { $$.val := "(localparam " & $1 & " " & $2 & ")" }
+  typed        { $$.val := "(localparam " & $1 & " " & $2 & ")" }
+  range        { $$.val := "(localparam " & $1 & " " & $2 & " " & $3 & ")" }
+  ident_start  { $$.val := "(localparam " & $1 & " " & $2 & ")" }
 
-opt_data_type: { val : TEXT; cnt : INTEGER; }
-  explicit        { $$.val := $1 }
-  implicit_range  { $$.val := $1 & " " & $2 }
-  empty           { $$.val := "()" }
+decl_ident_rest: { val : TEXT; cnt : INTEGER; }
+  user_typed   { $$.val := " (id " & $1 & " " & $2 & " " & $3 & ")" }
+  scoped       { $$.val := "::" & $1 & " " & $2 }
+  assign       { $$.val := " () " & $1 }
+  dims_assign  { $$.val := " " & $1 & " " & $2 }
+  bare         { $$.val := "" }
 
 continuous_assign: { val : TEXT; cnt : INTEGER; }
   x  { $$.val := "(assign " & $1 & ")" }
@@ -313,6 +364,7 @@ statement: { val : TEXT; cnt : INTEGER; }
   seq_block      { $$.val := "(begin " & $1 & " " & $2 & " " & $3 & ")" }
   if_stmt        { $$.val := "(if " & $1 & " " & $2 & " " & $3 & ")" }
   case_stmt      { $$.val := "(" & $1 & " " & $2 & " " & $3 & ")" }
+  case_inside_stmt { $$.val := "(" & $1 & "-inside " & $2 & " " & $3 & ")" }
   for_stmt       { $$.val := "(for " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
   while_stmt     { $$.val := "(while " & $1 & " " & $2 & ")" }
   repeat_stmt    { $$.val := "(repeat " & $1 & " " & $2 & ")" }
@@ -336,6 +388,7 @@ statement: { val : TEXT; cnt : INTEGER; }
   dec_stmt       { $$.val := "(-- " & $1 & ")" }
   preinc_stmt    { $$.val := "(++ " & $1 & ")" }
   predec_stmt    { $$.val := "(-- " & $1 & ")" }
+  assert_stmt    { $$.val := "(assert " & $1 & " " & $2 & ")" }
   null_stmt      { $$.val := "(null)" }
   directive      { $$.val := "(directive)" }
 
@@ -349,6 +402,11 @@ opt_end_name: { val : TEXT; cnt : INTEGER; }
 
 opt_else: { val : TEXT; cnt : INTEGER; }
   yes    { $$.val := $1 }
+  empty  { $$.val := "()" }
+
+opt_assert_else: { val : TEXT; cnt : INTEGER; }
+  yes    { $$.val := $1 }
+  bare   { $$.val := "()" }
   empty  { $$.val := "()" }
 
 case_keyword: { val : TEXT; cnt : INTEGER; }
@@ -371,6 +429,10 @@ case_expr_list: { val : TEXT; cnt : INTEGER; }
   single  { $$.val := $1 }
   cons    { $$.val := $1 & " " & $2 }
 
+case_expr_item: { val : TEXT; cnt : INTEGER; }
+  expr    { $$.val := $1 }
+  range   { $$.val := "[" & $1 & ":" & $2 & "]" }
+
 for_init: { val : TEXT; cnt : INTEGER; }
   decl    { $$.val := "(decl " & $1 & " " & $2 & " " & $3 & ")" }
   assign  { $$.val := Wrap2("=", $1, $2) }
@@ -386,6 +448,7 @@ statement_list: { val : TEXT; cnt : INTEGER; }
   empty      { $$.val := "" }
   cons       { $$.val := Seq($1, $2) }
   local_decl { $$.val := Seq($1, $2) }
+  auto_decl  { $$.val := Seq($1, $2) }
 
 subroutine_call: { val : TEXT; cnt : INTEGER; }
   func    { $$.val := "(call " & $1 & " " & $2 & ")" }
@@ -588,6 +651,15 @@ rel_expr: { val : TEXT; cnt : INTEGER; }
   gt      { $$.val := Wrap2(">", $1, $2) }
   leq     { $$.val := Wrap2("<=", $1, $2) }
   geq     { $$.val := Wrap2(">=", $1, $2) }
+  inside  { $$.val := "(inside " & $1 & " " & $2 & ")" }
+
+inside_list: { val : TEXT; cnt : INTEGER; }
+  single  { $$.val := $1 }
+  cons    { $$.val := $1 & " " & $2 }
+
+inside_item: { val : TEXT; cnt : INTEGER; }
+  expr    { $$.val := $1 }
+  range   { $$.val := "[" & $1 & ":" & $2 & "]" }
 
 shift_expr: { val : TEXT; cnt : INTEGER; }
   single   { $$.val := $1 }
@@ -642,7 +714,19 @@ primary_expr: { val : TEXT; cnt : INTEGER; }
   paren         { $$.val := $1 }
   concat        { $$.val := "(concat " & $1 & ")" }
   replicate     { $$.val := "(replicate " & $1 & " " & $2 & ")" }
-  empty_concat  { $$.val := "(concat)" }
+  empty_concat        { $$.val := "(concat)" }
+  struct_lit          { $$.val := "(struct-lit " & $1 & ")" }
+  struct_lit_default  { $$.val := "(struct-lit-default " & $1 & ")" }
+  unsigned_kw         { $$.val := "unsigned" }
+  signed_kw           { $$.val := "signed" }
+
+assign_pattern_list: { val : TEXT; cnt : INTEGER; }
+  single  { $$.val := $1 }
+  cons    { $$.val := $1 & " " & $2 }
+
+assign_pattern_item: { val : TEXT; cnt : INTEGER; }
+  named       { $$.val := $1 & ": " & $2 }
+  positional  { $$.val := $1 }
 
 hierarchical_id: { val : TEXT; cnt : INTEGER; }
   simple  { $$.val := "(id " & $1 & ")" }

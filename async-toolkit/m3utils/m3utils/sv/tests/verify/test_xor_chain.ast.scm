@@ -1,0 +1,1 @@
+(module test_xor_chain () (ports (port input (id a )) (port input (id b )) (port input (id c )) (port input (id d )) (port output (id y ))) (assign (= (id y) (^ (^ (^ (id a) (id b)) (id c)) (id d)))))

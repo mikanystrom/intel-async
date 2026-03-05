@@ -74,6 +74,9 @@ T_LONGINT       "longint"
 T_VOID          "void"
 T_STRING        "string"
 T_CHANDLE       "chandle"
+T_TYPE          "type"
+T_INSIDE        "inside"
+T_ASSERT        "assert"
 
 T_CEQ           "==="
 T_CNE           "!=="
@@ -114,7 +117,7 @@ T_NAND          "~&"
 T_NOR           "~|"
 T_XNOR          "~^"
 
-T_NUMBER        ({DIGIT}({DIGIT}|"_")*"'"[sS]?{BASE}{HEXDIG}+)|("'"[sS]?{BASE}{HEXDIG}+)|("'"[01xXzZ])|({DIGIT}({DIGIT}|"_")*)
+T_NUMBER        ({DIGIT}({DIGIT}|"_")*"'"[sS]?{BASE}" "?{HEXDIG}+)|("'"[sS]?{BASE}" "?{HEXDIG}+)|("'"[01xXzZ])|({DIGIT}({DIGIT}|"_")*)
 
 T_STRLIT        \"([^"\\]|\\.)*\"
 
@@ -123,6 +126,8 @@ T_SYSIDENT      "$"{IDENT}
 T_DIRECTIVE     "`"{IDENT}([^\n]*"\n")?
 
 T_IDENT         {IDENT}
+
+T_ATTRIBUTE     "(*"([^*]|"*"[^)])*"*)"
 
 char            {%char}
 skip            ([ \t\n]|("/*"([^*]|"*"[^/])*"*/")|("//"[^\n]*"\n"))*

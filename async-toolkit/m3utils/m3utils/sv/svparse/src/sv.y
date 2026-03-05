@@ -16,10 +16,11 @@ description:
   param                     parameter_declaration ';'
   localparam                localparam_declaration ';'
   directive                 T_DIRECTIVE
+  null                      ';'
 
 
 package_declaration:
-  x                         T_PACKAGE T_IDENT ';' package_body T_ENDPACKAGE
+  x                         T_PACKAGE T_IDENT ';' package_body T_ENDPACKAGE opt_end_label
 
 package_body:
   empty
@@ -48,7 +49,7 @@ import_item:
 
 
 module_declaration:
-  x                         T_MODULE T_IDENT opt_module_imports opt_param_port_list opt_port_list ';' module_body T_ENDMODULE
+  x                         T_MODULE T_IDENT opt_module_imports opt_param_port_list opt_port_list ';' module_body T_ENDMODULE opt_end_label
 
 opt_module_imports:
   empty
@@ -64,9 +65,21 @@ param_port_list:
   cons                      param_port_list ',' param_port_decl
 
 param_port_decl:
-  param                     T_PARAMETER opt_data_type T_IDENT '=' expression
-  localparam                T_LOCALPARAM opt_data_type T_IDENT '=' expression
-  bare_id                   opt_data_type T_IDENT '=' expression
+  param_typed               T_PARAMETER data_type T_IDENT '=' expression
+  param_bare                T_PARAMETER T_IDENT param_ident_rest
+  param_range               T_PARAMETER opt_signing packed_dim_list T_IDENT '=' expression
+  localparam_typed          T_LOCALPARAM data_type T_IDENT '=' expression
+  localparam_bare           T_LOCALPARAM T_IDENT param_ident_rest
+  localparam_range          T_LOCALPARAM opt_signing packed_dim_list T_IDENT '=' expression
+  bare_typed                data_type T_IDENT '=' expression
+  bare_range                opt_signing packed_dim_list T_IDENT '=' expression
+  bare_bare                 T_IDENT param_ident_rest
+  param_type                T_PARAMETER T_TYPE T_IDENT '=' data_type_or_implicit
+
+param_ident_rest:
+  scoped                    T_SCOPE T_IDENT T_IDENT '=' expression
+  user_typed                T_IDENT '=' expression
+  plain                     '=' expression
 
 opt_port_list:
   yes                       '(' port_list ')'
@@ -82,13 +95,23 @@ port_decl:
   reg                       port_direction T_REG opt_signing opt_packed_dims port_ident
   logic                     port_direction T_LOGIC opt_signing opt_packed_dims port_ident
   integer                   port_direction T_INTEGER port_ident
+  int                       port_direction T_INT opt_signing port_ident
   user_typed                port_direction T_IDENT T_IDENT opt_unpacked_dims
-  dir_only                  port_direction T_IDENT opt_unpacked_dims
+  dir_only                  port_direction T_IDENT dir_only_rest
   implicit_dims             port_direction packed_dim_list port_ident
+  scoped_typed              port_direction T_IDENT T_SCOPE T_IDENT T_IDENT opt_unpacked_dims
+  scoped_only               T_IDENT T_SCOPE T_IDENT T_IDENT opt_unpacked_dims
+  user_typed_bare           T_IDENT T_IDENT opt_unpacked_dims
   interface_port            T_IDENT '.' T_IDENT T_IDENT opt_unpacked_dims
   dotnamed                  '.' T_IDENT '(' opt_expression ')'
   dotstar                   T_DOTSTAR
   ident_only                T_IDENT
+
+dir_only_rest:
+  bare
+  dims                      unpacked_dim_list
+  dims_ident                unpacked_dim_list port_ident
+  assign                    '=' expression
 
 port_direction:
   input                     T_INPUT
@@ -154,6 +177,10 @@ module_item:
   function_item             function_declaration
   task_item                 task_declaration
   directive                 T_DIRECTIVE
+  attribute                 T_ATTRIBUTE module_item
+  if_gen                    T_IF '(' expression ')' generate_block opt_gen_else
+  for_gen                   T_FOR '(' genvar_init ';' expression ';' genvar_step ')' generate_block
+  begin_block               T_BEGIN opt_block_name generate_body T_END opt_end_name
 
 ident_item_tail:
   inst_hash                 '#' '(' arg_list ')' inst_list ';'
@@ -176,9 +203,22 @@ port_direction_declaration:
 
 net_declaration:
   typed                     data_type ident_decl_list
-  wire_decl                 T_WIRE opt_signing opt_packed_dims ident_decl_list
+  wire_signed               T_WIRE T_SIGNED opt_packed_dims ident_decl_list
+  wire_unsigned             T_WIRE T_UNSIGNED opt_packed_dims ident_decl_list
+  wire_range                T_WIRE packed_dim_list ident_decl_list
+  wire_ident                T_WIRE T_IDENT wire_ident_rest
   genvar                    T_GENVAR genvar_id_list
   user_type                 T_IDENT ident_decl_list
+  user_type_dims            T_IDENT packed_dim_list ident_decl_list
+
+wire_ident_rest:
+  user_type                 ident_decl_list
+  assign                    '=' expression
+  dims                      unpacked_dim_list
+  dims_assign               unpacked_dim_list '=' expression
+  dims_list                 unpacked_dim_list ',' ident_decl_list
+  list                      ',' ident_decl_list
+  bare
 
 data_type:
   logic                     T_LOGIC opt_signing opt_packed_dims
@@ -193,6 +233,7 @@ data_type:
   void                      T_VOID
   enum                      enum_type
   struct                    struct_type
+  scoped                    T_IDENT T_SCOPE T_IDENT
 
 enum_type:
   x                         T_ENUM opt_enum_base_type '{' enum_name_list '}'
@@ -219,19 +260,22 @@ enum_name_decl:
   ranged_assigned           T_IDENT '[' expression ']' '=' expression
 
 struct_type:
-  x                         T_STRUCT T_PACKED opt_signing '{' struct_member_list '}'
+  packed                    T_STRUCT T_PACKED opt_signing '{' struct_member_list '}'
+  unpacked                  T_STRUCT '{' struct_member_list '}'
 
 struct_member_list:
   single                    struct_member
   cons                      struct_member_list struct_member
 
 struct_member:
-  x                         data_type_or_implicit ident_decl_list ';'
+  typed                     data_type_or_implicit ident_decl_list ';'
+  user_type                 T_IDENT ident_decl_list ';'
 
 typedef_declaration:
   data                      T_TYPEDEF data_type T_IDENT opt_unpacked_dims
   enum                      T_TYPEDEF enum_type T_IDENT
   struct                    T_TYPEDEF struct_type T_IDENT
+  alias                     T_TYPEDEF T_IDENT T_IDENT
 
 ident_decl_list:
   single                    ident_decl
@@ -246,15 +290,21 @@ genvar_id_list:
   cons                      genvar_id_list ',' T_IDENT
 
 parameter_declaration:
-  x                         T_PARAMETER opt_data_type ident_decl_list
+  typed                     T_PARAMETER data_type ident_decl_list
+  range                     T_PARAMETER opt_signing packed_dim_list ident_decl_list
+  ident_start               T_PARAMETER T_IDENT decl_ident_rest
 
 localparam_declaration:
-  x                         T_LOCALPARAM opt_data_type ident_decl_list
+  typed                     T_LOCALPARAM data_type ident_decl_list
+  range                     T_LOCALPARAM opt_signing packed_dim_list ident_decl_list
+  ident_start               T_LOCALPARAM T_IDENT decl_ident_rest
 
-opt_data_type:
-  explicit                  data_type
-  implicit_range            opt_signing opt_packed_dims
-  empty
+decl_ident_rest:
+  user_typed                T_IDENT opt_unpacked_dims '=' expression
+  scoped                    T_SCOPE T_IDENT ident_decl_list
+  assign                    '=' expression
+  dims_assign               unpacked_dim_list '=' expression
+  bare
 
 
 continuous_assign:
@@ -294,6 +344,7 @@ statement:
   seq_block                 T_BEGIN opt_block_name statement_list T_END opt_end_name
   if_stmt                   T_IF '(' expression ')' statement opt_else
   case_stmt                 case_keyword '(' expression ')' case_item_list T_ENDCASE
+  case_inside_stmt          case_keyword '(' expression ')' T_INSIDE case_item_list T_ENDCASE
   for_stmt                  T_FOR '(' for_init ';' expression ';' for_step ')' statement
   while_stmt                T_WHILE '(' expression ')' statement
   repeat_stmt               T_REPEAT '(' expression ')' statement
@@ -317,6 +368,7 @@ statement:
   dec_stmt                  lvalue T_DEC ';'
   preinc_stmt               T_INC lvalue ';'
   predec_stmt               T_DEC lvalue ';'
+  assert_stmt               T_ASSERT '(' expression ')' opt_assert_else
   null_stmt                 ';'
   directive                 T_DIRECTIVE
 
@@ -330,6 +382,11 @@ opt_end_name:
 
 opt_else:
   yes                       T_ELSE statement
+  empty
+
+opt_assert_else:
+  yes                       T_ELSE statement
+  bare                      ';'
   empty
 
 case_keyword:
@@ -349,8 +406,12 @@ case_item:
   default_bare              T_DEFAULT statement
 
 case_expr_list:
-  single                    expression
-  cons                      case_expr_list ',' expression
+  single                    case_expr_item
+  cons                      case_expr_list ',' case_expr_item
+
+case_expr_item:
+  expr                      expression
+  range                     '[' expression ':' expression ']'
 
 for_init:
   decl                      data_type_or_implicit T_IDENT '=' expression
@@ -369,6 +430,7 @@ statement_list:
   empty
   cons                      statement_list statement
   local_decl                statement_list net_declaration ';'
+  auto_decl                 statement_list T_AUTOMATIC net_declaration ';'
 
 subroutine_call:
   func                      hierarchical_id '(' opt_arg_list ')'
@@ -439,7 +501,7 @@ opt_end_label:
 
 
 interface_declaration:
-  x                         T_INTERFACE T_IDENT opt_param_port_list opt_port_list ';' interface_body T_ENDINTERFACE
+  x                         T_INTERFACE T_IDENT opt_param_port_list opt_port_list ';' interface_body T_ENDINTERFACE opt_end_label
 
 interface_body:
   empty
@@ -576,6 +638,15 @@ rel_expr:
   gt                        rel_expr '>' shift_expr
   leq                       rel_expr T_LEQ shift_expr
   geq                       rel_expr T_GEQ shift_expr
+  inside                    shift_expr T_INSIDE '{' inside_list '}'
+
+inside_list:
+  single                    inside_item
+  cons                      inside_list ',' inside_item
+
+inside_item:
+  expr                      expression
+  range                     '[' expression ':' expression ']'
 
 shift_expr:
   single                    add_expr
@@ -631,6 +702,18 @@ primary_expr:
   concat                    '{' expression_list '}'
   replicate                 '{' expression '{' expression_list '}' '}'
   empty_concat              '{' '}'
+  struct_lit                '\'' '{' assign_pattern_list '}'
+  struct_lit_default        '\'' '{' T_DEFAULT ':' expression '}'
+  unsigned_kw               T_UNSIGNED
+  signed_kw                 T_SIGNED
+
+assign_pattern_list:
+  single                    assign_pattern_item
+  cons                      assign_pattern_list ',' assign_pattern_item
+
+assign_pattern_item:
+  named                     T_IDENT ':' expression
+  positional                expression
 
 hierarchical_id:
   simple                    T_IDENT

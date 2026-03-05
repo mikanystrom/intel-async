@@ -1,0 +1,1 @@
+(module test_alu1 () (ports (port input (id a )) (port input (id b )) (port input (id op0 )) (port input (id op1 )) (port output (id y ))) (assign (= (id y) (?: (id op1) (?: (id op0) (~ (& (id a) (id b))) (^ (id a) (id b))) (?: (id op0) (| (id a) (id b)) (& (id a) (id b)))))))

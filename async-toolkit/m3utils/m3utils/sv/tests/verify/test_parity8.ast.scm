@@ -1,0 +1,1 @@
+(module test_parity8 () (ports (port input (id a )) (port input (id b )) (port input (id c )) (port input (id d )) (port input (id e )) (port input (id f )) (port input (id g )) (port input (id h )) (port output (id p ))) (assign (= (id p) (^ (^ (^ (^ (^ (^ (^ (id a) (id b)) (id c)) (id d)) (id e)) (id f)) (id g)) (id h)))))

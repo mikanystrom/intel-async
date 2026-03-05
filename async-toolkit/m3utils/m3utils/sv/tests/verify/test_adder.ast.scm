@@ -1,0 +1,1 @@
+(module test_adder () (ports (port input (id a )) (port input (id b )) (port input (id cin )) (port output (id sum )) (port output (id cout ))) (assign (= (id sum) (^ (^ (id a) (id b)) (id cin)))) (assign (= (id cout) (| (| (& (id a) (id b)) (& (id a) (id cin))) (& (id b) (id cin))))))
