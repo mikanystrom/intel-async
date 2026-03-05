@@ -108,6 +108,7 @@ port_decl: { val : TEXT; cnt : INTEGER; }
   integer     { $$.val := "(port " & $1 & " integer " & $2 & ")" }
   user_typed  { $$.val := "(port " & $1 & " " & $2 & " (id " & $3 & " " & $4 & "))" }
   dir_only    { $$.val := "(port " & $1 & " (id " & $2 & " " & $3 & "))" }
+  implicit_dims { $$.val := "(port " & $1 & " logic " & $2 & " " & $3 & ")" }
   interface_port { $$.val := "(port-if " & $1 & "." & $2 & " (id " & $3 & " " & $4 & "))" }
   dotnamed    { $$.val := "(port-named " & $1 & " " & $2 & ")" }
   dotstar     { $$.val := "(port-dotstar)" }
@@ -321,6 +322,20 @@ statement: { val : TEXT; cnt : INTEGER; }
   force_assign   { $$.val := Wrap2("assign", $1, $2) }
   call_stmt      { $$.val := $1 }
   return_stmt    { $$.val := "(return " & $1 & ")" }
+  passign_stmt   { $$.val := "(+= " & $1 & " " & $2 & ")" }
+  massign_stmt   { $$.val := "(-= " & $1 & " " & $2 & ")" }
+  tassign_stmt   { $$.val := "(*= " & $1 & " " & $2 & ")" }
+  dassign_stmt   { $$.val := "(/= " & $1 & " " & $2 & ")" }
+  rassign_stmt   { $$.val := "(%= " & $1 & " " & $2 & ")" }
+  aassign_stmt   { $$.val := "(&= " & $1 & " " & $2 & ")" }
+  oassign_stmt   { $$.val := "(|= " & $1 & " " & $2 & ")" }
+  xassign_stmt   { $$.val := "(^= " & $1 & " " & $2 & ")" }
+  lsassign_stmt  { $$.val := "(<<= " & $1 & " " & $2 & ")" }
+  rsassign_stmt  { $$.val := "(>>= " & $1 & " " & $2 & ")" }
+  inc_stmt       { $$.val := "(++ " & $1 & ")" }
+  dec_stmt       { $$.val := "(-- " & $1 & ")" }
+  preinc_stmt    { $$.val := "(++ " & $1 & ")" }
+  predec_stmt    { $$.val := "(-- " & $1 & ")" }
   null_stmt      { $$.val := "(null)" }
   directive      { $$.val := "(directive)" }
 

@@ -84,6 +84,7 @@ port_decl:
   integer                   port_direction T_INTEGER port_ident
   user_typed                port_direction T_IDENT T_IDENT opt_unpacked_dims
   dir_only                  port_direction T_IDENT opt_unpacked_dims
+  implicit_dims             port_direction packed_dim_list port_ident
   interface_port            T_IDENT '.' T_IDENT T_IDENT opt_unpacked_dims
   dotnamed                  '.' T_IDENT '(' opt_expression ')'
   dotstar                   T_DOTSTAR
@@ -302,6 +303,20 @@ statement:
   force_assign              T_ASSIGN lvalue '=' expression ';'
   call_stmt                 subroutine_call ';'
   return_stmt               T_RETURN opt_expression ';'
+  passign_stmt              lvalue T_PASSIGN expression ';'
+  massign_stmt              lvalue T_MASSIGN expression ';'
+  tassign_stmt              lvalue T_TASSIGN expression ';'
+  dassign_stmt              lvalue T_DASSIGN expression ';'
+  rassign_stmt              lvalue T_RASSIGN expression ';'
+  aassign_stmt              lvalue T_AASSIGN expression ';'
+  oassign_stmt              lvalue T_OASSIGN expression ';'
+  xassign_stmt              lvalue T_XASSIGN expression ';'
+  lsassign_stmt             lvalue T_LSASSIGN expression ';'
+  rsassign_stmt             lvalue T_RSASSIGN expression ';'
+  inc_stmt                  lvalue T_INC ';'
+  dec_stmt                  lvalue T_DEC ';'
+  preinc_stmt               T_INC lvalue ';'
+  predec_stmt               T_DEC lvalue ';'
   null_stmt                 ';'
   directive                 T_DIRECTIVE
 
