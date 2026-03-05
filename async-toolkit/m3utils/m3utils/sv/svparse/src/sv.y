@@ -176,13 +176,13 @@ port_direction_declaration:
 net_declaration:
   typed                     data_type ident_decl_list
   wire_decl                 T_WIRE opt_signing opt_packed_dims ident_decl_list
-  logic_decl                T_LOGIC opt_signing opt_packed_dims ident_decl_list
-  reg_decl                  T_REG opt_signing opt_packed_dims ident_decl_list
   genvar                    T_GENVAR genvar_id_list
-  integer_decl              T_INTEGER ident_decl_list
   user_type                 T_IDENT ident_decl_list
 
 data_type:
+  logic                     T_LOGIC opt_signing opt_packed_dims
+  reg                       T_REG opt_signing opt_packed_dims
+  integer                   T_INTEGER
   bit                       T_BIT opt_signing opt_packed_dims
   byte                      T_BYTE opt_signing
   shortint                  T_SHORTINT opt_signing
