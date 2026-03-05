@@ -33,7 +33,7 @@ module oscdecode
     parameter NTOTAL_SPEEDS = NTAPS * NSETTINGS_PER_TAP + 1,
     parameter W        = $clog2(NTOTAL_SPEEDS)
     )
-   (input logic [W-1:0] speed,
+   (input logic [W-1:0] speed
     );
 
    generate
