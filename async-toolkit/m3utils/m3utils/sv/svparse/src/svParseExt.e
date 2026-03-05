@@ -383,8 +383,9 @@ for_step: { val : TEXT; cnt : INTEGER; }
   massign  { $$.val := "(-= " & $1 & " " & $2 & ")" }
 
 statement_list: { val : TEXT; cnt : INTEGER; }
-  empty  { $$.val := "" }
-  cons   { $$.val := Seq($1, $2) }
+  empty      { $$.val := "" }
+  cons       { $$.val := Seq($1, $2) }
+  local_decl { $$.val := Seq($1, $2) }
 
 subroutine_call: { val : TEXT; cnt : INTEGER; }
   func    { $$.val := "(call " & $1 & " " & $2 & ")" }
@@ -631,6 +632,7 @@ postfix_expr: { val : TEXT; cnt : INTEGER; }
   msel       { $$.val := "(-: " & $1 & " " & $2 & " " & $3 & ")" }
   member     { $$.val := "(field " & $1 & " " & $2 & ")" }
   call       { $$.val := "(call " & $1 & " " & $2 & ")" }
+  cast       { $$.val := "(cast " & $1 & " " & $2 & ")" }
 
 primary_expr: { val : TEXT; cnt : INTEGER; }
   number        { $$.val := $1 }
