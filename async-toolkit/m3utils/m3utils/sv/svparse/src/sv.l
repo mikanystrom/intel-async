@@ -117,7 +117,7 @@ T_NAND          "~&"
 T_NOR           "~|"
 T_XNOR          "~^"
 
-T_NUMBER        ({DIGIT}({DIGIT}|"_")*"'"[sS]?{BASE}" "?{HEXDIG}+)|("'"[sS]?{BASE}" "?{HEXDIG}+)|("'"[01xXzZ])|({DIGIT}({DIGIT}|"_")*)
+T_NUMBER        ({DIGIT}({DIGIT}|"_")*"'"[sS]?{BASE}" "?{HEXDIG}+)|("'"[sS]?{BASE}" "?{HEXDIG}+)|("'"[01xXzZ])|({DIGIT}({DIGIT}|"_")*"."{DIGIT}({DIGIT}|"_")*)|({DIGIT}({DIGIT}|"_")*)
 
 T_STRLIT        \"([^"\\]|\\.)*\"
 
