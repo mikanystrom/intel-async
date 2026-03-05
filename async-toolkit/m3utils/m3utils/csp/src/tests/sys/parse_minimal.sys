@@ -1,0 +1,7 @@
+system Minimal;
+  process Hello = begin
+    print("hello!")
+  end;
+begin
+  var h : Hello;
+end.

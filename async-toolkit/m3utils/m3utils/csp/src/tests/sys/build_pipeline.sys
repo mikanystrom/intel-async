@@ -1,0 +1,19 @@
+system Pipeline;
+  var c1 : channel(32);
+  var c2 : channel(32);
+
+  process Producer = "producer.csp"
+    port out R : channel(32);
+
+  process Pass = "passthrough.csp"
+    port in L : channel(32)
+    port out R : channel(32);
+
+  process Consumer = "consumer.csp"
+    port in L : channel(32);
+
+begin
+  var p : Producer(R => c1);
+  var f : Pass(L => c1, R => c2);
+  var q : Consumer(L => c2);
+end.

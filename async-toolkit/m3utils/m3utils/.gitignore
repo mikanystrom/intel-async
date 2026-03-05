@@ -3,6 +3,7 @@ hack/*
 .top
 *.log
 AMD64_LINUX/
+ARM64_DARWIN/
 bin/
 *~
 .nfs*
@@ -15,3 +16,6 @@ bin/
 #*#
 .bindir
 *.done
+*.pdf
+*.tex
+build/

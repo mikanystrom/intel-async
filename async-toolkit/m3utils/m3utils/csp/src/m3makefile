@@ -110,9 +110,9 @@ implementation ("Main")
 
 program ("cspc")
 
-% The Apple linker caps -stack_size at 512 MB on arm64, but the CSP
-% compiler's Scheme interpreter needs more for complex processes.
-% Patch LC_MAIN.stacksize directly in the Mach-O binary to 8 GB.
-if IsTargetDarwin()
-  exec("python3 ../../bin/macho-set-stacksize ../" & BUILD_DIR & "/cspc")
-end
+% The ARM64_DARWIN config already passes -Wl,-stack_size,0x20000000
+% (512 MB) to the linker.  A previous post-link step used
+% macho-set-stacksize to bump this to 8 GB, but that causes
+% intermittent SIGTRAP (signal 5, exit 133) crashes on ARM64 macOS
+% because the kernel cannot always map the 8 GB stack region.
+% 512 MB is sufficient for the Scheme interpreter.

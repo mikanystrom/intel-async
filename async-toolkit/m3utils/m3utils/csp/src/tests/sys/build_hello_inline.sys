@@ -1,0 +1,7 @@
+system HelloInline;
+  process Hello = begin
+    print("hello, world!")
+  end;
+begin
+  var h : Hello;
+end.

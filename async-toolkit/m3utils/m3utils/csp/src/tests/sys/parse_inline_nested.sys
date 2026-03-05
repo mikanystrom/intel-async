@@ -1,0 +1,9 @@
+system InlineNested;
+  process Complex = begin
+    begin
+      print("inner block")
+    end
+  end;
+begin
+  var c : Complex;
+end.

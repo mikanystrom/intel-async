@@ -1,0 +1,4 @@
+system ErrUnknownProc;
+begin
+  var x : Nonexistent;
+end.

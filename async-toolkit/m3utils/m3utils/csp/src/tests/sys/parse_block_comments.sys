@@ -1,0 +1,17 @@
+(*
+  System with block comments, including (* nested *) ones.
+*)
+system BlockComments;
+  var c : channel(32) (* data channel *);
+
+  process Src = "producer.csp"
+    port out R : channel(32);
+
+  (* This is the consumer process *)
+  process Dst = "consumer.csp"
+    port in L : channel(32);
+
+begin
+  var s : Src(R => c);
+  var d : Dst(L => c);
+end.

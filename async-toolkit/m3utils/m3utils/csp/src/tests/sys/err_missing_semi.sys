@@ -1,0 +1,4 @@
+system ErrMissingSemi
+  var c : channel(32);
+begin
+end.

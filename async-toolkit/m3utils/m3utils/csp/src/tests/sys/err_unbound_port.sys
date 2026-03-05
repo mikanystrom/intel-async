@@ -1,0 +1,9 @@
+system ErrUnboundPort;
+  var c : channel(32);
+
+  process Fwd = "passthrough.csp"
+    port in L : channel(32)
+    port out R : channel(32);
+begin
+  var f : Fwd(L => c);
+end.

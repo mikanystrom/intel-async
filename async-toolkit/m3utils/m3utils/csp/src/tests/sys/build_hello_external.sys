@@ -1,0 +1,5 @@
+system HelloExternal;
+  process Hello = "hello.csp";
+begin
+  var h : Hello;
+end.

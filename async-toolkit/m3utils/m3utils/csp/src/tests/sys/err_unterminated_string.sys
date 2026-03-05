@@ -1,0 +1,4 @@
+system ErrUnterminatedString;
+  process Bad = "never_closed.csp;
+begin
+end.

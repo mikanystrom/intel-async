@@ -41,19 +41,16 @@ pack/unpack) exhaust the default 8 MB macOS stack, causing segfaults.
 On Linux this is not a problem — `ulimit -s unlimited` works there.
 On macOS the kernel hard-limits `ulimit -s` to ~64 MB, which is still
 not enough.  The Apple linker's `-stack_size` flag caps out at 512 MB
-on arm64, but the kernel honours any value in the Mach-O
-`LC_MAIN.stacksize` field.
+on arm64.
 
-The CM3 ARM64\_DARWIN config sets 512 MB via the linker flag.  The
-`csp/src/m3makefile` then runs `bin/macho-set-stacksize` as a
-post-link step to bump `cspc` to 8 GB.  This happens automatically
-during `cm3 -build -override` — no manual patching is needed.
+The CM3 ARM64\_DARWIN config sets 512 MB via the linker flag
+(`-Wl,-stack_size,0x20000000`).  This is sufficient for the Scheme
+interpreter.
 
-The `bin/macho-set-stacksize` script can also be used standalone:
-
-```sh
-bin/macho-set-stacksize <binary> [size_in_bytes]   # default: 8 GB
-```
+> **Note:** An earlier version used `bin/macho-set-stacksize` to
+> post-link patch the binary to 8 GB, but this caused intermittent
+> SIGTRAP crashes on ARM64 macOS (the kernel cannot always map an
+> 8 GB stack region).  The post-link step has been removed.
 
 ## Quick start: HELLOWORLD
 

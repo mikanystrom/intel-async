@@ -1,0 +1,4 @@
+(* This comment is never closed
+system WillNotParse;
+begin
+end.

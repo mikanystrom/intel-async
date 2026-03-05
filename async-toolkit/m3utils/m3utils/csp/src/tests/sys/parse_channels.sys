@@ -1,0 +1,15 @@
+system Channels;
+  var narrow : channel(8);
+  var medium : channel(32);
+  var wide   : channel(64);
+
+  process Src = "producer.csp"
+    port out R : channel(32);
+
+  process Dst = "consumer.csp"
+    port in L : channel(32);
+
+begin
+  var s : Src(R => medium);
+  var d : Dst(L => medium);
+end.

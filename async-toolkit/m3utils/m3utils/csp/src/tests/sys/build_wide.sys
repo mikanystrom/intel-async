@@ -1,0 +1,13 @@
+system Wide;
+  var c : channel(64);
+
+  process Src = "producer.csp"
+    port out R : channel(64);
+
+  process Dst = "consumer.csp"
+    port in L : channel(64);
+
+begin
+  var s : Src(R => c);
+  var d : Dst(L => c);
+end.

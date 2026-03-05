@@ -1,0 +1,11 @@
+system MultiBinding;
+  var c1 : channel(32);
+  var c2 : channel(32);
+
+  process Fwd = "passthrough.csp"
+    port in L : channel(32)
+    port out R : channel(32);
+
+begin
+  var f : Fwd(L => c1, R => c2);
+end.

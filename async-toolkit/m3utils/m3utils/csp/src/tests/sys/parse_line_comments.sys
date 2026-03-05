@@ -1,0 +1,18 @@
+// System with line comments everywhere
+system LineComments; // system declaration
+  // Channel declaration
+  var c : channel(32); // 32-bit channel
+
+  // Process with external body
+  process Src = "producer.csp" // source file
+    port out R : channel(32); // output port
+
+  // Another process
+  process Dst = "consumer.csp"
+    port in L : channel(32);
+
+begin
+  // Instances
+  var s : Src(R => c); // producer instance
+  var d : Dst(L => c); // consumer instance
+end. // done
