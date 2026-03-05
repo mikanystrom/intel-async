@@ -1,0 +1,442 @@
+SystemVerilog Parser Frontend (svfe) -- Project Plan
+=====================================================
+
+Mika Nystroem, March 2026
+
+
+1.  MOTIVATION AND GOALS
+
+    We want a standalone SystemVerilog parser frontend, built in
+    Modula-3 using the CM3 parserlib metacompiler, with Scheme
+    (mscheme) as the extension/scripting language.  The parser
+    should understand enough SystemVerilog to support real ASIC
+    design automation tasks:
+
+      - Linting (undriven signals, width mismatches, latch inference)
+      - Elaboration (parameter resolution, hierarchy flattening)
+      - Gate-level decomposition (silicon compilation)
+      - Custom design rule checking and transformations via Scheme
+
+    The target language level is the SystemVerilog synthesis subset
+    as supported by Synopsys Design Compiler and Cadence Genus --
+    roughly IEEE 1800-2017 minus the verification/OOP features.
+    Object-oriented constructs (classes, constraints, covergroups)
+    are explicitly excluded since they do not help ASIC synthesis.
+
+
+2.  ARCHITECTURE
+
+    The architecture follows the CSP compiler (csp/) exactly:
+
+      sv/
+      +-- svgrammar/src/       AST type definitions (M3 interfaces)
+      +-- svparse/src/         Parser generator input files
+      |     sv.t               Token definitions
+      |     sv.l               Lexer specification (DFA)
+      |     sv.y               YACC grammar (LR(1))
+      |     svLexExt.e         Lexer extension (captures token text)
+      |     svParseExt.e       Parser extension (semantic actions)
+      |     Main.m3            Command-line driver (svfe program)
+      +-- src/                 Scheme-integrated compiler (svpc, later)
+      +-- doc/                 Documentation
+
+    How it works (same pipeline as cspfe):
+
+      Source file (.sv/.v)
+        --> Preprocessor (handles `define, `include, `ifdef)
+        --> Lexer (sv.l --> DFA, tokenizes into sv.t tokens)
+        --> Parser (sv.y --> LR(1), builds parse tree)
+        --> Extension (svParseExt.e, semantic actions)
+        --> S-expression output (consumed by Scheme)
+        --> Scheme scripts do elaboration, linting, synthesis
+
+    The parserlib toolchain generates the lexer and parser code
+    from declarative specifications:
+
+      ktok  processes sv.t  -->  svTok.i3    (token type interface)
+      klex  processes sv.l  -->  svLex.i3/m3 (DFA lexer)
+      kyacc processes sv.y  -->  svParse.i3/m3 (LR(1) parser)
+      kext  processes .e    -->  svLexExt, svParseExt (extensions)
+
+    The m3makefile for svparse/src/ will contain:
+
+      import ("libm3")
+      import ("cit_util")
+      import ("parserlib")
+
+      Token("sv")
+      Lexer("sv","sv")
+      Parser("sv","sv")
+
+      Extended("svLexExt")
+      Extended("svParseExt")
+
+      implementation ("Main")
+      program ("svfe")
+
+
+3.  LANGUAGE SCOPE
+
+    The SystemVerilog language is enormous (IEEE 1800-2017 is over
+    1300 pages).  We take it in three phases, each producing a
+    working tool.
+
+    PHASE 1 -- Core RTL
+    -------------------
+
+    The minimum viable parser.  Enough to parse typical
+    synthesizable Verilog/SystemVerilog modules.
+
+    Constructs:
+
+      module / endmodule          ANSI and non-ANSI port styles
+      input, output, inout        Port directions
+      logic, wire, reg            Net and variable types
+      [N:M]                       Packed bit ranges
+      assign                      Continuous assignments
+      always @(...)               Classic sensitivity lists
+      always_comb                 Combinational blocks
+      always_ff                   Sequential (flip-flop) blocks
+      always_latch                Latch blocks
+      if / else                   Conditional statements
+      case, casez, casex          Case statements
+      unique case, priority case  SV case qualifiers
+      begin / end                 Block grouping
+      = (blocking)                Blocking assignment
+      <= (non-blocking)           Non-blocking assignment
+      parameter, localparam       Compile-time constants
+      Module instantiation        Named and positional ports, .*
+      Operators                   All Verilog operators:
+                                    Arithmetic: + - * / % **
+                                    Logical:    && || !
+                                    Bitwise:    & | ^ ~ ~& ~| ~^
+                                    Shift:      << >> <<< >>>
+                                    Relational: == != < > <= >=
+                                    Identity:   === !==
+                                    Ternary:    ? :
+                                    Concat:     { }
+                                    Replication: {N{expr}}
+                                    Part select: [+:] [-:]
+      Number literals             Verilog format: 8'hFF, 32'd0,
+                                    4'b1010, 'h3F, unsized, x/z
+      Strings                     "hello"
+      Comments                    // and /* */
+      Preprocessor                `define, `include, `ifdef,
+                                  `ifndef, `else, `endif,
+                                  `timescale, `default_nettype
+
+    With this phase we can parse the sim1588 Verilog files and
+    most single-module synthesizable designs.
+
+    PHASE 2 -- Extended Synthesis
+    -----------------------------
+
+    Adds the SystemVerilog type system and hierarchy features
+    needed for real multi-file ASIC designs.
+
+    Constructs:
+
+      package / endpackage        Package declarations
+      import pkg::item            Package imports
+      typedef                     Type aliases
+      enum                        Enumerated types
+      struct packed               Packed structures
+      union packed                Packed unions (if needed)
+      interface / endinterface    Interface declarations
+      modport                     Interface modports
+      generate / endgenerate      Generate blocks
+      genvar                      Generate variables
+      for generate                Parameterized replication
+      if generate                 Conditional instantiation
+      function / endfunction      Functions (automatic)
+      task / endtask              Tasks (combinational only)
+      for, while, repeat          Bounded loops
+      $clog2, $bits, $size        Synthesizable system functions
+      $signed, $unsigned          Signedness casts
+      Type casting                type'(expr)
+      Multi-dimensional arrays    logic [7:0] mem [0:255]
+      Signed arithmetic           signed, unsigned qualifiers
+      .* port connections         Implicit port connections
+
+    After this phase we can parse most production RTL codebases.
+
+    PHASE 3 -- Linting and Elaboration
+    -----------------------------------
+
+    Adds Scheme-based analysis passes.  The parser remains the
+    same; the new work is in Scheme scripts that process the
+    S-expression AST.
+
+    Capabilities:
+
+      Parameter resolution        Evaluate parameters, propagate
+      Constant folding            Compute constant expressions
+      Module hierarchy            Build instantiation tree
+      Width inference             Infer and check bit widths
+      Lint checks:
+        - Undriven signals        Outputs/wires never assigned
+        - Multi-driven nets       Multiple drivers on same signal
+        - Width mismatches        Operand width disagreements
+        - Latch inference         always_comb with incomplete assigns
+        - Unused declarations     Declared but never read
+        - Missing resets          always_ff without reset
+        - Blocking in always_ff   Blocking assigns in sequential blocks
+        - Non-blocking in comb    Non-blocking in combinational blocks
+      Gate decomposition          Map RTL to gate-level netlist
+        - AND, OR, NOT, XOR, MUX, DFF, LATCH primitives
+        - Technology-independent netlist output
+        - Suitable for silicon compilation algorithms
+
+
+4.  EXCLUDED CONSTRUCTS (verification-only)
+
+    These are not in the synthesis subset and will not be parsed:
+
+      class / endclass            OOP (UVM testbenches)
+      constraint                  Constrained random
+      covergroup / coverpoint     Functional coverage
+      program / endprogram        Testbench programs
+      initial                     Simulation-only initialization
+      fork / join / join_any      Parallel threads
+      real, shortreal, time       Non-synthesizable types
+      string (as variable)        Dynamic strings
+      force / release             Simulation overrides
+      #delay                      Time delays
+      @ event control (complex)   Dynamic event expressions
+      DPI (import "DPI-C")        Foreign function interface
+      bind                        Verification binding
+      sequence / property         SVA sequences and properties
+                                    (except possibly for linting)
+      chandle                     C handle type
+      mailbox, semaphore          Verification synchronization
+
+
+5.  KEY DESIGN DECISIONS
+
+    5.1  S-expression output first
+
+    Like cspfe --scm, the parser's primary output is S-expressions.
+    This is consumed by Scheme for all downstream processing.
+    Example output for a simple module:
+
+      (module "counter"
+        (ports
+          (port input logic (range 0 0) "clk")
+          (port input logic (range 0 0) "rst_n")
+          (port output logic (range 7 0) "count"))
+        (items
+          (always_ff (posedge "clk" negedge "rst_n")
+            (if (not (id "rst_n"))
+              (non-blocking (id "count") (literal 8 0))
+              (non-blocking (id "count")
+                (+ (id "count") (literal 32 1)))))))
+
+    5.2  Preprocessor as a separate pass
+
+    Unlike CSP, SystemVerilog needs a C-like preprocessor for
+    `define, `include, `ifdef.  This will be implemented as a
+    reader wrapper that sits between file I/O and the lexer,
+    expanding macros and processing conditionals before tokens
+    reach the parser.
+
+    5.3  LR(1) conflict resolution
+
+    The parserlib IMPLEMENTATION_GUIDE (in the cm3 tree at
+    caltech-parser/parserlib/IMPLEMENTATION_GUIDE.md) documents
+    several patterns critical for this project:
+
+    - Explicit precedence climbing: use separate nonterminals
+      for each operator precedence level (cond_or_expr,
+      and_expr, shift_expr, add_expr, mul_expr, unary_expr, ...)
+      rather than %left/%right directives.  This avoids
+      shift/reduce conflict surprises when adding new constructs.
+      The CSP grammar uses 10 expression levels this way.
+
+    - Statement suffix disambiguation: parse the lvalue first,
+      then branch on the suffix (assignment operator, port
+      connection, etc.).  This avoids conflicts from multiple
+      statement forms starting with lvalue:
+
+        statement:
+          lval    lvalue stmt_suffix
+        stmt_suffix:
+          blocking      '=' expression
+          nonblocking   T_LEQ expression
+          ...
+
+    - $n numbering skips constant tokens: in semantic actions
+      $1, $2 refer only to nonconstant symbols (%token and
+      nonterminals), not to %const or %char tokens.
+
+    The IEEE SystemVerilog grammar has well-known LR conflicts:
+
+      - The declaration/expression ambiguity: is "foo bar" a
+        type declaration or a function call?  Resolved by treating
+        user-defined type names as identifiers in the grammar and
+        disambiguating in semantic actions (the extension file).
+
+      - The "dangling else" ambiguity: standard %right precedence.
+
+      - Port declaration complexity: ANSI vs non-ANSI styles.
+
+    Verilator's working YACC grammar (verilog.y, ~500 rules) is
+    our practical reference for how to resolve these in a real
+    LR(1) parser.
+
+    5.4  Verilator number format
+
+    Verilog numbers like 8'hFF are unusual.  The lexer must
+    recognize the full format:
+
+      [size] ' [s|S] base digits
+
+    where base is b/B, o/O, d/D, h/H.  The size part is optional.
+    X and Z digits must be recognized.  This is handled in the
+    lexer (sv.l) with appropriate regex patterns.
+
+    5.5  Standalone parser
+
+    The parser uses only the CM3 parserlib infrastructure.  It does
+    not depend on Verilator, Yosys, slang, or any other tool at
+    runtime.  Those tools are references for grammar design and
+    test validation.
+
+
+6.  REFERENCE MATERIALS
+
+    Standards:
+
+      IEEE 1800-2017              SystemVerilog standard (Annex A
+                                    contains the formal BNF)
+      IEEE 1364.1-2002            Verilog RTL synthesis standard
+                                    (withdrawn but defines baseline)
+
+    Open-source grammars:
+
+      Verilator verilog.y/l       Working YACC/flex grammar, ~500
+                                    rules, handles real-world SV
+      ANTLR4 Sv.g4                Full IEEE 1800-2017 grammar by
+        (miguel-guerrero)           Miguel Guerrero, derived from
+                                    Annex A
+      Rochus Keller Verilog.ebnf  LL(1)-oriented EBNF, clean
+      Sigasi SV EBNF              IEEE 1800-2012 browsable grammar
+
+    Open-source implementations:
+
+      Verilator                   C++ simulator, mature SV parser
+      slang                       Complete SV compiler library (C++)
+      Verible                     SV developer tools (CHIPS Alliance)
+      sv-parser (dalance)         Rust, IEEE 1800-2017 compliant
+      Surelog/UHDM                SV preprocessor/parser/elaborator
+      Yosys                       Open-source synthesis (Verilog)
+      yosys-slang                 SV synthesis via slang frontend
+
+    Papers:
+
+      Sutherland, "Synthesizable SystemVerilog", SNUG 2013
+        Comprehensive guide to synthesis-supported constructs.
+
+      Cummings, "Synthesizable Finite State Machine Design
+        Techniques Using the New SystemVerilog 3.0 Enhancements",
+        SNUG 2003.
+
+      Cummings, "Nonblocking Assignments in Verilog Synthesis,
+        Coding Styles that Kill", SNUG 2000.
+
+      Cummings, "Full Parallel Case and Full Case with Don't
+        Cares", SNUG 1999.
+
+
+7.  TEST STRATEGY
+
+    7.1  Existing tests (in-tree)
+
+    The sim1588/verilog/ directory contains real SV files:
+
+      tsu.sv              Timestamping unit (447 lines)
+      vern_calc.sv        Vernier calculator (649 lines)
+      tsu_pkg.vh          Package definitions
+      sim/tsu_tb*.sv      Testbenches
+
+    Also: ecc/*.sv (ECC modules, up to 9000+ lines),
+    spice/ringosc/verilog/*.sv, pg/pgtool/src/*.sv.
+
+    7.2  External tests
+
+    We will validate against open-source RTL:
+
+      - OpenTitan (lowRISC): Large ASIC-quality SV codebase
+      - RISC-V cores (e.g. PicoRV32, VexRiscv SV ports)
+      - CHIPS Alliance test suites
+      - Verilator test suite (publicly available)
+
+    7.3  Validation method
+
+    For each test file:
+      1. Parse with svfe, check exit status
+      2. Compare against Verilator (verilator --lint-only)
+      3. Verify S-expression output round-trips correctly
+      4. Scheme-based structural checks on the AST
+
+
+8.  ESTIMATED SCOPE
+
+    Phase 1:  sv.t (~50 tokens), sv.l (~120 lines),
+              sv.y (~250 rules), extensions (~400 lines),
+              Main.m3 (~60 lines).
+              Comparable to cspfe in total size.
+
+    Phase 2:  ~100 additional grammar rules, extended type
+              and extension code.
+
+    Phase 3:  Primarily Scheme code for analysis passes.
+              M3 changes limited to Scheme stub generation.
+
+
+9.  DEVELOPMENT WORKFLOW
+
+    Following the parserlib IMPLEMENTATION_GUIDE's recommended
+    iteration pattern:
+
+    Step 1.  Write sv.t and sv.l.  Build with just Token("sv")
+             and Lexer("sv","sv") in the m3makefile.  Write a
+             minimal Main.m3 that calls svTok.Test(lexer) to
+             verify tokenization against sample SV files.
+
+    Step 2.  Add the sv.y grammar.  Start with a skeleton
+             handling module/endmodule and port declarations.
+             Build with Parser("sv","sv") added.  kyacc reports
+             LR(1) conflicts at build time -- resolve these
+             before proceeding.
+
+    Step 3.  Add minimal svLexExt.e and svParseExt.e with
+             empty semantic actions.  Build and test with
+             parse().discard() on sample files.
+
+    Step 4.  Add semantic actions incrementally -- first for
+             module declarations, then always blocks, then
+             expressions, then the remaining constructs.
+             Test after each major grammar section.
+
+    Step 5.  Add S-expression output and Scheme integration.
+
+    Testing uses the shell-script pattern from cspfe: generate
+    temporary .sv files, run svfe, check exit codes and output.
+    Cross-validate against Verilator (verilator --lint-only).
+
+
+10. DIRECTORY PLACEMENT
+
+    The new package lives at:
+
+      m3utils/sv/svgrammar/      (library: svgrammar)
+      m3utils/sv/svparse/        (program: svfe)
+      m3utils/sv/src/            (program: svpc, later)
+      m3utils/sv/doc/
+
+    The m3overrides file will need new entries:
+
+      override("svgrammar", TOP & "/sv")
+      override("svparse",   TOP & "/sv")
+
+    The Makefile REGSUBS list will need svparse added.
