@@ -204,6 +204,7 @@ module_item: { val : TEXT; cnt : INTEGER; }
   attribute       { $$.val := $2 }
   if_gen          { $$.val := "(if-generate " & $1 & " " & $2 & " " & $3 & ")" }
   for_gen         { $$.val := "(for-generate " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
+  case_item       { $$.val := "(" & $1 & " " & $2 & " " & $3 & ")" }
   begin_block     { $$.val := "(begin " & $1 & " " & $2 & " " & $3 & ")" }
 
 ident_item_tail: { val : TEXT; cnt : INTEGER; }
@@ -247,6 +248,8 @@ data_type: { val : TEXT; cnt : INTEGER; }
   logic     { $$.val := "(logic " & $1 & " " & $2 & ")" }
   reg       { $$.val := "(reg " & $1 & " " & $2 & ")" }
   integer   { $$.val := "(integer)" }
+  real      { $$.val := "(real)" }
+  time      { $$.val := "(time)" }
   bit       { $$.val := "(bit " & $1 & " " & $2 & ")" }
   byte      { $$.val := "(byte " & $1 & ")" }
   shortint  { $$.val := "(shortint " & $1 & ")" }
@@ -389,6 +392,8 @@ statement: { val : TEXT; cnt : INTEGER; }
   preinc_stmt    { $$.val := "(++ " & $1 & ")" }
   predec_stmt    { $$.val := "(-- " & $1 & ")" }
   assert_stmt    { $$.val := "(assert " & $1 & " " & $2 & ")" }
+  delay_stmt     { $$.val := "(delay " & $1 & " " & $2 & ")" }
+  event_ctrl_stmt { $$.val := "(event-ctrl " & $1 & " " & $2 & ")" }
   null_stmt      { $$.val := "(null)" }
   directive      { $$.val := "(directive)" }
 
@@ -447,8 +452,10 @@ for_step: { val : TEXT; cnt : INTEGER; }
 statement_list: { val : TEXT; cnt : INTEGER; }
   empty      { $$.val := "" }
   cons       { $$.val := Seq($1, $2) }
-  local_decl { $$.val := Seq($1, $2) }
-  auto_decl  { $$.val := Seq($1, $2) }
+  local_decl      { $$.val := Seq($1, $2) }
+  auto_decl       { $$.val := Seq($1, $2) }
+  local_param     { $$.val := Seq($1, $2) }
+  local_parameter { $$.val := Seq($1, $2) }
 
 subroutine_call: { val : TEXT; cnt : INTEGER; }
   func    { $$.val := "(call " & $1 & " " & $2 & ")" }
@@ -558,6 +565,7 @@ generate_item: { val : TEXT; cnt : INTEGER; }
   if_gen       { $$.val := "(if-generate " & $1 & " " & $2 & " " & $3 & ")" }
   for_gen      { $$.val := "(for-generate " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
   begin_gen    { $$.val := "(begin " & $1 & " " & $2 & " " & $3 & ")" }
+  sys_call     { $$.val := $1 }
 
 opt_gen_else: { val : TEXT; cnt : INTEGER; }
   yes    { $$.val := $1 }

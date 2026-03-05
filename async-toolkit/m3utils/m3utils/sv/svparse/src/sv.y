@@ -180,6 +180,7 @@ module_item:
   attribute                 T_ATTRIBUTE module_item
   if_gen                    T_IF '(' expression ')' generate_block opt_gen_else
   for_gen                   T_FOR '(' genvar_init ';' expression ';' genvar_step ')' generate_block
+  case_item                 case_keyword '(' expression ')' case_item_list T_ENDCASE
   begin_block               T_BEGIN opt_block_name generate_body T_END opt_end_name
 
 ident_item_tail:
@@ -224,6 +225,8 @@ data_type:
   logic                     T_LOGIC opt_signing opt_packed_dims
   reg                       T_REG opt_signing opt_packed_dims
   integer                   T_INTEGER
+  real                      T_REAL
+  time                      T_TIME
   bit                       T_BIT opt_signing opt_packed_dims
   byte                      T_BYTE opt_signing
   shortint                  T_SHORTINT opt_signing
@@ -369,6 +372,8 @@ statement:
   preinc_stmt               T_INC lvalue ';'
   predec_stmt               T_DEC lvalue ';'
   assert_stmt               T_ASSERT '(' expression ')' opt_assert_else
+  delay_stmt                '#' expression statement
+  event_ctrl_stmt           sensitivity statement
   null_stmt                 ';'
   directive                 T_DIRECTIVE
 
@@ -431,6 +436,8 @@ statement_list:
   cons                      statement_list statement
   local_decl                statement_list net_declaration ';'
   auto_decl                 statement_list T_AUTOMATIC net_declaration ';'
+  local_param               statement_list localparam_declaration ';'
+  local_parameter            statement_list parameter_declaration ';'
 
 subroutine_call:
   func                      hierarchical_id '(' opt_arg_list ')'
@@ -543,6 +550,7 @@ generate_item:
   if_gen                    T_IF '(' expression ')' generate_block opt_gen_else
   for_gen                   T_FOR '(' genvar_init ';' expression ';' genvar_step ')' generate_block
   begin_gen                 T_BEGIN opt_block_name generate_body T_END opt_end_name
+  sys_call                  subroutine_call ';'
 
 opt_gen_else:
   yes                       T_ELSE generate_block
