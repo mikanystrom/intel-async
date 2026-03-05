@@ -198,13 +198,13 @@ port_direction_declaration: { val : TEXT; cnt : INTEGER; }
 net_declaration: { val : TEXT; cnt : INTEGER; }
   typed        { $$.val := Wrap2("decl", $1, $2) }
   wire_decl    { $$.val := "(decl wire " & $1 & " " & $2 & " " & $3 & ")" }
-  logic_decl   { $$.val := "(decl logic " & $1 & " " & $2 & " " & $3 & ")" }
-  reg_decl     { $$.val := "(decl reg " & $1 & " " & $2 & " " & $3 & ")" }
   genvar       { $$.val := "(genvar " & $1 & ")" }
-  integer_decl { $$.val := "(decl integer " & $1 & ")" }
   user_type    { $$.val := "(decl " & $1 & " " & $2 & ")" }
 
 data_type: { val : TEXT; cnt : INTEGER; }
+  logic     { $$.val := "(logic " & $1 & " " & $2 & ")" }
+  reg       { $$.val := "(reg " & $1 & " " & $2 & ")" }
+  integer   { $$.val := "(integer)" }
   bit       { $$.val := "(bit " & $1 & " " & $2 & ")" }
   byte      { $$.val := "(byte " & $1 & ")" }
   shortint  { $$.val := "(shortint " & $1 & ")" }
