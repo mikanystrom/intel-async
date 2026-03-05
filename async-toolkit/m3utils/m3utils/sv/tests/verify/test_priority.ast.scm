@@ -1,0 +1,1 @@
+(module test_priority () (ports (port input (id a )) (port input (id b )) (port input (id c )) (port input (id d )) (port output (id y1 )) (port output (id y0 ))) (assign (= (id y1) (| (id d) (id c)))) (assign (= (id y0) (| (id d) (& (~ (id c)) (id b))))))

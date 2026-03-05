@@ -1,0 +1,1 @@
+(module test_majority () (ports (port input (id a )) (port input (id b )) (port input (id c )) (port output (id y ))) (assign (= (id y) (| (| (& (id a) (id b)) (& (id b) (id c))) (& (id a) (id c))))))

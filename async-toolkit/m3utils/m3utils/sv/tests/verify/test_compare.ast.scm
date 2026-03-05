@@ -1,0 +1,1 @@
+(module test_compare () (ports (port input (id a )) (port input (id b )) (port output (id eq )) (port output (id gt )) (port output (id lt ))) (assign (= (id eq) (~ (^ (id a) (id b))))) (assign (= (id gt) (& (id a) (~ (id b))))) (assign (= (id lt) (& (~ (id a)) (id b)))))

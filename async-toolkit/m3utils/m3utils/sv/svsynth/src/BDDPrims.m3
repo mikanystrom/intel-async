@@ -7,7 +7,7 @@ MODULE BDDPrims;
 IMPORT SchemePrimitive, SchemeProcedure, Scheme;
 IMPORT SchemeString, SchemeBoolean, SchemeLongReal;
 IMPORT SchemeUtils, Atom;
-IMPORT BDD;
+IMPORT BDD, BDDImpl;
 FROM SchemeUtils IMPORT First, Second, Third;
 FROM SchemeBoolean IMPORT True, False;
 FROM Scheme IMPORT Object, E;
@@ -158,6 +158,87 @@ PROCEDURE BDDEqualApply(<*UNUSED*>p : SchemeProcedure.T;
     END
   END BDDEqualApply;
 
+(* (bdd-true? b) => is b the constant TRUE? *)
+PROCEDURE BDDIsTrueApply(<*UNUSED*>p : SchemeProcedure.T;
+                         <*UNUSED*>interp : Scheme.T;
+                                   args : Object) : Object RAISES { E } =
+  BEGIN
+    IF BDD.Equal(CheckBDD(First(args)), BDD.True()) THEN
+      RETURN True()
+    ELSE
+      RETURN False()
+    END
+  END BDDIsTrueApply;
+
+(* (bdd-false? b) => is b the constant FALSE? *)
+PROCEDURE BDDIsFalseApply(<*UNUSED*>p : SchemeProcedure.T;
+                          <*UNUSED*>interp : Scheme.T;
+                                    args : Object) : Object RAISES { E } =
+  BEGIN
+    IF BDD.Equal(CheckBDD(First(args)), BDD.False()) THEN
+      RETURN True()
+    ELSE
+      RETURN False()
+    END
+  END BDDIsFalseApply;
+
+(* (bdd-const? b) => is b TRUE or FALSE? *)
+PROCEDURE BDDIsConstApply(<*UNUSED*>p : SchemeProcedure.T;
+                          <*UNUSED*>interp : Scheme.T;
+                                    args : Object) : Object RAISES { E } =
+  VAR b : BDD.T;
+  BEGIN
+    b := CheckBDD(First(args));
+    IF BDD.Equal(b, BDD.True()) OR BDD.Equal(b, BDD.False()) THEN
+      RETURN True()
+    ELSE
+      RETURN False()
+    END
+  END BDDIsConstApply;
+
+(* (bdd-high b) => the high (then) child *)
+PROCEDURE BDDHighApply(<*UNUSED*>p : SchemeProcedure.T;
+                       <*UNUSED*>interp : Scheme.T;
+                                 args : Object) : Object RAISES { E } =
+  BEGIN
+    RETURN BDDImpl.Left(CheckBDD(First(args)))
+  END BDDHighApply;
+
+(* (bdd-low b) => the low (else) child *)
+PROCEDURE BDDLowApply(<*UNUSED*>p : SchemeProcedure.T;
+                      <*UNUSED*>interp : Scheme.T;
+                                args : Object) : Object RAISES { E } =
+  BEGIN
+    RETURN BDDImpl.Right(CheckBDD(First(args)))
+  END BDDLowApply;
+
+(* (bdd-node-var b) => the decision variable of this node *)
+PROCEDURE BDDNodeVarApply(<*UNUSED*>p : SchemeProcedure.T;
+                          <*UNUSED*>interp : Scheme.T;
+                                    args : Object) : Object RAISES { E } =
+  BEGIN
+    RETURN BDDImpl.NodeVar(CheckBDD(First(args)))
+  END BDDNodeVarApply;
+
+(* (bdd-name b) => the name string of a variable, or #f *)
+PROCEDURE BDDNameApply(<*UNUSED*>p : SchemeProcedure.T;
+                       <*UNUSED*>interp : Scheme.T;
+                                 args : Object) : Object RAISES { E } =
+  VAR name : TEXT;
+  BEGIN
+    name := BDD.Format(CheckBDD(First(args)));
+    IF name = NIL THEN RETURN False() END;
+    RETURN SchemeString.FromText(name)
+  END BDDNameApply;
+
+(* (bdd-id b) => integer id of the node *)
+PROCEDURE BDDIdApply(<*UNUSED*>p : SchemeProcedure.T;
+                     <*UNUSED*>interp : Scheme.T;
+                               args : Object) : Object RAISES { E } =
+  BEGIN
+    RETURN SchemeLongReal.FromLR(FLOAT(BDD.GetId(CheckBDD(First(args))), LONGREAL))
+  END BDDIdApply;
+
 (**********************************************************************)
 
 PROCEDURE Install(prims : SchemePrimitive.ExtDefiner) : SchemePrimitive.ExtDefiner =
@@ -204,6 +285,30 @@ PROCEDURE Install(prims : SchemePrimitive.ExtDefiner) : SchemePrimitive.ExtDefin
     prims.addPrim("bdd-equal?", NEW(SchemeProcedure.T,
                                      apply := BDDEqualApply),
                   2, 2);
+    prims.addPrim("bdd-true?", NEW(SchemeProcedure.T,
+                                    apply := BDDIsTrueApply),
+                  1, 1);
+    prims.addPrim("bdd-false?", NEW(SchemeProcedure.T,
+                                     apply := BDDIsFalseApply),
+                  1, 1);
+    prims.addPrim("bdd-const?", NEW(SchemeProcedure.T,
+                                     apply := BDDIsConstApply),
+                  1, 1);
+    prims.addPrim("bdd-high", NEW(SchemeProcedure.T,
+                                   apply := BDDHighApply),
+                  1, 1);
+    prims.addPrim("bdd-low", NEW(SchemeProcedure.T,
+                                  apply := BDDLowApply),
+                  1, 1);
+    prims.addPrim("bdd-node-var", NEW(SchemeProcedure.T,
+                                       apply := BDDNodeVarApply),
+                  1, 1);
+    prims.addPrim("bdd-name", NEW(SchemeProcedure.T,
+                                   apply := BDDNameApply),
+                  1, 1);
+    prims.addPrim("bdd-id", NEW(SchemeProcedure.T,
+                                 apply := BDDIdApply),
+                  1, 1);
     RETURN prims
   END Install;
 

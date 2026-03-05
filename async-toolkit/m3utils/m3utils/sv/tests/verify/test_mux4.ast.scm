@@ -1,0 +1,1 @@
+(module test_mux4 () (ports (port input (id s0 )) (port input (id s1 )) (port input (id d0 )) (port input (id d1 )) (port input (id d2 )) (port input (id d3 )) (port output (id y ))) (assign (= (id y) (?: (id s1) (?: (id s0) (id d3) (id d2)) (?: (id s0) (id d1) (id d0))))))

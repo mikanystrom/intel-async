@@ -1,0 +1,1 @@
+(module test_decoder () (ports (port input (id a )) (port input (id b )) (port output (id y0 )) (port output (id y1 )) (port output (id y2 )) (port output (id y3 ))) (assign (= (id y0) (& (~ (id a)) (~ (id b))))) (assign (= (id y1) (& (~ (id a)) (id b)))) (assign (= (id y2) (& (id a) (~ (id b))))) (assign (= (id y3) (& (id a) (id b)))))
