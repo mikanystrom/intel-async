@@ -614,7 +614,7 @@ postfix_expr: { val : TEXT; cnt : INTEGER; }
   range_sel  { $$.val := "(range " & $1 & " " & $2 & " " & $3 & ")" }
   psel       { $$.val := "(+: " & $1 & " " & $2 & " " & $3 & ")" }
   msel       { $$.val := "(-: " & $1 & " " & $2 & " " & $3 & ")" }
-  member     { $$.val := "(. " & $1 & " " & $2 & ")" }
+  member     { $$.val := "(field " & $1 & " " & $2 & ")" }
   call       { $$.val := "(call " & $1 & " " & $2 & ")" }
 
 primary_expr: { val : TEXT; cnt : INTEGER; }
@@ -630,7 +630,7 @@ primary_expr: { val : TEXT; cnt : INTEGER; }
 hierarchical_id: { val : TEXT; cnt : INTEGER; }
   simple  { $$.val := "(id " & $1 & ")" }
   scoped  { $$.val := "(:: " & $1 & " " & $2 & ")" }
-  dotted  { $$.val := "(. " & $1 & " " & $2 & ")" }
+  dotted  { $$.val := "(field " & $1 & " " & $2 & ")" }
 
 expression_list: { val : TEXT; cnt : INTEGER; }
   single  { $$.val := $1 }
@@ -646,7 +646,7 @@ lvalue: { val : TEXT; cnt : INTEGER; }
   range_sel  { $$.val := "(range " & $1 & " " & $2 & " " & $3 & ")" }
   psel       { $$.val := "(+: " & $1 & " " & $2 & " " & $3 & ")" }
   msel       { $$.val := "(-: " & $1 & " " & $2 & " " & $3 & ")" }
-  member     { $$.val := "(. " & $1 & " " & $2 & ")" }
+  member     { $$.val := "(field " & $1 & " " & $2 & ")" }
   concat     { $$.val := "(concat " & $1 & ")" }
 
 lvalue_list: { val : TEXT; cnt : INTEGER; }
