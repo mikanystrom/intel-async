@@ -1,0 +1,13 @@
+import ("libm3")
+import ("cit_util")
+import ("parserlib")
+
+Token("sv")
+Lexer("sv","sv")
+Parser("sv","sv")
+
+Extended("svLexExt")
+Extended("svParseExt")
+
+implementation ("Main")
+program ("svfe")
