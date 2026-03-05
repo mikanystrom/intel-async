@@ -1,0 +1,13 @@
+import("libm3")
+import("cit_util")
+import("mscheme")
+import("schemesig")
+import("modula3scheme")
+import("parseparams")
+import("bdd")
+
+interface("BDDPrims")
+module("BDDPrims")
+implementation("Main")
+
+program("svsynth")
