@@ -1,0 +1,363 @@
+svfe -- SystemVerilog Frontend
+==============================
+
+Mika Nystroem, March 2026
+
+
+1.  OVERVIEW
+
+    svfe is a SystemVerilog parser that produces S-expression output
+    suitable for processing by Scheme scripts.  It is built on the
+    CM3 parserlib metacompiler and supports the synthesizable subset
+    of IEEE 1800-2017 SystemVerilog as accepted by Synopsys Design
+    Compiler and Cadence Genus.
+
+    The tool is part of a pipeline:
+
+      SystemVerilog source (.sv / .v / .vh)
+        --> svfe --scm          parse and emit S-expressions
+        --> mscheme              analyze, lint, transform
+
+    The S-expression output preserves the full structure of the
+    source code and can be consumed by any Scheme implementation.
+    The companion script svread.scm provides analysis and lint
+    checks for use with mscheme.
+
+
+2.  BUILDING
+
+    svfe is built with the CM3 Modula-3 compiler.  From the
+    sv/svparse/ directory:
+
+      $ cm3 -override
+
+    This invokes the parserlib metacompiler to generate the lexer
+    (from sv.l), parser (from sv.y), and extensions (from
+    svLexExt.e, svParseExt.e), then compiles and links the svfe
+    binary.
+
+    The binary is placed in sv/svparse/AMD64_LINUX/svfe (or the
+    appropriate platform directory).
+
+    Prerequisites:
+      - CM3 compiler with parserlib installed
+      - A .top file in the m3utils root (see cm3 documentation)
+      - The m3overrides file (included)
+
+
+3.  USAGE
+
+    3.1  Command-line options
+
+      svfe [--scm] [--lex] [--name <module>] <file.sv>
+
+      --scm     Emit S-expression output (default mode)
+      --lex     Emit lexer token stream (for debugging)
+      --name    Set the module name for error messages
+
+    3.2  Basic usage
+
+      $ svfe --scm mymodule.sv
+
+    This parses the file and writes S-expressions to standard
+    output, one per top-level construct.  Errors are reported to
+    standard error with line numbers.
+
+    3.3  Piping to Scheme
+
+      $ svfe --scm mymodule.sv > /tmp/ast.scm
+
+    Then in mscheme:
+
+      > (load "sv/src/svread.scm")
+      > (define ast (read-sv-file "/tmp/ast.scm"))
+      > (lint-all ast)
+      === Module: mymodule ===
+        Ports: 8 (in: 5 out: 3)
+        Local signals: 12
+        Assigned signals: 14
+
+
+4.  SUPPORTED LANGUAGE CONSTRUCTS
+
+    4.1  Declarations
+
+      module / endmodule          Module declarations (ANSI ports)
+      package / endpackage        Package declarations
+      interface / endinterface    Interface declarations
+      modport                     Interface modport declarations
+      import pkg::item            Package imports (including ::*)
+      import before ports         Module-level import declarations
+      typedef                     Type aliases
+      parameter, localparam       Compile-time constants
+      function / endfunction      Function declarations (automatic)
+      task / endtask              Task declarations (automatic)
+
+    4.2  Types
+
+      logic, wire, reg            Net and variable types
+      integer                     32-bit integer type
+      bit, byte, shortint         Small integer types
+      int, longint                Sized integer types
+      string, void                Other built-in types
+      signed, unsigned            Signedness qualifiers
+      enum                        Enumerated types
+      struct packed               Packed structures
+      [N:M]                       Packed bit ranges
+      [N:M][P:Q]                  Multi-dimensional packed arrays
+      [0:N-1]                     Unpacked array dimensions
+      User-defined types          Via typedef or package import
+
+    4.3  Statements
+
+      assign                      Continuous assignments
+      always @(...)               Classic sensitivity lists
+      always_comb                 Combinational blocks
+      always_ff @(posedge ...)    Sequential (flip-flop) blocks
+      always_latch                Latch blocks
+      if / else                   Conditional statements
+      case, casez, casex          Case statements
+      unique case, priority case  SV case qualifiers
+      begin / end                 Block grouping (with optional names)
+      = (blocking)                Blocking assignment
+      <= (non-blocking)           Non-blocking assignment
+      for                         For loops (with int/genvar)
+      while, repeat, forever      Other loops
+      return                      Function return
+      ++, --                      Pre/post increment/decrement
+      +=, -=, *=, /=, %=         Compound assignment operators
+      &=, |=, ^=, <<=, >>=       Bitwise compound assignments
+
+    4.4  Expressions
+
+      Arithmetic:   + - * / % **
+      Logical:      && || !
+      Bitwise:      & | ^ ~ ~& ~| ~^
+      Shift:        << >> <<< >>>
+      Relational:   == != < > <= >=
+      Identity:     === !==
+      Wildcard:     ==? !=?
+      Ternary:      ? :
+      Concat:       { }
+      Replication:  {N{expr}}
+      Part select:  [+:] [-:]
+      Member:       expr.field (struct access)
+      Function:     func(args)
+      System:       $clog2(), $bits(), $signed(), etc.
+
+    4.5  Number literals
+
+      Verilog format: 8'hFF, 32'd0, 4'b1010, 16'shFFFF
+      Unsized:        'h3F, '0, '1, 'x, 'z
+      Plain decimal:  42, 1_000_000
+
+    4.6  Generate
+
+      generate / endgenerate      Generate regions
+      for generate                Parameterized replication
+      if generate                 Conditional instantiation
+      genvar                      Generate variables
+      begin : name ... end        Named generate blocks
+
+    4.7  Module instantiation
+
+      Named ports:      .port(signal)
+      Implicit named:   .port          (shorthand for .port(port))
+      Positional:       signal
+      Wildcard:         .*
+      Parameters:       #(.PARAM(val))
+
+    4.8  Other
+
+      // and /* */                Comments (stripped by lexer)
+      `directive                  Compiler directives (preserved as
+                                  (directive) nodes in the AST)
+      Hierarchical ids:           a.b, pkg::name
+
+
+5.  S-EXPRESSION FORMAT
+
+    The output is standard Scheme S-expressions.  Each top-level
+    construct produces one form.  The key node types are documented
+    in svread.scm and summarized here.
+
+    5.1  Top-level forms
+
+      (module <name> [<import>...] <params> <ports> <body>...)
+      (package <name> <items>...)
+      (interface <name> <params> <ports> <items>...)
+      (typedef <type-def> <name>)
+      (import <items>)
+
+    5.2  Module body items
+
+      (decl <type> (id <name> [<dims>]) ...)
+      (assign (= <lvalue> <expr>))
+      (always_ff <sensitivity> <statement>)
+      (always_comb <statement>)
+      (always_latch <sensitivity> <statement>)
+      (generate <items>...)
+      (ident-item <type-or-module> ...)
+      (function ...)
+      (directive)
+
+    5.3  Statements
+
+      (= <lvalue> <expr>)                blocking assignment
+      (<= <lvalue> <expr>)               non-blocking assignment
+      (begin [<name>] <stmts>...)         sequential block
+      (if <cond> <then> [<else>])         conditional
+      (case <expr> (<match> <stmt>)...)   case statement
+      (casez <expr> (<match> <stmt>)...)  casez statement
+      (for <init> <cond> <step> <body>)   for loop
+      (null)                              null statement
+      (return [<expr>])                   function return
+
+    5.4  Expressions
+
+      (id <name>)                         identifier
+      (scoped <pkg> <name>)               package-scoped id
+      (+ <a> <b>)                         addition (similarly for
+                                          all binary operators)
+      (~ <a>)                             bitwise NOT
+      (! <a>)                             logical NOT
+      (?: <cond> <then> <else>)           ternary
+      (index <expr> <idx>)                bit/array select
+      (range <expr> <hi> <lo>)            part select
+      (+: <expr> <base> <width>)          ascending part select
+      (-: <expr> <base> <width>)          descending part select
+      (field <expr> <member>)             struct member access
+      (concat <exprs>...)                 concatenation
+      (replicate <count> <exprs>...)      replication
+      (call <func> <args>...)             function call
+      (sys <name>)                        system function
+
+    5.5  Types in declarations
+
+      (logic <signing> <packed-dims>)
+      (reg <signing> <packed-dims>)
+      (bit <signing> <packed-dims>)
+      (int <signing>)
+      (integer)
+      (enum <base-type> <members>...)
+      (struct <members>...)
+
+    5.6  Port declarations
+
+      (ports
+        (port <dir> <type> <signing> <dims> (id <name> [<dims>]))
+        (port-ident <name>)
+        (port-if <interface.modport> (id <name>))
+        ...)
+
+    5.7  Sensitivity lists
+
+      (sens (posedge <expr>) (negedge <expr>) ...)
+      (sens *)
+
+    5.8  Example
+
+    Given this SystemVerilog:
+
+      module counter #(parameter W = 8) (
+        input  logic       clk,
+        input  logic       rst_n,
+        output logic [W-1:0] count
+      );
+        logic [W-1:0] cnt_q;
+        assign count = cnt_q;
+        always_ff @(posedge clk or negedge rst_n)
+          if (!rst_n) cnt_q <= '0;
+          else        cnt_q <= cnt_q + 1;
+      endmodule
+
+    svfe --scm produces:
+
+      (module counter
+        (parameters (parameter () W 8))
+        (ports (port input logic (id clk))
+               (port input logic (id rst_n))
+               (port output logic [(- (id W) 1):0] (id count)))
+        (decl (logic [(- (id W) 1):0]) (id cnt_q))
+        (assign (= (id count) (id cnt_q)))
+        (always_ff (sens (posedge (id clk)) (negedge (id rst_n)))
+          (if (! (id rst_n))
+              (<= (id cnt_q) '0)
+              (<= (id cnt_q) (+ (id cnt_q) 1)))))
+
+
+6.  LINT CHECKS (svread.scm)
+
+    The svread.scm Scheme script provides basic lint analysis of
+    the S-expression output.  It currently checks for:
+
+    6.1  Undriven outputs
+
+      Outputs declared in the port list that are never assigned
+      anywhere in the module body (neither by continuous assign
+      nor by procedural blocks).
+
+    6.2  Blocking assigns in always_ff
+
+      Blocking assignments (=) inside always_ff blocks.  These
+      should use non-blocking (<=) to avoid simulation/synthesis
+      mismatches.
+
+    6.3  Non-blocking assigns in always_comb
+
+      Non-blocking assignments (<=) inside always_comb blocks.
+      These should use blocking (=) to model combinational logic
+      correctly.
+
+    6.4  Signal statistics
+
+      For each module, the linter reports:
+        - Number of ports (input/output breakdown)
+        - Number of local signal declarations
+        - Number of distinct assigned signals
+
+
+7.  EXCLUDED CONSTRUCTS
+
+    The following SystemVerilog features are not supported, as they
+    are not part of the synthesis subset:
+
+      class / endclass            OOP constructs (UVM)
+      constraint                  Constrained random
+      covergroup / coverpoint     Functional coverage
+      program / endprogram        Testbench programs
+      fork / join                 Parallel threads
+      force / release             Simulation overrides
+      #delay                      Time delays
+      DPI (import "DPI-C")        Foreign function interface
+      bind                        Verification binding
+      sequence / property         SVA assertions
+      mailbox, semaphore          Verification synchronization
+
+    Also not yet supported:
+      type'(expr)                 Type casting
+      union packed                Packed unions
+      `define / `include          Preprocessor (directives are
+                                  preserved but not expanded)
+
+
+8.  FILES
+
+    sv/svparse/src/sv.t           Token definitions
+    sv/svparse/src/sv.l           Lexer specification (DFA)
+    sv/svparse/src/sv.y           Grammar (LR(1), ~640 lines)
+    sv/svparse/src/svLexExt.e     Lexer extension (token values)
+    sv/svparse/src/svParseExt.e   Parser extension (S-expr output)
+    sv/svparse/src/Main.m3        Command-line driver
+    sv/svparse/src/m3makefile     Build configuration
+    sv/src/svread.scm             Scheme lint/analysis script
+    sv/PLAN.txt                   Project plan
+    sv/doc/svfe-manual.txt        This file
+
+
+9.  SEE ALSO
+
+    PLAN.txt                      Detailed project plan and scope
+    svread.scm                    Scheme API documentation (in-file)
+    csp/cspparse/                 Reference CSP parser (same architecture)
+    parserlib/IMPLEMENTATION_GUIDE.md   CM3 parserlib documentation
