@@ -368,6 +368,7 @@ for_step:
 statement_list:
   empty
   cons                      statement_list statement
+  local_decl                statement_list net_declaration ';'
 
 subroutine_call:
   func                      hierarchical_id '(' opt_arg_list ')'
@@ -619,6 +620,7 @@ postfix_expr:
   msel                      postfix_expr '[' expression T_MSEL expression ']'
   member                    postfix_expr '.' T_IDENT
   call                      postfix_expr '(' opt_arg_list ')'
+  cast                      postfix_expr '\'' '(' expression ')'
 
 primary_expr:
   number                    T_NUMBER
