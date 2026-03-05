@@ -172,6 +172,66 @@
   (sv-delete-dups result))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Find blocking assigns in a statement (for always_ff check)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define (find-blocking-in-stmt stmt)
+  (cond
+    ((not (pair? stmt)) '())
+    ((eq? '= (car stmt))
+     (lvalue-signals (cadr stmt)))
+    ((eq? '<= (car stmt)) '()) ;; non-blocking is fine in always_ff
+    ((eq? 'begin (car stmt))
+     (sv-append-all
+      (map find-blocking-in-stmt
+           (if (and (pair? (cdr stmt)) (symbol? (cadr stmt)))
+               (cddr stmt) (cdr stmt)))))
+    ((eq? 'if (car stmt))
+     (append (find-blocking-in-stmt (caddr stmt))
+             (if (> (length stmt) 3)
+                 (find-blocking-in-stmt (cadddr stmt))
+                 '())))
+    ((memq (car stmt) '(case casez casex))
+     (sv-append-all (map (lambda (ci)
+                           (if (and (pair? ci) (> (length ci) 1))
+                               (find-blocking-in-stmt (cadr ci))
+                               '()))
+                         (cddr stmt))))
+    ((eq? 'for (car stmt))
+     (find-blocking-in-stmt (sv-last stmt)))
+    (else '())))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Find non-blocking assigns in a statement (for always_comb check)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(define (find-nonblocking-in-stmt stmt)
+  (cond
+    ((not (pair? stmt)) '())
+    ((eq? '<= (car stmt))
+     (lvalue-signals (cadr stmt)))
+    ((eq? '= (car stmt)) '()) ;; blocking is fine in always_comb
+    ((eq? 'begin (car stmt))
+     (sv-append-all
+      (map find-nonblocking-in-stmt
+           (if (and (pair? (cdr stmt)) (symbol? (cadr stmt)))
+               (cddr stmt) (cdr stmt)))))
+    ((eq? 'if (car stmt))
+     (append (find-nonblocking-in-stmt (caddr stmt))
+             (if (> (length stmt) 3)
+                 (find-nonblocking-in-stmt (cadddr stmt))
+                 '())))
+    ((memq (car stmt) '(case casez casex))
+     (sv-append-all (map (lambda (ci)
+                           (if (and (pair? ci) (> (length ci) 1))
+                               (find-nonblocking-in-stmt (cadr ci))
+                               '()))
+                         (cddr stmt))))
+    ((eq? 'for (car stmt))
+     (find-nonblocking-in-stmt (sv-last stmt)))
+    (else '())))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Lint checks
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -213,6 +273,32 @@
                     (symbol->string (cadr o))
                     "' is never driven")))
    outputs)
+
+  ;; Check for blocking assigns in always_ff
+  (for-each
+   (lambda (item)
+     (if (and (pair? item) (eq? 'always_ff (car item)))
+         (let ((bad (find-blocking-in-stmt (sv-last item))))
+           (for-each
+            (lambda (sig)
+              (displayln "  WARNING: blocking assign to '"
+                         (symbol->string sig)
+                         "' in always_ff"))
+            bad))))
+   body)
+
+  ;; Check for non-blocking assigns in always_comb
+  (for-each
+   (lambda (item)
+     (if (and (pair? item) (eq? 'always_comb (car item)))
+         (let ((bad (find-nonblocking-in-stmt (sv-last item))))
+           (for-each
+            (lambda (sig)
+              (displayln "  WARNING: non-blocking assign to '"
+                         (symbol->string sig)
+                         "' in always_comb"))
+            bad))))
+   body)
 
   ;; Report signal counts
   (displayln "  Ports: " (number->string (length ports))
