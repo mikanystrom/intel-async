@@ -158,13 +158,19 @@
 ;; (per email from CherSian)
 ;;
 
-(define *n3-17m-n* 34.00) ;; CENSORED
-(define *n3-18m-n* 36.00) ;; CENSORED
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; WARNING: ALL VALUES BELOW ARE FICTITIOUS PLACEHOLDERS.
+;; They are MADE-UP numbers to stand in for proprietary data.
+;; DO NOT USE FOR PRODUCTION YIELD ESTIMATES.
+;; The real values are subject to NDA and are not in this repository.
+;; Contact your TSMC representative for further information.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(define *n3-17m-n* 34.00)        ;; FICTITIOUS - not a real value
+(define *n3-18m-n* 36.00)        ;; FICTITIOUS - not a real value
 
-;; all below CENSORED
-(define *n3-d0-2023q3*   0.100) ;; 2023Q3
-(define *n3-d0-2024q3*   0.080) ;; 2024Q3
-(define *n3-d0-2025q4*   0.065) ;; 2025Q4 (saturation value)
+(define *n3-d0-2023q3*   0.100)  ;; FICTITIOUS - not a real TSMC value
+(define *n3-d0-2024q3*   0.080)  ;; FICTITIOUS - not a real TSMC value
+(define *n3-d0-2025q4*   0.065)  ;; FICTITIOUS - not a real TSMC value
 
 
 ;; let's work in 18M, 2024

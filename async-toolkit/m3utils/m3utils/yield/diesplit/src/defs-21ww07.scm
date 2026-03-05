@@ -3,10 +3,16 @@
 
 (define *n5-n* 32)
 
-(define *n5-saturation-D0* 0.075)
-;; TSMC official value is 0.080 ; CENSORED
-;; but TOM thinks 0.070
-;; we split the difference here
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; WARNING: The value below is a FICTITIOUS PLACEHOLDER.
+;; It is a MADE-UP number to stand in for proprietary data.
+;; DO NOT USE FOR PRODUCTION YIELD ESTIMATES.
+;; The real value is subject to NDA and is not in this repository.
+;; Contact your TSMC representative for further information.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(define *n5-saturation-D0* 0.075)  ;; FICTITIOUS - not a real TSMC value
+;; TSMC official value is CENSORED
+;; the dummy value above is chosen to be plausible but is NOT real
 
 (define *tsmc-large-die-correction* -0.02)
 

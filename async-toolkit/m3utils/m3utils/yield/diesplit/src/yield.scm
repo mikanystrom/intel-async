@@ -44,11 +44,18 @@
 
 (define (PAp) (- 1 (PA)))
 
-(define (tsmc-d0-correction a) ;; CENSORED
-  (cond ((> a 400) -0.030)
-        ((> a 300) -0.025)
-        ((> a 200) -0.020)
-        ((> a 100) -0.010) ;; see Jeremy's script
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; WARNING: ALL VALUES IN THIS FUNCTION ARE FICTITIOUS PLACEHOLDERS.
+;; They are MADE-UP numbers to stand in for proprietary data.
+;; DO NOT USE FOR PRODUCTION YIELD ESTIMATES.
+;; The real values are subject to NDA and are not in this repository.
+;; Contact your TSMC representative for further information.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(define (tsmc-d0-correction a)
+  (cond ((> a 400) -0.030)  ;; FICTITIOUS - not a real TSMC value
+        ((> a 300) -0.025)  ;; FICTITIOUS - not a real TSMC value
+        ((> a 200) -0.020)  ;; FICTITIOUS - not a real TSMC value
+        ((> a 100) -0.010)  ;; FICTITIOUS - not a real TSMC value
         (else       0)
         )
   )
