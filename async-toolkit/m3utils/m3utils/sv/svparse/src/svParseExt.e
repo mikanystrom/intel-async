@@ -277,8 +277,9 @@ enum_type: { val : TEXT; cnt : INTEGER; }
   x  { $$.val := "(enum " & $1 & " " & $2 & ")" }
 
 opt_enum_base_type: { val : TEXT; cnt : INTEGER; }
-  yes    { $$.val := $1 }
-  empty  { $$.val := "()" }
+  yes        { $$.val := $1 }
+  user_type  { $$.val := $1 }
+  empty      { $$.val := "()" }
 
 data_type_or_implicit: { val : TEXT; cnt : INTEGER; }
   logic    { $$.val := "(logic " & $1 & " " & $2 & ")" }
@@ -498,7 +499,10 @@ arg_item: { val : TEXT; cnt : INTEGER; }
   empty_arg  { $$.val := "()" }
 
 function_declaration: { val : TEXT; cnt : INTEGER; }
-  x  { $$.val := "(function " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
+  x          { $$.val := "(function " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
+  user_type  { $$.val := "(function " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
+  user_type_dims { $$.val := "(function " & $1 & " (" & $2 & " " & $3 & ") " & $4 & " " & $5 & ")" }
+  bare       { $$.val := "(function " & $1 & " () " & $2 & " " & $3 & ")" }
 
 opt_automatic: { val : TEXT; cnt : INTEGER; }
   yes    { $$.val := "automatic" }
@@ -510,8 +514,7 @@ opt_data_type_or_void: { val : TEXT; cnt : INTEGER; }
   logic           { $$.val := "logic " & $1 & " " & $2 }
   reg             { $$.val := "reg " & $1 & " " & $2 }
   integer         { $$.val := "integer" }
-  implicit_range  { $$.val := $1 & " " & $2 }
-  empty           { $$.val := "()" }
+  implicit_dims   { $$.val := $1 & " " & $2 }
 
 function_body: { val : TEXT; cnt : INTEGER; }
   empty  { $$.val := "" }
@@ -520,6 +523,7 @@ function_body: { val : TEXT; cnt : INTEGER; }
 function_body_item: { val : TEXT; cnt : INTEGER; }
   decl           { $$.val := $1 }
   net_decl       { $$.val := $1 }
+  auto_decl      { $$.val := "(automatic " & $1 & ")" }
   param_decl     { $$.val := $1 }
   localparam_decl { $$.val := $1 }
   stmt           { $$.val := $1 }
@@ -728,7 +732,19 @@ postfix_expr: { val : TEXT; cnt : INTEGER; }
   msel       { $$.val := "(-: " & $1 & " " & $2 & " " & $3 & ")" }
   member     { $$.val := "(field " & $1 & " " & $2 & ")" }
   call       { $$.val := "(call " & $1 & " " & $2 & ")" }
-  cast       { $$.val := "(cast " & $1 & " " & $2 & ")" }
+  cast           { $$.val := "(cast " & $1 & " " & $2 & ")" }
+  type_cast      { $$.val := "(cast " & $1 & " " & $2 & ")" }
+
+cast_type: { val : TEXT; cnt : INTEGER; }
+  int        { $$.val := "int" }
+  logic      { $$.val := "logic" }
+  bit        { $$.val := "bit" }
+  byte       { $$.val := "byte" }
+  shortint   { $$.val := "shortint" }
+  longint    { $$.val := "longint" }
+  integer    { $$.val := "integer" }
+  signed     { $$.val := "signed" }
+  unsigned   { $$.val := "unsigned" }
 
 primary_expr: { val : TEXT; cnt : INTEGER; }
   number        { $$.val := $1 }
@@ -739,10 +755,17 @@ primary_expr: { val : TEXT; cnt : INTEGER; }
   concat        { $$.val := "(concat " & $1 & ")" }
   replicate     { $$.val := "(replicate " & $1 & " " & $2 & ")" }
   empty_concat        { $$.val := "(concat)" }
+  stream_left         { $$.val := "(stream-left " & $1 & " " & $2 & ")" }
+  stream_right        { $$.val := "(stream-right " & $1 & " " & $2 & ")" }
   struct_lit          { $$.val := "(struct-lit " & $1 & ")" }
   struct_lit_default  { $$.val := "(struct-lit-default " & $1 & ")" }
   unsigned_kw         { $$.val := "unsigned" }
   signed_kw           { $$.val := "signed" }
+
+stream_slice: { val : TEXT; cnt : INTEGER; }
+  number  { $$.val := $1 }
+  ident   { $$.val := $1 }
+  empty   { $$.val := "()" }
 
 assign_pattern_list: { val : TEXT; cnt : INTEGER; }
   single  { $$.val := $1 }

@@ -255,6 +255,7 @@ enum_type:
 
 opt_enum_base_type:
   yes                       data_type_or_implicit
+  user_type                 T_IDENT
   empty
 
 data_type_or_implicit:
@@ -480,6 +481,9 @@ arg_item:
 
 function_declaration:
   x                         T_FUNCTION opt_automatic opt_data_type_or_void T_IDENT opt_port_list ';' function_body T_ENDFUNCTION opt_end_label
+  user_type                 T_FUNCTION opt_automatic T_IDENT T_IDENT opt_port_list ';' function_body T_ENDFUNCTION opt_end_label
+  user_type_dims            T_FUNCTION opt_automatic T_IDENT packed_dim_list T_IDENT opt_port_list ';' function_body T_ENDFUNCTION opt_end_label
+  bare                      T_FUNCTION opt_automatic T_IDENT opt_port_list ';' function_body T_ENDFUNCTION opt_end_label
 
 opt_automatic:
   yes                       T_AUTOMATIC
@@ -491,8 +495,7 @@ opt_data_type_or_void:
   logic                     T_LOGIC opt_signing opt_packed_dims
   reg                       T_REG opt_signing opt_packed_dims
   integer                   T_INTEGER
-  implicit_range            opt_signing opt_packed_dims
-  empty
+  implicit_dims             opt_signing packed_dim_list
 
 function_body:
   empty
@@ -501,6 +504,7 @@ function_body:
 function_body_item:
   decl                      port_direction_declaration ';'
   net_decl                  net_declaration ';'
+  auto_decl                 T_AUTOMATIC net_declaration ';'
   param_decl                parameter_declaration ';'
   localparam_decl           localparam_declaration ';'
   stmt                      statement
@@ -714,6 +718,18 @@ postfix_expr:
   member                    postfix_expr '.' T_IDENT
   call                      postfix_expr '(' opt_arg_list ')'
   cast                      postfix_expr '\'' '(' expression ')'
+  type_cast                 cast_type '\'' '(' expression ')'
+
+cast_type:
+  int                       T_INT
+  logic                     T_LOGIC
+  bit                       T_BIT
+  byte                      T_BYTE
+  shortint                  T_SHORTINT
+  longint                   T_LONGINT
+  integer                   T_INTEGER
+  signed                    T_SIGNED
+  unsigned                  T_UNSIGNED
 
 primary_expr:
   number                    T_NUMBER
@@ -724,10 +740,17 @@ primary_expr:
   concat                    '{' expression_list '}'
   replicate                 '{' expression '{' expression_list '}' '}'
   empty_concat              '{' '}'
+  stream_left               '{' T_LSHIFT stream_slice '{' expression_list '}' '}'
+  stream_right              '{' T_RSHIFT stream_slice '{' expression_list '}' '}'
   struct_lit                '\'' '{' assign_pattern_list '}'
   struct_lit_default        '\'' '{' T_DEFAULT ':' expression '}'
   unsigned_kw               T_UNSIGNED
   signed_kw                 T_SIGNED
+
+stream_slice:
+  number                    T_NUMBER
+  ident                     T_IDENT
+  empty
 
 assign_pattern_list:
   single                    assign_pattern_item
