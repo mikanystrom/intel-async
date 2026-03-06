@@ -1,7 +1,5 @@
 system HelloInline;
-  process Hello = begin
-    print("hello, world!")
-  end;
+  process Hello = %[% print("hello, world!") %]%;
 begin
   var h : Hello;
 end.

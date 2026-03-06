@@ -164,7 +164,6 @@ run_parse_test  parse_line_comments  parse_line_comments.sys
 run_parse_test  parse_block_comments parse_block_comments.sys
 run_parse_test  parse_multi_instance parse_multi_instance.sys
 run_parse_test  parse_multi_process  parse_multi_process.sys
-run_parse_test  parse_inline_nested  parse_inline_nested.sys
 run_parse_test  parse_multi_binding  parse_multi_binding.sys
 
 echo ""

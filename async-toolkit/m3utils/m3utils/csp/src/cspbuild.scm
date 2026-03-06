@@ -96,8 +96,12 @@
 
 (define (sys-tokenize port)
   ;; Tokenize a .sys file.  Returns a list of (kind value line) tokens.
-  ;; kind: ident keyword int string punct eof
-  ;; Punctuation: ; : ( ) , . = =>
+  ;; kind: ident keyword int string body punct eof
+  ;;
+  ;; Inline CSP bodies are delimited by %[% ... %]% and returned as a
+  ;; single (body "raw text" line) token.  The raw text is passed to
+  ;; cspfe verbatim.  The scanner tracks string literals inside the
+  ;; body so that a %]% inside a CSP string does not end the body.
 
   (define line 1)
 
@@ -109,7 +113,6 @@
       c))
 
   (define (skip-line-comment)
-    ;; Consume until end of line or EOF
     (let loop ()
       (let ((c (advance)))
         (if (or (eof-object? c) (char=? c #\newline))
@@ -156,6 +159,48 @@
                (loop (cons (advance) chars)))
               (else (loop (cons c chars)))))))
 
+  (define (read-csp-body)
+    ;; Opening %[% already consumed.  Read raw characters until %]%.
+    ;; Track CSP string literals so %]% inside a string is not
+    ;; mistaken for the end delimiter.
+    (let ((start-line line))
+      (let loop ((chars '()) (in-string #f))
+        (let ((c (advance)))
+          (cond
+           ((eof-object? c)
+            (sys-error "unterminated %[% body starting at line "
+                       (number->string start-line)))
+           ;; inside a CSP string literal
+           (in-string
+            (cond
+             ((char=? c #\\)
+              (let ((c2 (advance)))
+                (loop (cons c2 (cons c chars)) #t)))
+             ((char=? c #\")
+              (loop (cons c chars) #f))
+             (else
+              (loop (cons c chars) #t))))
+           ;; entering a CSP string literal
+           ((char=? c #\")
+            (loop (cons c chars) #t))
+           ;; possible %]% delimiter
+           ((char=? c #\%)
+            (if (and (char? (peek)) (char=? (peek) #\]))
+                (begin
+                  (advance) ;; consume ]
+                  (if (and (char? (peek)) (char=? (peek) #\%))
+                      (begin
+                        (advance) ;; consume final %
+                        (list 'body
+                              (list->string (reverse chars))
+                              start-line))
+                      ;; false alarm: %] without trailing %
+                      (loop (cons #\] (cons #\% chars)) in-string)))
+                ;; bare % in CSP (modulo operator)
+                (loop (cons c chars) in-string)))
+           (else
+            (loop (cons c chars) in-string)))))))
+
   (define (next-token)
     (let ((c (peek)))
       (cond
@@ -167,6 +212,20 @@
         (if (and (char? (peek)) (char=? (peek) #\/))
             (begin (skip-line-comment) (next-token))
             (sys-error "unexpected '/' at line "
+                       (number->string line))))
+       ;; %[% inline CSP body
+       ((char=? c #\%)
+        (advance)
+        (if (and (char? (peek)) (char=? (peek) #\[))
+            (begin
+              (advance) ;; consume [
+              (if (and (char? (peek)) (char=? (peek) #\%))
+                  (begin
+                    (advance) ;; consume %
+                    (read-csp-body))
+                  (sys-error "expected %[% at line "
+                             (number->string line))))
+            (sys-error "unexpected '%' at line "
                        (number->string line))))
        ;; identifier or keyword
        ((char-alphabetic? c)
@@ -317,40 +376,16 @@
               (list 'process name body (reverse ports))))))))
 
 (define (parse-process-body ts)
-  ;; STRING_LIT | "begin" csp_text "end"
-  (if (eq? (ts-peek-kind ts) 'string)
-      ;; external file reference
-      (list 'external (cadr (ts-advance! ts)))
-      ;; inline body: collect tokens between begin/end (tracking nesting)
-      (begin
-        (ts-expect! ts 'keyword "begin")
-        (let loop ((depth 1) (body-tokens '()))
-          (let ((tok (ts-advance! ts)))
-            (cond
-             ((eq? (car tok) 'eof)
-              (sys-error "unexpected end of file in inline process body"))
-             ((and (eq? (car tok) 'keyword) (equal? (cadr tok) "begin"))
-              (loop (+ depth 1) (cons tok body-tokens)))
-             ((and (eq? (car tok) 'keyword) (equal? (cadr tok) "end"))
-              (if (= depth 1)
-                  (list 'inline (tokens->csp-text (reverse body-tokens)))
-                  (loop (- depth 1) (cons tok body-tokens))))
-             (else
-              (loop depth (cons tok body-tokens)))))))))
-
-(define (tokens->csp-text tokens)
-  ;; Reconstruct approximate CSP source text from a token list.
-  (apply string-append
-         (map (lambda (tok)
-                (let ((kind (car tok))
-                      (val  (cadr tok)))
-                  (string-append
-                   (cond
-                    ((eq? kind 'string) (string-append "\"" val "\""))
-                    ((eq? kind 'int) (number->string val))
-                    (else val))
-                   " ")))
-              tokens)))
+  ;; STRING_LIT | %[% csp_text %]%
+  (cond
+   ((eq? (ts-peek-kind ts) 'string)
+    (list 'external (cadr (ts-advance! ts))))
+   ((eq? (ts-peek-kind ts) 'body)
+    (list 'inline (cadr (ts-advance! ts))))
+   (else
+    (sys-error "expected string or %[% but got '"
+               (ts-peek-value ts) "' at line "
+               (number->string (ts-peek-line ts))))))
 
 (define (parse-port-decl ts)
   ;; "port" direction IDENT ":" "channel" "(" INTEGER ")"
@@ -575,6 +610,7 @@
              (let ((tmp-path (string-append tmp-dir escaped ".csp")))
                (let ((p (open-output-file tmp-path)))
                  (display (cadr body) p)
+                 (newline p)
                  (close-output-port p))
                tmp-path))
             (else

@@ -1,7 +1,5 @@
 system Minimal;
-  process Hello = begin
-    print("hello!")
-  end;
+  process Hello = %[% print("hello!") %]%;
 begin
   var h : Hello;
 end.
