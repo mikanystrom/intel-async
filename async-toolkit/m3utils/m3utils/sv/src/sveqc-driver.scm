@@ -46,9 +46,12 @@
   (width-reset!)
 
   (define name (module-name mod))
+  (define params (module-params mod))
   (define ports (module-ports mod))
   (define body (module-body-items mod))
 
+  ;; Process parameters first (for parametric widths)
+  (if params (extract-param-defaults params))
   (extract-port-widths ports)
   (extract-decl-widths body)
 
@@ -114,6 +117,8 @@
   (width-reset!)
 
   (define name-1 (module-name mod-1))
+  (define params-1 (module-params mod-1))
+  (if params-1 (extract-param-defaults params-1))
   (extract-port-widths (module-ports mod-1))
   (extract-decl-widths (module-body-items mod-1))
 
@@ -140,6 +145,8 @@
   (width-reset!)
 
   (define name-2 (module-name mod-2))
+  (define params-2 (module-params mod-2))
+  (if params-2 (extract-param-defaults params-2))
   (extract-port-widths (module-ports mod-2))
   (extract-decl-widths (module-body-items mod-2))
 
