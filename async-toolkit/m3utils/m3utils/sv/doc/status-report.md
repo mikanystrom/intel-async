@@ -13,18 +13,18 @@ S-expression ASTs.
 ### Architecture
 
 ```
-  SystemVerilog        S-expression AST          Gate Netlist
+  SystemVerilog        S-expression AST          Gate Netlist / C eval
   source file    -->   (via svfe --scm)    -->   (via svsynth)
       |                      |                        |
-      |                 svbase.scm                    |
-      |                 svlint.scm              svgates.scm
-      |                 svgen.scm               svverify.scm
-      |                 svsynth.scm              svfec.scm
-      |                      |                        |
+   svpp.py              svbase.scm              svemit.scm (gate SV)
+  (preprocessor)        svbv.scm (BDD)          svemit-c.scm (C code)
+      |                 svlint.scm                    |
+      |                 svgen.scm               Verification
+      |                      |                  (FEC / exhaustive / C)
       +------+---------------+------------------------+
              |
-        Verification
-        (iverilog / Scheme FEC / exhaustive eval)
+        sveqc (equivalence checking)
+        svlint (RTL lint)
 ```
 
 ### Components
@@ -33,16 +33,76 @@ S-expression ASTs.
 |------|----------|-------------|
 | `sv/svparse/` | Modula-3 | LR(1) parser for SystemVerilog (`.t`/`.l`/`.y`/`.e` grammar) |
 | `sv/svparse/.../svfe` | Binary | Parser frontend: `svfe [--scm] file.sv` |
-| `sv/svsynth/` | Modula-3 | `svsynth` interpreter = mscheme + BDD primitives |
-| `sv/svsynth/.../BDDPrims.m3` | Modula-3 | BDD primitives for mscheme (26 primitives) |
-| `sv/src/svbase.scm` | Scheme | AST navigation, file I/O, utility functions |
-| `sv/src/svsynth.scm` | Scheme | RTL-to-BDD compiler (expression/statement/module) |
-| `sv/src/svgates.scm` | Scheme | Gate library + BDD-to-gate technology mapper |
-| `sv/src/svverify.scm` | Scheme | Exhaustive functional equivalence verifier |
-| `sv/src/svfec.scm` | Scheme | BDD-based Formal Equivalence Checking (FEC) |
-| `sv/src/svlint.scm` | Scheme | Lint checks on ASTs |
+| `sv/svsynth/` | Modula-3 | `svsynth` interpreter = mscheme + BDD primitives (22 primitives) |
+| `sv/src/svpp.py` | Python | Standalone preprocessor (`` `define ``, `` `ifdef ``, `` `include ``, etc.) |
+| `sv/src/svbase.scm` | Scheme | AST navigation, file I/O, signal collection, utility functions |
+| `sv/src/svbv.scm` | Scheme | Bit-level BDD synthesis engine (multi-bit, LRM-correct widths) |
+| `sv/src/svemit.scm` | Scheme | BDD-to-gate-level SV emitter (Shannon expansion MUX decomposition) |
+| `sv/src/svemit-c.scm` | Scheme | BDD-to-C emitter (generates static inline eval functions) |
+| `sv/src/svlint.scm` | Scheme | RTL lint checks (7 rules) |
 | `sv/src/svgen.scm` | Scheme | SystemVerilog regeneration from AST |
-| `sv/tests/verify/` | Verilog/Scheme | Test designs, gate netlists, iverilog testbenches |
+
+### Tools
+
+| Tool | Script | Description |
+|------|--------|-------------|
+| svlint | `sv/svlint/run-svlint.sh` | RTL lint (undriven, unused, multi-driver, latches, loops, widths, blocking-in-ff) |
+| sveqc | `sv/sveqc/run-sveqc.sh` | Self-equivalence check (RTL → BDD → gate SV → BDD → compare) |
+| 6502 gen | `sv/6502/gen-c-eval.sh` | Generate C eval functions from ALU BDDs |
+| 6502 test | `sv/6502/run-6502-tests.sh` | Full 6502 test suite (BDD gen + ALU exhaustive + Dormann) |
+
+---
+
+## Parser Status
+
+The svfe parser supports a broad subset of SystemVerilog including:
+modules, packages, interfaces, modports, typedefs, enums, structs,
+always_ff/comb/latch, if/case/for/while/generate, functions/tasks,
+delay controls, event controls, real/time types, float literals,
+full expression hierarchy, module instantiation, signed/unsigned,
+type casts, streaming operators, DPI-C export, escaped identifiers,
+unique/priority case.
+
+### Parser Test Results
+
+| Test Suite | Files | Pass | Status |
+|------------|-------|------|--------|
+| sv/tests/verify/ | 21 | 21 | 100% |
+| ibex/rtl/ | 30 | 30 | 100% |
+| ibex prim/rtl/ | 161 | 161 | 100% |
+
+---
+
+## BDD Synthesis Engine (svbv.scm)
+
+The bit-level BDD synthesis engine handles:
+- Multi-bit signals with LRM-correct width inference
+- Arithmetic (+, -, *), bitwise (&, |, ^, ~), comparison (<, <=, ==, !=)
+- Concatenation on both LHS and RHS
+- Part-select (range), bit-select (index)
+- Reduction operators (&, |, ^)
+- Shift operators (<<, >>)
+- Ternary (? :), case statements with default
+- localparam/parameter constant evaluation
+- always_comb, always @(*) combinational blocks
+
+### BDD Synthesis Tests (8 modules)
+
+| Design | Description | Status |
+|--------|-------------|--------|
+| 4-bit adder | Carry-chain addition | PASS |
+| 4-bit subtractor | Two's complement subtraction | PASS |
+| 4-bit bitwise ops | AND/OR/XOR/NOT | PASS |
+| 4-bit comparator | All comparison operators | PASS |
+| 4-bit wide mux | 4-input multiplexer | PASS |
+| 8-bit reductions | Reduction AND/OR/XOR | PASS |
+| 4-bit shifts | Logical left/right shifts | PASS |
+| 8-bit range/index | Part-select and bit-select | PASS |
+
+### Round-trip Verification
+
+Behavioral SV → BDDs → gate-level SV → BDDs → compare:
+all outputs match (symbolic BDD comparison, not enumeration).
 
 ---
 
@@ -70,160 +130,68 @@ Standard cell library with behavioral Verilog models for simulation:
 
 ---
 
-## Synthesis Pipeline
+## 6502 CPU Model
 
-The BDD-to-gate technology mapper (`svgates.scm`) performs
-Shannon expansion with pattern recognition:
+### ALU (sv/6502/rtl/ALU.sv)
 
-1. **Parse** RTL to S-expression AST (svfe --scm)
-2. **Build BDDs** for each output signal (svsynth.scm)
-3. **Map** BDD nodes to gate instances (svgates.scm):
-   - BDD TRUE → TIEH
-   - BDD FALSE → TIEL
-   - ITE(v, TRUE, FALSE) → wire (pure variable)
-   - ITE(v, FALSE, TRUE) → INV
-   - ITE(a, b, FALSE) → AND2
-   - ITE(a, TRUE, b) → OR2
-   - ITE(a, NOT b, TRUE) → NAND2
-   - ITE(a, FALSE, NOT b) → NOR2
-   - ITE(a, NOT b, b) → XOR2
-   - ITE(a, b, NOT b) → XNOR2
-   - General case → MUX2(A=low, B=high, S=var)
-4. **Emit** structural Verilog netlist
+Pure combinational ALU supporting 15 operations (ADC, SBC, AND, ORA,
+EOR, ASL, LSR, ROL, ROR, INC, DEC, CMP, BIT, PASS_A, PASS).
 
----
+BDD synthesis produces ~17K total BDD nodes across 5 output signals.
+The BDD-to-C emitter generates ~12K temp variables in the C eval header.
 
-## Verification Methods
+### Exhaustive ALU Verification
 
-Three independent verification approaches confirm correctness:
+The BDD-generated C evaluation functions are verified against a
+reference C implementation for all input combinations:
 
-### 1. Exhaustive Simulation (svverify.scm)
+- 15 ops × 256 a × 256 operand × 2 carry = **1,966,080 test vectors**
+- Checks: result, carry_out, zero_out, sign_out, overflow_out
+- **All pass (0 failures)**
 
-The Scheme-based functional verifier evaluates **both** the BDD
-and the gate netlist for every possible input combination and
-compares results.
+### Reference Emulator (fake6502)
 
-- Runs inside mscheme — no external simulator required
-- Provides exact counterexample vectors on failure
-- Practical for designs up to ~20 inputs (2^20 = 1M vectors)
-- Tests the gate evaluator independently of the BDD library
-
-### 2. Formal Equivalence Checking (svfec.scm)
-
-BDD-based FEC proves equivalence for **all** input combinations
-without enumerating them:
-
-1. Build BDD from the original RTL expressions ("golden" reference)
-2. Rebuild BDD from the gate netlist by interpreting each gate
-   as a Boolean equation (INV→NOT, AND2→AND, MUX2→ITE, etc.)
-3. Compare with `bdd-equal?` — canonical BDDs are equal iff the
-   functions are identical
-
-This is the same methodology used by commercial FEC tools
-(Synopsys Formality, Cadence Conformal).  It scales to
-arbitrarily many inputs since there is no enumeration.
-
-For **sequential designs**, the combinational cones between
-register Q outputs (treated as primary inputs) and register D
-inputs (treated as primary outputs) form the equivalence points.
-This register-to-register FEC is planned but not yet implemented
-in the automated pipeline.
-
-### 3. iverilog Simulation
-
-Standard Verilog simulation using Icarus Verilog:
-
-- Compiles both RTL and gate-level netlist with cell library
-- Testbench exhaustively applies all input combinations
-- Cycle-by-cycle output comparison
-- Validates that emitted Verilog is syntactically correct and
-  accepted by a third-party tool
+The fake6502 reference emulator passes Klaus Dormann's 6502 functional
+test suite:
+- **30,646,179 instructions, 96,561,376 cycles**
+- Success at PC = 0x3469
 
 ---
 
-## Test Results
+## RTL Lint (svlint)
 
-### Unit Tests (17 tests each)
+Seven lint rules operating on ASTs:
 
-| Test | svverify | svfec |
-|------|----------|-------|
-| const-true | PASS | EQUIVALENT |
-| const-false | PASS | EQUIVALENT |
-| wire | PASS | EQUIVALENT |
-| NOT | PASS | EQUIVALENT |
-| AND | PASS | EQUIVALENT |
-| OR | PASS | EQUIVALENT |
-| XOR | PASS | EQUIVALENT |
-| NAND | PASS | EQUIVALENT |
-| NOR | PASS | EQUIVALENT |
-| XNOR | PASS | EQUIVALENT |
-| IMPLIES | PASS | EQUIVALENT |
-| ITE | PASS | EQUIVALENT |
-| MUX4 | PASS | EQUIVALENT |
-| XOR-chain | PASS | EQUIVALENT |
-| complex | PASS | EQUIVALENT |
-| majority | PASS | EQUIVALENT |
-| parity | PASS | EQUIVALENT |
+| Rule | Description |
+|------|-------------|
+| Undriven outputs | Output ports with no driver |
+| Unused signals | Declared signals never read |
+| Multiple drivers | Same signal assigned in >1 always/assign |
+| Latch inference | Incomplete if/case in always_comb |
+| Combinational loops | Cycle in assign dependency graph |
+| Width mismatches | LHS/RHS width differ in assignments |
+| Blocking in FF | Blocking `=` in always_ff |
 
-### RTL Design Tests (12 designs)
-
-| Design | Inputs | Outputs | Gates | Vectors | svverify | svfec | iverilog |
-|--------|--------|---------|-------|---------|----------|-------|----------|
-| test_and2 | 2 | 1 | 1 | 4 | PASS | EQUIV | PASS |
-| test_or2 | 2 | 1 | 1 | 4 | PASS | EQUIV | — |
-| test_xor_chain | 4 | 1 | 5 | 16 | PASS | EQUIV | PASS |
-| test_mixed | 4 | 2 | 6 | 16 | PASS | EQUIV | PASS |
-| test_mux4 | 6 | 1 | 3 | 64 | PASS | EQUIV | PASS |
-| test_majority | 3 | 1 | 3 | 8 | PASS | EQUIV | — |
-| test_priority | 4 | 2 | 4 | 16 | PASS | EQUIV | — |
-| test_adder | 3 | 2 | 6 | 8 | PASS | EQUIV | PASS |
-| test_alu1 | 4 | 1 | 6 | 16 | PASS | EQUIV | PASS |
-| test_compare | 2 | 3 | 5 | 4 | PASS | EQUIV | PASS |
-| test_decoder | 2 | 4 | 6 | 4 | PASS | EQUIV | PASS |
-| test_parity8 | 8 | 1 | 13 | 256 | PASS | EQUIV | PASS |
-
-Total: **416 simulation vectors**, all passing.
-FEC: **12 modules, 19 outputs**, all formally proven equivalent.
-
-### Parser Test Results
-
-The svfe parser was tested on 25 open-source SystemVerilog files
-from ibex, cva6, PULP, PicoRV32, ZipCPU, and Surelog test suites:
-
-- **3/25 pass** (surelog_enum.sv, surelog_generate.sv, eth_mac_1g.v)
-- **22/25 fail** — common failure causes:
-  - Package imports (`import pkg::*`)
-  - `typedef` / `enum` / `struct` in module scope
-  - SystemVerilog `unique case`, `inside` operator
-  - Multi-dimensional arrays, parameterized types
-  - `for` loop variable declarations
-  - Interface/modport references
-
-The parser handles the core SV subset (modules, ports, wires,
-assigns, always blocks, basic expressions) but many real-world
-constructs remain unsupported.
+Test suite: 7/7 tests pass.
 
 ---
 
-## Bug Fixes This Session
+## Equivalence Checking (sveqc)
 
-1. **BDD wire cache collision** — `cache-lookup` used `bdd-id`
-   which returns the root variable id (not unique per node).
-   Multi-output modules got wrong results.  Fixed: use
-   `bdd-equal?` for cache key comparison.
+Self-equivalence check pipeline:
+1. Parse RTL → build BDDs for each output
+2. Emit gate-level SV from BDDs
+3. Re-parse gate-level SV → rebuild BDDs (sharing input variables)
+4. Compare output BDDs bit-by-bit with `bdd-equal?`
 
-2. **FEC variable identity** — `netlist-to-bdds` created fresh
-   BDD variables with `bdd-var`, getting different internal ids
-   from the RTL-side variables.  Fixed: reuse variables from
-   `*bdd-env*` so BDDs are directly comparable.
+Test results: **8/8 modules verified** (self-equivalence).
 
 ---
 
 ## Pending Work
 
-- [ ] Extend parser for remaining SV constructs (packages, typedefs, etc.)
-- [ ] Register-to-register FEC automation (parse sequential RTL,
-      identify register boundaries, verify combinational cones)
-- [ ] Multi-bit signal support in synthesizer
-- [ ] Gate count optimization (common subexpression sharing across outputs)
-- [ ] Timing-aware synthesis / area optimization
+- [ ] Synthesize full 6502 CPU combinational cones (decoder, address gen)
+- [ ] Multi-backend 6502 emulator (BDD-eval vs reference cycle comparison)
+- [ ] Register-to-register FEC automation
+- [ ] Gate count optimization (common subexpression sharing)
+- [ ] Extend parser: import "DPI-C", packed unions
