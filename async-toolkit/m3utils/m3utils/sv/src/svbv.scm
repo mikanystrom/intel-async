@@ -25,6 +25,35 @@
 ;; 1. BIT-VECTOR PRIMITIVES
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; --- BDD cut mechanism ---
+;; When a BDD exceeds *bv-cut-threshold* nodes, replace it with a fresh
+;; BDD variable and record the definition in *bv-cuts*.  This breaks
+;; deep carry chains into shallow multi-level networks.
+;; Set to #f to disable (default: disabled).
+(define *bv-cut-threshold* #f)
+(define *bv-cuts* '())
+(define *bv-cut-counter* 0)
+
+(define (bv-cuts-reset!)
+  (set! *bv-cuts* '())
+  (set! *bv-cut-counter* 0))
+
+;; If bdd exceeds the cut threshold, replace with a fresh variable.
+;; hint is a string used to name the cut wire (e.g. "carry_3").
+;; Returns the (possibly replaced) bdd.
+(define (bdd-maybe-cut bdd hint)
+  (if (or (not *bv-cut-threshold*)
+          (bdd-true? bdd)
+          (bdd-false? bdd)
+          (<= (bdd-size bdd) *bv-cut-threshold*))
+      bdd
+      (let* ((name (string-append "_cut_" hint "_"
+                      (number->string *bv-cut-counter*)))
+             (fresh (bdd-var name)))
+        (set! *bv-cut-counter* (+ *bv-cut-counter* 1))
+        (set! *bv-cuts* (cons (cons name bdd) *bv-cuts*))
+        fresh)))
+
 ;; Constant bit-vectors
 (define (bv-const val width)
   ;; val is an integer, width is the number of bits
@@ -188,6 +217,8 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; Ripple-carry adder.  Returns (width+1)-bit result (includes carry).
+;; When *bv-cut-threshold* is set, carries that exceed the threshold
+;; are replaced with fresh BDD variables (cut points).
 (define (bv-add-full a b)
   (let ((w (length a)))
     (let loop ((i 0) (carry (bdd-false)) (acc '()))
@@ -198,7 +229,9 @@
                  (sum (bdd-xor (bdd-xor ai bi) carry))
                  (cout (bdd-or (bdd-and ai bi)
                                (bdd-or (bdd-and ai carry)
-                                       (bdd-and bi carry)))))
+                                       (bdd-and bi carry))))
+                 (cout (bdd-maybe-cut cout
+                         (string-append "carry_" (number->string i)))))
             (loop (+ i 1) cout (append acc (list sum))))))))
 
 ;; Add, truncated to max(width-a, width-b) bits
@@ -245,7 +278,9 @@
                  (sum (bdd-xor (bdd-xor ai bi) carry))
                  (cout (bdd-or (bdd-and ai bi)
                                (bdd-or (bdd-and ai carry)
-                                       (bdd-and bi carry)))))
+                                       (bdd-and bi carry))))
+                 (cout (bdd-maybe-cut cout
+                         (string-append "borrow_" (number->string i)))))
             (loop (+ i 1) cout (append acc (list sum))))))))
 
 
@@ -280,7 +315,9 @@
                  (bi (bdd-not (list-ref b1 i)))
                  (cout (bdd-or (bdd-and ai bi)
                                (bdd-or (bdd-and ai carry)
-                                       (bdd-and bi carry)))))
+                                       (bdd-and bi carry))))
+                 (cout (bdd-maybe-cut cout
+                         (string-append "cmp_" (number->string i)))))
             (loop (+ i 1) cout acc))))))
 
 ;; Unsigned greater-than: a > b
@@ -573,7 +610,8 @@
 
 (define (bv-env-reset!)
   (set! *bv-env* '())
-  (set! *bv-func-table* '()))
+  (set! *bv-func-table* '())
+  (bv-cuts-reset!))
 
 ;; (bv-lookup name) -- find or create BDD variables for signal NAME.
 ;; Returns a bit-vector (list of BDDs).
