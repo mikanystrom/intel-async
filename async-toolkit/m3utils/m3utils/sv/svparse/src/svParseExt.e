@@ -42,7 +42,6 @@ description: { val : TEXT; cnt : INTEGER; }
   import     { $$.val := $1 }
   param      { $$.val := $1 }
   localparam { $$.val := $1 }
-  directive  { $$.val := "" }
   null       { $$.val := "" }
 
 package_declaration: { val : TEXT; cnt : INTEGER; }
@@ -59,7 +58,6 @@ package_item: { val : TEXT; cnt : INTEGER; }
   function   { $$.val := $1 }
   task       { $$.val := $1 }
   import     { $$.val := $1 }
-  directive  { $$.val := "" }
 
 import_declaration: { val : TEXT; cnt : INTEGER; }
   x  { $$.val := "(import " & $1 & ")" }
@@ -123,6 +121,8 @@ port_decl: { val : TEXT; cnt : INTEGER; }
   user_typed  { $$.val := "(port " & $1 & " " & $2 & " (id " & $3 & " " & $4 & "))" }
   dir_only    { $$.val := "(port " & $1 & " " & $2 & $3 & ")" }
   implicit_dims { $$.val := "(port " & $1 & " logic " & $2 & " " & $3 & ")" }
+  signed_dims   { $$.val := "(port " & $1 & " signed " & $2 & " " & $3 & ")" }
+  unsigned_dims { $$.val := "(port " & $1 & " unsigned " & $2 & " " & $3 & ")" }
   scoped_typed { $$.val := "(port " & $1 & " " & $2 & "::" & $3 & " (id " & $4 & " " & $5 & "))" }
   scoped_only  { $$.val := "(port " & $1 & "::" & $2 & " (id " & $3 & " " & $4 & "))" }
 
@@ -200,7 +200,6 @@ module_item: { val : TEXT; cnt : INTEGER; }
   import_item     { $$.val := $1 }
   function_item   { $$.val := $1 }
   task_item       { $$.val := $1 }
-  directive       { $$.val := "" }
   attribute       { $$.val := $2 }
   if_gen          { $$.val := "(if-generate " & $1 & " " & $2 & " " & $3 & ")" }
   for_gen         { $$.val := "(for-generate " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
@@ -395,7 +394,6 @@ statement: { val : TEXT; cnt : INTEGER; }
   delay_stmt     { $$.val := "(delay " & $1 & " " & $2 & ")" }
   event_ctrl_stmt { $$.val := "(event-ctrl " & $1 & " " & $2 & ")" }
   null_stmt      { $$.val := "(null)" }
-  directive      { $$.val := "(directive)" }
 
 opt_block_name: { val : TEXT; cnt : INTEGER; }
   yes    { $$.val := $1 }
@@ -446,6 +444,8 @@ for_step: { val : TEXT; cnt : INTEGER; }
   assign   { $$.val := Wrap2("=", $1, $2) }
   inc      { $$.val := "(++ " & $1 & ")" }
   dec      { $$.val := "(-- " & $1 & ")" }
+  preinc   { $$.val := "(++ " & $1 & ")" }
+  predec   { $$.val := "(-- " & $1 & ")" }
   passign  { $$.val := "(+= " & $1 & " " & $2 & ")" }
   massign  { $$.val := "(-= " & $1 & " " & $2 & ")" }
 
@@ -504,7 +504,6 @@ function_body_item: { val : TEXT; cnt : INTEGER; }
   param_decl     { $$.val := $1 }
   localparam_decl { $$.val := $1 }
   stmt           { $$.val := $1 }
-  directive      { $$.val := "(directive)" }
 
 task_declaration: { val : TEXT; cnt : INTEGER; }
   x  { $$.val := "(task " & $1 & " " & $2 & " " & $3 & ")" }
@@ -517,7 +516,6 @@ task_body_item: { val : TEXT; cnt : INTEGER; }
   decl      { $$.val := $1 }
   net_decl  { $$.val := $1 }
   stmt      { $$.val := $1 }
-  directive { $$.val := "(directive)" }
 
 opt_end_label: { val : TEXT; cnt : INTEGER; }
   yes    { $$.val := "" }
@@ -538,7 +536,6 @@ interface_item: { val : TEXT; cnt : INTEGER; }
   typedef_item   { $$.val := $1 }
   function_item  { $$.val := $1 }
   task_item      { $$.val := $1 }
-  directive      { $$.val := "(directive)" }
 
 modport_declaration: { val : TEXT; cnt : INTEGER; }
   x  { $$.val := "(modport " & $1 & " " & $2 & ")" }

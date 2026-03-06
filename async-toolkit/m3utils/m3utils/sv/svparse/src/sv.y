@@ -15,7 +15,6 @@ description:
   import                    import_declaration ';'
   param                     parameter_declaration ';'
   localparam                localparam_declaration ';'
-  directive                 T_DIRECTIVE
   null                      ';'
 
 
@@ -33,7 +32,6 @@ package_item:
   function                  function_declaration
   task                      task_declaration
   import                    import_declaration ';'
-  directive                 T_DIRECTIVE
 
 
 import_declaration:
@@ -99,6 +97,8 @@ port_decl:
   user_typed                port_direction T_IDENT T_IDENT opt_unpacked_dims
   dir_only                  port_direction T_IDENT dir_only_rest
   implicit_dims             port_direction packed_dim_list port_ident
+  signed_dims               port_direction T_SIGNED packed_dim_list port_ident
+  unsigned_dims             port_direction T_UNSIGNED packed_dim_list port_ident
   scoped_typed              port_direction T_IDENT T_SCOPE T_IDENT T_IDENT opt_unpacked_dims
   scoped_only               T_IDENT T_SCOPE T_IDENT T_IDENT opt_unpacked_dims
   user_typed_bare           T_IDENT T_IDENT opt_unpacked_dims
@@ -176,7 +176,6 @@ module_item:
   import_item               import_declaration ';'
   function_item             function_declaration
   task_item                 task_declaration
-  directive                 T_DIRECTIVE
   attribute                 T_ATTRIBUTE module_item
   if_gen                    T_IF '(' expression ')' generate_block opt_gen_else
   for_gen                   T_FOR '(' genvar_init ';' expression ';' genvar_step ')' generate_block
@@ -375,7 +374,6 @@ statement:
   delay_stmt                '#' expression statement
   event_ctrl_stmt           sensitivity statement
   null_stmt                 ';'
-  directive                 T_DIRECTIVE
 
 opt_block_name:
   yes                       ':' T_IDENT
@@ -487,7 +485,6 @@ function_body_item:
   param_decl                parameter_declaration ';'
   localparam_decl           localparam_declaration ';'
   stmt                      statement
-  directive                 T_DIRECTIVE
 
 task_declaration:
   x                         T_TASK opt_automatic T_IDENT opt_port_list ';' task_body T_ENDTASK opt_end_label
@@ -500,7 +497,6 @@ task_body_item:
   decl                      port_direction_declaration ';'
   net_decl                  net_declaration ';'
   stmt                      statement
-  directive                 T_DIRECTIVE
 
 opt_end_label:
   yes                       ':' T_IDENT
@@ -522,7 +518,6 @@ interface_item:
   typedef_item              typedef_declaration ';'
   function_item             function_declaration
   task_item                 task_declaration
-  directive                 T_DIRECTIVE
 
 modport_declaration:
   x                         T_MODPORT T_IDENT '(' modport_port_list ')'
