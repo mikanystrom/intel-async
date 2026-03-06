@@ -14,11 +14,12 @@ import sys, os, re, argparse
 
 class Macro:
     """A defined macro, possibly with parameters."""
-    __slots__ = ('body', 'params')
+    __slots__ = ('body', 'params', 'defaults')
 
-    def __init__(self, body, params=None):
+    def __init__(self, body, params=None, defaults=None):
         self.body = body
-        self.params = params  # None = simple macro, list = parameterized
+        self.params = params  # None = simple macro, list = param names
+        self.defaults = defaults  # None or list of default values (None = no default)
 
 
 def preprocess(filename, defines, include_dirs, seen_files=None):
@@ -43,7 +44,10 @@ def preprocess(filename, defines, include_dirs, seen_files=None):
     def is_active():
         return all(active for active, _ in cond_stack)
 
-    for line in lines:
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        i += 1
         stripped = line.rstrip('\n').rstrip('\r')
         m = re.match(r'\s*`(\w+)(.*)', stripped)
         if m:
@@ -51,9 +55,15 @@ def preprocess(filename, defines, include_dirs, seen_files=None):
             rest = m.group(2)
 
             if directive == 'define':
-                if is_active():
-                    parse_define(rest.strip(), defines)
+                # Join backslash-continuation lines
+                full_rest = rest
                 output.append('\n')
+                while full_rest.rstrip().endswith('\\') and i < len(lines):
+                    full_rest = full_rest.rstrip()[:-1] + ' ' + lines[i].rstrip('\n').rstrip('\r')
+                    i += 1
+                    output.append('\n')
+                if is_active():
+                    parse_define(full_rest.strip(), defines)
                 continue
 
             elif directive == 'undef':
@@ -123,7 +133,17 @@ def preprocess(filename, defines, include_dirs, seen_files=None):
             output.append('\n')
             continue
 
-        output.append(expand_macros(stripped, defines) + '\n')
+        # Join continuation lines for multi-line macro invocations
+        joined = stripped
+        extra_lines = 0
+        while has_unclosed_macro_args(joined, defines) and i < len(lines):
+            joined += '\n' + lines[i].rstrip('\n').rstrip('\r')
+            i += 1
+            extra_lines += 1
+
+        expanded = expand_macros(joined, defines)
+        for exp_line in expanded.split('\n'):
+            output.append(exp_line + '\n')
 
     return output
 
@@ -134,13 +154,46 @@ def parse_define(rest, defines):
     m = re.match(r'(\w+)\(([^)]*)\)\s*(.*)', rest)
     if m:
         name = m.group(1)
-        params = [p.strip() for p in m.group(2).split(',')]
+        raw_params = [p.strip() for p in m.group(2).split(',')]
         body = m.group(3)
-        defines[name] = Macro(body, params)
+        params = []
+        defaults = []
+        for p in raw_params:
+            if '=' in p:
+                pname, pdefault = p.split('=', 1)
+                params.append(pname.strip())
+                defaults.append(pdefault.strip())
+            else:
+                params.append(p)
+                defaults.append(None)
+        defines[name] = Macro(body, params, defaults)
     else:
         m = re.match(r'(\w+)\s*(.*)', rest)
         if m:
             defines[m.group(1)] = Macro(m.group(2))
+
+
+def has_unclosed_macro_args(text, defines):
+    """Check if text contains a known parameterized macro with unclosed parens."""
+    for m in re.finditer(r'`(\w+)', text):
+        name = m.group(1)
+        if name in defines:
+            macro = defines[name]
+            if isinstance(macro, Macro) and macro.params is not None:
+                after = m.end()
+                if after < len(text) and text[after] == '(':
+                    # Count parens from here
+                    depth = 0
+                    for c in text[after:]:
+                        if c == '(':
+                            depth += 1
+                        elif c == ')':
+                            depth -= 1
+                            if depth == 0:
+                                break
+                    if depth > 0:
+                        return True
+    return False
 
 
 def expand_macros(line, defines):
@@ -151,7 +204,45 @@ def expand_macros(line, defines):
         if new_line == line:
             break
         line = new_line
+    # Process conditional directives that emerged from macro expansion
+    line = _process_inline_conditionals(line, defines)
     return line
+
+
+def _process_inline_conditionals(text, defines):
+    """Handle `ifdef/`ifndef/`else/`endif that appear after macro expansion."""
+    # These can appear on a single line from multi-line macro bodies joined together
+    cond_re = re.compile(r'`(ifdef|ifndef|elsif|else|endif)\b\s*(\w*)')
+    if not cond_re.search(text):
+        return text
+    # Process by splitting into segments
+    result = []
+    cond_stack = []
+    pos = 0
+    for m in cond_re.finditer(text):
+        directive = m.group(1)
+        name = m.group(2)
+        # Add text before this directive if currently active
+        if all(cond_stack) if cond_stack else True:
+            result.append(text[pos:m.start()])
+        if directive == 'ifdef':
+            cond_stack.append(name in defines)
+        elif directive == 'ifndef':
+            cond_stack.append(name not in defines)
+        elif directive == 'else':
+            if cond_stack:
+                cond_stack[-1] = not cond_stack[-1]
+        elif directive == 'elsif':
+            if cond_stack:
+                cond_stack[-1] = name in defines
+        elif directive == 'endif':
+            if cond_stack:
+                cond_stack.pop()
+        pos = m.end()
+    # Add remaining text
+    if all(cond_stack) if cond_stack else True:
+        result.append(text[pos:])
+    return ''.join(result)
 
 
 def _expand_once(line, defines):
@@ -170,8 +261,17 @@ def _expand_once(line, defines):
                         # Parameterized macro — look for (args)
                         args, end = parse_macro_args(line, after)
                         if args is not None:
+                            # Fill in defaults for missing arguments
+                            full_args = list(args)
+                            if macro.defaults:
+                                while len(full_args) < len(macro.params):
+                                    idx = len(full_args)
+                                    if idx < len(macro.defaults) and macro.defaults[idx] is not None:
+                                        full_args.append(macro.defaults[idx])
+                                    else:
+                                        break
                             body = macro.body
-                            for p, a in zip(macro.params, args):
+                            for p, a in zip(macro.params, full_args):
                                 body = body.replace(p, a)
                             result.append(body)
                             i = end
