@@ -128,6 +128,7 @@ port_decl: { val : TEXT; cnt : INTEGER; }
 
   user_typed_bare { $$.val := "(port " & $1 & " (id " & $2 & " " & $3 & "))" }
   interface_port { $$.val := "(port-if " & $1 & "." & $2 & " (id " & $3 & " " & $4 & "))" }
+  wire_bare   { $$.val := "(port wire (id " & $1 & " " & $2 & "))" }
   dotnamed    { $$.val := "(port-named " & $1 & " " & $2 & ")" }
   dotstar     { $$.val := "(port-dotstar)" }
   ident_only  { $$.val := "(port-ident " & $1 & ")" }
@@ -410,7 +411,6 @@ opt_else: { val : TEXT; cnt : INTEGER; }
 opt_assert_else: { val : TEXT; cnt : INTEGER; }
   yes    { $$.val := $1 }
   bare   { $$.val := "()" }
-  empty  { $$.val := "()" }
 
 case_keyword: { val : TEXT; cnt : INTEGER; }
   case           { $$.val := "case" }

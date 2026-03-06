@@ -125,7 +125,7 @@ T_SYSIDENT      "$"{IDENT}
 
 T_DIRECTIVE     "`"{IDENT}([^\n]*"\n")?
 
-T_IDENT         {IDENT}
+T_IDENT         {IDENT}|"\\"[^ \t\r\n]+
 
 T_ATTRIBUTE     "(*"([^*]|"*"[^)])*"*)"
 
