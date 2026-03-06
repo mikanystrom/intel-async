@@ -64,12 +64,15 @@ param_port_list:
 
 param_port_decl:
   param_typed               T_PARAMETER data_type T_IDENT '=' expression
+  param_typed_dims          T_PARAMETER data_type T_IDENT unpacked_dim_list '=' expression
   param_bare                T_PARAMETER T_IDENT param_ident_rest
   param_range               T_PARAMETER opt_signing packed_dim_list T_IDENT '=' expression
   localparam_typed          T_LOCALPARAM data_type T_IDENT '=' expression
+  localparam_typed_dims     T_LOCALPARAM data_type T_IDENT unpacked_dim_list '=' expression
   localparam_bare           T_LOCALPARAM T_IDENT param_ident_rest
   localparam_range          T_LOCALPARAM opt_signing packed_dim_list T_IDENT '=' expression
   bare_typed                data_type T_IDENT '=' expression
+  bare_typed_dims           data_type T_IDENT unpacked_dim_list '=' expression
   bare_range                opt_signing packed_dim_list T_IDENT '=' expression
   bare_bare                 T_IDENT param_ident_rest
   param_type                T_PARAMETER T_TYPE T_IDENT '=' data_type_or_implicit
@@ -94,16 +97,24 @@ port_decl:
   logic                     port_direction T_LOGIC opt_signing opt_packed_dims port_ident
   integer                   port_direction T_INTEGER port_ident
   int                       port_direction T_INT opt_signing port_ident
+  string_dir                port_direction T_STRING port_ident
   user_typed                port_direction T_IDENT T_IDENT opt_unpacked_dims
   dir_only                  port_direction T_IDENT dir_only_rest
   implicit_dims             port_direction packed_dim_list port_ident
   signed_dims               port_direction T_SIGNED packed_dim_list port_ident
   unsigned_dims             port_direction T_UNSIGNED packed_dim_list port_ident
   scoped_typed              port_direction T_IDENT T_SCOPE T_IDENT T_IDENT opt_unpacked_dims
+  scoped_typed_dims         port_direction T_IDENT T_SCOPE T_IDENT packed_dim_list T_IDENT opt_unpacked_dims
   scoped_only               T_IDENT T_SCOPE T_IDENT T_IDENT opt_unpacked_dims
+  scoped_only_dims          T_IDENT T_SCOPE T_IDENT packed_dim_list T_IDENT opt_unpacked_dims
   user_typed_bare           T_IDENT T_IDENT opt_unpacked_dims
   interface_port            T_IDENT '.' T_IDENT T_IDENT opt_unpacked_dims
   wire_bare                 T_WIRE T_IDENT opt_unpacked_dims
+  bare_logic                T_LOGIC opt_signing opt_packed_dims port_ident
+  bare_int                  T_INT opt_signing port_ident
+  bare_integer              T_INTEGER port_ident
+  bare_bit                  T_BIT opt_signing opt_packed_dims port_ident
+  bare_string               T_STRING port_ident
   dotnamed                  '.' T_IDENT '(' opt_expression ')'
   dotstar                   T_DOTSTAR
   ident_only                T_IDENT
@@ -170,6 +181,7 @@ module_item:
   assign_stmt               continuous_assign ';'
   always_block              always_construct
   initial_block             T_INITIAL statement
+  final_block               T_FINAL statement
   generate_block            generate_region
   genvar_decl               T_GENVAR genvar_id_list ';'
   ident_item                T_IDENT ident_item_tail
@@ -326,6 +338,7 @@ always_construct:
   comb                      T_ALWAYS_COMB statement
   ff                        T_ALWAYS_FF sensitivity statement
   latch                     T_ALWAYS_LATCH sensitivity statement
+  latch_nosens              T_ALWAYS_LATCH statement
 
 sensitivity:
   list                      '@' '(' sensitivity_list ')'
@@ -374,6 +387,7 @@ statement:
   assert_stmt               T_ASSERT '(' expression ')' opt_assert_else
   delay_stmt                '#' expression statement
   event_ctrl_stmt           sensitivity statement
+  void_cast                 T_VOID '\'' '(' expression ')' ';'
   null_stmt                 ';'
 
 opt_block_name:
@@ -397,7 +411,11 @@ case_keyword:
   casez                     T_CASEZ
   casex                     T_CASEX
   unique_case               T_UNIQUE T_CASE
+  unique_casez              T_UNIQUE T_CASEZ
+  unique_casex              T_UNIQUE T_CASEX
   priority_case             T_PRIORITY T_CASE
+  priority_casez            T_PRIORITY T_CASEZ
+  priority_casex            T_PRIORITY T_CASEX
 
 case_item_list:
   single                    case_item
@@ -434,6 +452,7 @@ statement_list:
   cons                      statement_list statement
   local_decl                statement_list net_declaration ';'
   auto_decl                 statement_list T_AUTOMATIC net_declaration ';'
+  static_decl               statement_list T_STATIC net_declaration ';'
   local_param               statement_list localparam_declaration ';'
   local_parameter            statement_list parameter_declaration ';'
 
@@ -716,6 +735,7 @@ assign_pattern_list:
 
 assign_pattern_item:
   named                     T_IDENT ':' expression
+  default                   T_DEFAULT ':' expression
   positional                expression
 
 hierarchical_id:

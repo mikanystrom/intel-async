@@ -48,12 +48,14 @@ T_GENERATE      "generate"
 T_ENDGENERATE   "endgenerate"
 T_GENVAR        "genvar"
 T_INITIAL       "initial"
+T_FINAL         "final"
 T_FUNCTION      "function"
 T_ENDFUNCTION   "endfunction"
 T_TASK          "task"
 T_ENDTASK       "endtask"
 T_RETURN        "return"
 T_AUTOMATIC     "automatic"
+T_STATIC        "static"
 T_PACKAGE       "package"
 T_ENDPACKAGE    "endpackage"
 T_IMPORT        "import"
@@ -121,7 +123,7 @@ T_NUMBER        ({DIGIT}({DIGIT}|"_")*"'"[sS]?{BASE}" "?{HEXDIG}+)|("'"[sS]?{BAS
 
 T_STRLIT        \"([^"\\]|\\.)*\"
 
-T_SYSIDENT      "$"{IDENT}
+T_SYSIDENT      "$"{IDENT}("$"{IDENT})*
 
 T_DIRECTIVE     "`"{IDENT}([^\n]*"\n")?
 

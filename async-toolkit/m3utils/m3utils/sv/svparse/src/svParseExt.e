@@ -88,12 +88,15 @@ param_port_list: { val : TEXT; cnt : INTEGER; }
 
 param_port_decl: { val : TEXT; cnt : INTEGER; }
   param_typed      { $$.val := "(parameter " & $1 & " " & $2 & " " & $3 & ")" }
+  param_typed_dims { $$.val := "(parameter " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
   param_bare       { $$.val := "(parameter " & $1 & $2 & ")" }
   param_range      { $$.val := "(parameter " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
   localparam_typed { $$.val := "(localparam " & $1 & " " & $2 & " " & $3 & ")" }
+  localparam_typed_dims { $$.val := "(localparam " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
   localparam_bare  { $$.val := "(localparam " & $1 & $2 & ")" }
   localparam_range { $$.val := "(localparam " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
   bare_typed       { $$.val := "(parameter " & $1 & " " & $2 & " " & $3 & ")" }
+  bare_typed_dims  { $$.val := "(parameter " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
   bare_range       { $$.val := "(parameter " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
   bare_bare        { $$.val := "(parameter " & $1 & $2 & ")" }
   param_type       { $$.val := "(parameter-type " & $1 & " " & $2 & ")" }
@@ -118,17 +121,25 @@ port_decl: { val : TEXT; cnt : INTEGER; }
   logic       { $$.val := "(port " & $1 & " logic " & $2 & " " & $3 & " " & $4 & ")" }
   integer     { $$.val := "(port " & $1 & " integer " & $2 & ")" }
   int         { $$.val := "(port " & $1 & " int " & $2 & " " & $3 & ")" }
+  string_dir  { $$.val := "(port " & $1 & " string " & $2 & ")" }
   user_typed  { $$.val := "(port " & $1 & " " & $2 & " (id " & $3 & " " & $4 & "))" }
   dir_only    { $$.val := "(port " & $1 & " " & $2 & $3 & ")" }
   implicit_dims { $$.val := "(port " & $1 & " logic " & $2 & " " & $3 & ")" }
   signed_dims   { $$.val := "(port " & $1 & " signed " & $2 & " " & $3 & ")" }
   unsigned_dims { $$.val := "(port " & $1 & " unsigned " & $2 & " " & $3 & ")" }
   scoped_typed { $$.val := "(port " & $1 & " " & $2 & "::" & $3 & " (id " & $4 & " " & $5 & "))" }
+  scoped_typed_dims { $$.val := "(port " & $1 & " " & $2 & "::" & $3 & " " & $4 & " (id " & $5 & " " & $6 & "))" }
   scoped_only  { $$.val := "(port " & $1 & "::" & $2 & " (id " & $3 & " " & $4 & "))" }
+  scoped_only_dims { $$.val := "(port " & $1 & "::" & $2 & " " & $3 & " (id " & $4 & " " & $5 & "))" }
 
   user_typed_bare { $$.val := "(port " & $1 & " (id " & $2 & " " & $3 & "))" }
   interface_port { $$.val := "(port-if " & $1 & "." & $2 & " (id " & $3 & " " & $4 & "))" }
   wire_bare   { $$.val := "(port wire (id " & $1 & " " & $2 & "))" }
+  bare_logic  { $$.val := "(port logic " & $1 & " " & $2 & " " & $3 & ")" }
+  bare_int    { $$.val := "(port int " & $1 & " " & $2 & ")" }
+  bare_integer { $$.val := "(port integer " & $1 & ")" }
+  bare_bit    { $$.val := "(port bit " & $1 & " " & $2 & " " & $3 & ")" }
+  bare_string { $$.val := "(port string " & $1 & ")" }
   dotnamed    { $$.val := "(port-named " & $1 & " " & $2 & ")" }
   dotstar     { $$.val := "(port-dotstar)" }
   ident_only  { $$.val := "(port-ident " & $1 & ")" }
@@ -194,6 +205,7 @@ module_item: { val : TEXT; cnt : INTEGER; }
   assign_stmt     { $$.val := $1 }
   always_block    { $$.val := $1 }
   initial_block   { $$.val := Wrap("initial", $1) }
+  final_block     { $$.val := Wrap("final", $1) }
   generate_block  { $$.val := $1 }
   genvar_decl     { $$.val := "(genvar " & $1 & ")" }
   ident_item      { $$.val := "(ident-item " & $1 & " " & $2 & ")" }
@@ -346,7 +358,8 @@ always_construct: { val : TEXT; cnt : INTEGER; }
   always  { $$.val := "(always " & $1 & " " & $2 & ")" }
   comb    { $$.val := "(always_comb " & $1 & ")" }
   ff      { $$.val := "(always_ff " & $1 & " " & $2 & ")" }
-  latch   { $$.val := "(always_latch " & $1 & " " & $2 & ")" }
+  latch       { $$.val := "(always_latch " & $1 & " " & $2 & ")" }
+  latch_nosens { $$.val := "(always_latch " & $1 & ")" }
 
 sensitivity: { val : TEXT; cnt : INTEGER; }
   list     { $$.val := "(sens " & $1 & ")" }
@@ -394,6 +407,7 @@ statement: { val : TEXT; cnt : INTEGER; }
   assert_stmt    { $$.val := "(assert " & $1 & " " & $2 & ")" }
   delay_stmt     { $$.val := "(delay " & $1 & " " & $2 & ")" }
   event_ctrl_stmt { $$.val := "(event-ctrl " & $1 & " " & $2 & ")" }
+  void_cast      { $$.val := Wrap("void-cast", $1) }
   null_stmt      { $$.val := "(null)" }
 
 opt_block_name: { val : TEXT; cnt : INTEGER; }
@@ -417,7 +431,11 @@ case_keyword: { val : TEXT; cnt : INTEGER; }
   casez          { $$.val := "casez" }
   casex          { $$.val := "casex" }
   unique_case    { $$.val := "unique-case" }
+  unique_casez   { $$.val := "unique-casez" }
+  unique_casex   { $$.val := "unique-casex" }
   priority_case  { $$.val := "priority-case" }
+  priority_casez { $$.val := "priority-casez" }
+  priority_casex { $$.val := "priority-casex" }
 
 case_item_list: { val : TEXT; cnt : INTEGER; }
   single  { $$.val := $1 }
@@ -454,6 +472,7 @@ statement_list: { val : TEXT; cnt : INTEGER; }
   cons       { $$.val := Seq($1, $2) }
   local_decl      { $$.val := Seq($1, $2) }
   auto_decl       { $$.val := Seq($1, $2) }
+  static_decl     { $$.val := Seq($1, $2) }
   local_param     { $$.val := Seq($1, $2) }
   local_parameter { $$.val := Seq($1, $2) }
 
@@ -731,6 +750,7 @@ assign_pattern_list: { val : TEXT; cnt : INTEGER; }
 
 assign_pattern_item: { val : TEXT; cnt : INTEGER; }
   named       { $$.val := $1 & ": " & $2 }
+  default     { $$.val := "default: " & $1 }
   positional  { $$.val := $1 }
 
 hierarchical_id: { val : TEXT; cnt : INTEGER; }
