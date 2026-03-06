@@ -66,6 +66,18 @@
 
   (emit-reset!)
 
+  ;; First emit cut definitions (carry cuts etc.) in dependency order.
+  ;; *bv-cuts* is in reverse order; earlier cuts may reference only
+  ;; primary inputs, later cuts may reference earlier cut variables.
+  (define cut-wires '())
+  (for-each
+    (lambda (cut)
+      (let* ((cut-name (car cut))
+             (cut-bdd (cdr cut))
+             (wire (bdd->wire cut-bdd)))
+        (set! cut-wires (cons (cons cut-name wire) cut-wires))))
+    (reverse *bv-cuts*))
+
   ;; Walk output BDDs
   (define output-wires '())
   (for-each
@@ -114,12 +126,25 @@
   (emit ");")
   (emit "")
 
-  ;; Wire declarations
+  ;; Wire declarations (from Shannon expansion)
   (for-each (lambda (d) (emit d)) (reverse *emit-decls*))
-  (if (> (length *emit-decls*) 0) (emit ""))
 
-  ;; Gate assigns
+  ;; Cut wire declarations
+  (for-each
+    (lambda (cw)
+      (emit (string-append "  wire " (car cw) ";")))
+    (reverse cut-wires))
+  (if (or (> (length *emit-decls*) 0) (> (length cut-wires) 0))
+      (emit ""))
+
+  ;; Gate assigns (Shannon expansion MUXes)
   (for-each (lambda (a) (emit a)) (reverse *emit-assigns*))
+
+  ;; Cut wire assigns (carry chain stages etc.)
+  (for-each
+    (lambda (cw)
+      (emit (string-append "  assign " (car cw) " = " (cdr cw) ";")))
+    (reverse cut-wires))
   (emit "")
 
   ;; Output wiring -- group bits per signal, use concatenation
