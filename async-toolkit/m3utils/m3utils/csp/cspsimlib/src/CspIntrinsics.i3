@@ -28,6 +28,10 @@ PROCEDURE random_dynamic(x : DynamicInt.T; bits : NativeInt.T) : DynamicInt.T;
 
 CONST random_wide = random_dynamic;
 
+TYPE IntArray = REF ARRAY OF INTEGER;
+
+PROCEDURE readHexInts(frame : Frame; path : TEXT; maxN : INTEGER) : IntArray;
+
 TYPE
   Putter = OBJECT
   METHODS

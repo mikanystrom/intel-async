@@ -139,6 +139,37 @@ PROCEDURE ReplacePrefix(s, old, new : TEXT) : TEXT =
     END;
     RETURN s
   END ReplacePrefix;
+
+PROCEDURE SepToSpace(s : TEXT) : TEXT =
+  VAR r := ""; len := Text.Length(s); c : CHAR;
+  BEGIN
+    FOR i := 0 TO len - 1 DO
+      c := Text.GetChar(s, i);
+      IF c = '\001' THEN r := r & " "
+      ELSE r := r & Text.FromChar(c)
+      END
+    END;
+    RETURN r
+  END SepToSpace;
+
+PROCEDURE WrapArrayDims(dims, elemType : TEXT) : TEXT =
+  VAR
+    len := Text.Length(dims);
+    sep : INTEGER := -1;
+    inner, outer : TEXT;
+  BEGIN
+    IF Text.Empty(dims) THEN RETURN elemType END;
+    FOR i := len - 1 TO 0 BY -1 DO
+      IF Text.GetChar(dims, i) = '\001' THEN sep := i; EXIT END
+    END;
+    IF sep < 0 THEN
+      RETURN "(array " & dims & " " & elemType & ")"
+    ELSE
+      inner := Text.Sub(dims, sep + 1);
+      outer := Text.Sub(dims, 0, sep);
+      RETURN WrapArrayDims(outer, "(array " & inner & " " & elemType & ")")
+    END
+  END WrapArrayDims;
 }
 %interface {
 }
@@ -477,7 +508,7 @@ lvalue: { val : TEXT; cnt : INTEGER; }
     IF Text.Empty($2) THEN
       $$.val := "(apply " & $1 & ")"
     ELSE
-      $$.val := "(apply " & $1 & " " & $2 & ")"
+      $$.val := "(apply " & $1 & " " & SepToSpace($2) & ")"
     END }
   dot_id   { $$.val := "(member-access " & $1 & " " & $2 & ")" }
   dot_int  { $$.val := "(member-access " & $1 & " " & IntLit($2) & ")" }
@@ -566,11 +597,14 @@ declarator: { val : TEXT; cnt : INTEGER; }
   x  {
     VAR name := $2;
         dir  := $1;
+        dims := $3;
         init := $4;
+        ty   : TEXT;
         decl : TEXT;
     BEGIN
       IF Text.Empty(dir) THEN dir := "none" END;
-      decl := "(var1 (decl1 (id " & name & ") " & curType & " " & dir & "))";
+      ty := WrapArrayDims(dims, curType);
+      decl := "(var1 (decl1 (id " & name & ") " & ty & " " & dir & "))";
       IF NOT Text.Empty(init) THEN
         $$.val := decl & " (assign (id " & name & ") " & init & ")";
         $$.cnt := 2
@@ -589,7 +623,11 @@ opt_direction: { val : TEXT; cnt : INTEGER; }
   none     { $$.val := "" }
 
 opt_array_dims: { val : TEXT; cnt : INTEGER; }
-  bracket { $$.val := Seq($1, $2) }
+  bracket {
+    IF Text.Empty($1) THEN $$.val := $2
+    ELSE $$.val := $1 & "\001" & $2
+    END
+  }
   empty   { $$.val := "" }
 
 range_list: { val : TEXT; cnt : INTEGER; }

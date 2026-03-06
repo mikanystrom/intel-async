@@ -1,0 +1,7 @@
+int data[8];
+int count;
+int i;
+count = readHexInts("test_data.hex", 8, data);
+print("count=" + count);
+i = 0;
+*[ i < count -> print("data[" + i + "]=" + data[i]); i = i + 1 ]

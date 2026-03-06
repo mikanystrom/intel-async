@@ -2348,13 +2348,49 @@
     )  
   )
 
+(define (m3-compile-readHexInts-assign pc lhs lty rhs)
+  ;; rhs = (call-intrinsic readHexInts path maxN array)
+  ;; lhs = count variable
+  (dis "m3-compile-readHexInts-assign " lhs " := " rhs dnl)
+  (let* ((path-expr (caddr rhs))
+         (maxN-expr (cadddr rhs))
+         (arr-expr  (car (cddddr rhs)))
+         (m3-path   (if (string? path-expr)
+                        (CitTextUtils.MakeM3Literal path-expr)
+                        (m3-format-designator pc path-expr)))
+         (m3-maxN   (m3-compile-value pc 'native maxN-expr))
+         (m3-arr    (m3-format-designator pc arr-expr))
+         (m3-lhs    (m3-format-designator pc lhs))
+         ;; Determine element type of the array
+         (arr-type  (declared-type pc arr-expr))
+         (elem-type (if (array-type? arr-type) (caddr arr-type) arr-type))
+         (elem-dyn  (m3-dynamic-int-type? elem-type))
+         (lhs-dyn   (m3-dynamic-int-type? lty))
+         ;; Generate appropriate assignment forms
+         (copy-stmt (if elem-dyn
+                        (sa "    Mpz.set_si(" m3-arr "[i_], hexArr_^[i_]);")
+                        (sa "    " m3-arr "[i_] := hexArr_^[i_];")))
+         (cnt-stmt  (if lhs-dyn
+                        (sa "  Mpz.set_si(" m3-lhs ", NUMBER(hexArr_^));")
+                        (sa "  " m3-lhs " := NUMBER(hexArr_^);"))))
+    (sa "WITH hexArr_ = CspIntrinsics.readHexInts(frame, "
+        m3-path ", " m3-maxN ") DO" dnl
+        "  FOR i_ := 0 TO LAST(hexArr_^) DO" dnl
+        copy-stmt dnl
+        "  END;" dnl
+        cnt-stmt dnl
+        "END" dnl)))
+
 (define (m3-compile-intrinsic-assign pc lhs lty rhs)
   (cond ((eq? 'pack (cadr rhs))
          (m3-compile-pack-assign pc lhs lty rhs))
 
         ((eq? 'random (cadr rhs))
          (m3-compile-random-assign pc lhs lty rhs))
-  
+
+        ((eq? 'readHexInts (cadr rhs))
+         (m3-compile-readHexInts-assign pc lhs lty rhs))
+
         ((integer-type? lty)
          ;; if not pack or random we assume it returns a native int
          ;;

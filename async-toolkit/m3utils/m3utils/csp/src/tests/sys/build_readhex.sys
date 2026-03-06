@@ -1,0 +1,5 @@
+system ReadHex;
+  process Reader = "readhex.csp";
+begin
+  var r : Reader;
+end.

@@ -340,12 +340,13 @@
     cover   // what's this?
     pack
     unpack
+    readHexInts
     ;; there are more...
     ))
 
 (define nonblocking-intrinsics
   ;; these are the special functions that cannot block or error out
-  '(string print pack unpack))
+  '(string print pack unpack readHexInts))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
