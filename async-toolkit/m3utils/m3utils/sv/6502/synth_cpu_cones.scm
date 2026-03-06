@@ -85,7 +85,9 @@
   body)
 
 ;; Synthesize each always_comb block individually
-;; Skip cone 2 (execution logic) -- too complex for BDDs due to carry chains
+;; Enable carry cuts and case decomposition for complex blocks
+(set! *bv-cut-threshold* 200)
+
 (define cone-num 0)
 (define total-nodes 0)
 (define all-assigns '())
@@ -96,24 +98,20 @@
         (begin
           (set! cone-num (+ cone-num 1))
           (displayln "")
-          (if (= cone-num 2)
-              (displayln "--- Combinational cone 2 (execution logic): SKIPPED ---"
-                         *nl* "    (8-bit carry chains in ADC/SBC/CMP cause BDD blowup)")
-              (begin
-                (displayln "--- Combinational cone " (number->string cone-num) " ---")
-                (let ((assigns (stmt->bv-assigns (cadr item))))
-                  (set! all-assigns (append all-assigns assigns))
-                  (for-each
-                    (lambda (a)
-                      (let* ((sig (car a))
-                             (bv (cdr a))
-                             (w (length bv))
-                             (nodes (fold-left + 0 (map bdd-size bv))))
-                        (set! total-nodes (+ total-nodes nodes))
-                        (displayln "  " (symbol->string sig) " ["
-                                   (number->string w) " bits]: "
-                                   (number->string nodes) " BDD nodes")))
-                    assigns)))))))
+          (displayln "--- Combinational cone " (number->string cone-num) " ---")
+          (let ((assigns (stmt->bv-assigns (cadr item))))
+            (set! all-assigns (append all-assigns assigns))
+            (for-each
+              (lambda (a)
+                (let* ((sig (car a))
+                       (bv (cdr a))
+                       (w (length bv))
+                       (nodes (fold-left + 0 (map bdd-size bv))))
+                  (set! total-nodes (+ total-nodes nodes))
+                  (displayln "  " (symbol->string sig) " ["
+                             (number->string w) " bits]: "
+                             (number->string nodes) " BDD nodes")))
+              assigns)))))
   body)
 
 ;; Continuous assigns

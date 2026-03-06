@@ -1063,17 +1063,22 @@
                    (merge-bv-env env new-assigns))))))
 
     ;; Conditional: (if cond then [else])
-    ;; Save/restore *bv-env* around each branch to prevent cross-contamination.
+    ;; For long if-else chains, use decoder+MUX decomposition.
     ((eq? 'if (car stmt))
-     (let* ((cond-bv (expr->bv (cadr stmt)))
-            (saved-env *bv-env*)
-            (then-assigns (stmt->bv-assigns (caddr stmt)))
-            (dummy (set! *bv-env* saved-env))
-            (else-assigns (if (> (length stmt) 3)
-                              (stmt->bv-assigns (cadddr stmt))
-                              '()))
-            (dummy2 (set! *bv-env* saved-env)))
-       (merge-conditional-bv-assigns cond-bv then-assigns else-assigns)))
+     (let ((depth (if-chain-depth stmt)))
+       (if (< depth *bv-decomp-threshold*)
+           ;; Short chain: use nested ITE
+           (let* ((cond-bv (expr->bv (cadr stmt)))
+                  (saved-env *bv-env*)
+                  (then-assigns (stmt->bv-assigns (caddr stmt)))
+                  (dummy (set! *bv-env* saved-env))
+                  (else-assigns (if (> (length stmt) 3)
+                                    (stmt->bv-assigns (cadddr stmt))
+                                    '()))
+                  (dummy2 (set! *bv-env* saved-env)))
+             (merge-conditional-bv-assigns cond-bv then-assigns else-assigns))
+           ;; Long chain: flatten and use decoder+MUX
+           (compile-if-chain-decomp stmt))))
 
     ;; Case: (case expr (match stmt) ...)
     ((memq (car stmt) '(case casez casex))
@@ -1115,50 +1120,243 @@
         (bv-resize (cdr entry) width)
         (bv-resize (bv-lookup sig) width))))
 
+;; --- Case/if decomposition threshold ---
+;; When a case or if-else chain has more arms than this, use
+;; decoder+MUX decomposition instead of nested ITE chains.
+;; Each arm is built independently, then combined with one-hot OR
+;; (non-overlapping) or priority MUX (overlapping).
+(define *bv-decomp-threshold* 8)
+
 ;; Compile a case statement to BV assigns
 ;; case(sel) val1: stmt1; val2: stmt2; ... default: stmtN; endcase
 ;;
-;; We fold from the default outward:
-;;   result = ITE(sel==val_n, stmt_n, ITE(sel==val_{n-1}, ..., default))
+;; For small cases: nested ITE (fold from default outward).
+;; For large cases: decoder+MUX — build each arm independently,
+;; then combine with one-hot OR.
 (define (compile-case-bv sel-expr case-items)
-  (let ((sel-bv (expr->bv sel-expr)))
-    ;; Separate default from regular items
-    (let* ((default-item (find-default case-items))
-           (regular-items (sv-filter (lambda (ci)
-                                       (and (pair? ci)
-                                            (not (eq? 'default (car ci)))))
-                                     case-items))
-           (saved-env *bv-env*)
+  (let* ((sel-bv (expr->bv sel-expr))
+         (default-item (find-default case-items))
+         (regular-items (sv-filter (lambda (ci)
+                                     (and (pair? ci)
+                                          (not (eq? 'default (car ci)))))
+                                   case-items))
+         (n-arms (length regular-items)))
+    (if (< n-arms *bv-decomp-threshold*)
+        ;; Small case: use nested ITE chain (existing approach)
+        (compile-case-bv-ite sel-bv default-item regular-items)
+        ;; Large case: use decoder + MUX decomposition
+        (compile-case-bv-decomp sel-bv default-item regular-items))))
+
+;; Small case: nested ITE chain (fold from default outward)
+(define (compile-case-bv-ite sel-bv default-item regular-items)
+  (let* ((saved-env *bv-env*)
+         (default-assigns (if default-item
+                              (stmt->bv-assigns (cadr default-item))
+                              '()))
+         (dummy (set! *bv-env* saved-env)))
+    (fold-right
+      (lambda (ci acc)
+        (if (and (pair? ci) (> (length ci) 1))
+            (let* ((labels (case-item-labels ci))
+                   (body (sv-last ci))
+                   (eq-bv (case-match-or sel-bv labels))
+                   (saved-env *bv-env*)
+                   (item-assigns (stmt->bv-assigns body))
+                   (dummy (set! *bv-env* saved-env)))
+              (merge-conditional-bv-assigns eq-bv item-assigns acc))
+            acc))
+      default-assigns
+      regular-items)))
+
+;; Large case: decoder + MUX decomposition
+;; Build each arm independently, then combine:
+;;   output_bit = OR_k(match_k & body_k_bit) | (~any_match & default_bit)
+;;
+;; This avoids the exponential blowup of nested ITE chains because
+;; each arm's BDD is built in isolation.
+(define (compile-case-bv-decomp sel-bv default-item regular-items)
+  (let ((saved-env *bv-env*))
+    ;; Phase 1: Build all match signals and arm bodies independently
+    (let* ((arms
+             (map (lambda (ci)
+                    (if (and (pair? ci) (> (length ci) 1))
+                        (let* ((labels (case-item-labels ci))
+                               (body (sv-last ci))
+                               (match-bdd (car (case-match-or sel-bv labels)))
+                               (dummy (set! *bv-env* saved-env))
+                               (body-assigns (stmt->bv-assigns body))
+                               (dummy2 (set! *bv-env* saved-env)))
+                          (cons match-bdd body-assigns))
+                        #f))
+                  regular-items))
+           (arms (sv-filter (lambda (x) x) arms))
+           ;; Build default body
+           (dummy (set! *bv-env* saved-env))
            (default-assigns (if default-item
                                 (stmt->bv-assigns (cadr default-item))
                                 '()))
-           (dummy (set! *bv-env* saved-env)))
-      ;; Fold regular items right-to-left over the default.
-      ;; Save/restore *bv-env* around each branch so that assignments
-      ;; within one branch don't pollute other branches' lookups.
-      ;; Case items may have multiple labels: (label1 label2 ... body)
-      ;; The body is the last element; all preceding elements are match labels.
-      (fold-right
-        (lambda (ci acc)
-          (if (and (pair? ci) (> (length ci) 1))
-              (let* ((labels (let loop ((elts ci))
-                               (if (null? (cdr elts)) '()
-                                   (cons (car elts) (loop (cdr elts))))))
-                     (body (sv-last ci))
-                     ;; OR all label matches together
-                     (eq-bv (fold-left
-                              (lambda (acc-bv label)
-                                (let ((match-bv (expr->bv label)))
-                                  (bv-or acc-bv (bv-eq sel-bv match-bv))))
-                              (bv-zero 1)
-                              labels))
-                     (saved-env *bv-env*)
-                     (item-assigns (stmt->bv-assigns body))
-                     (dummy (set! *bv-env* saved-env)))
-                (merge-conditional-bv-assigns eq-bv item-assigns acc))
-              acc))
-        default-assigns
-        regular-items))))
+           (dummy2 (set! *bv-env* saved-env)))
+
+      ;; Phase 2: Combine with one-hot OR
+      ;; Collect all output signals mentioned across all arms + default
+      (let* ((all-sigs (sv-delete-dups
+                         (append (apply append (map (lambda (arm)
+                                                      (map car (cdr arm)))
+                                                    arms))
+                                 (map car default-assigns)))))
+        (map (lambda (sig)
+               (let* ((w (width-get sig))
+                      (default-bv (assq-bv sig default-assigns w))
+                      ;; any-match = OR of all match signals
+                      (any-match (fold-left bdd-or (bdd-false)
+                                            (map car arms))))
+                 (cons sig
+                       (let bit-loop ((bit 0) (acc '()))
+                         (if (>= bit w) (reverse acc)
+                             (let* ((def-bit (list-ref default-bv bit))
+                                    ;; OR together: (match_k & body_k[bit])
+                                    (or-term
+                                      (fold-left
+                                        (lambda (acc-bdd arm)
+                                          (let* ((match-bdd (car arm))
+                                                 (arm-assigns (cdr arm))
+                                                 (arm-bv (assq-bv sig
+                                                           arm-assigns w))
+                                                 (arm-bit (list-ref arm-bv bit)))
+                                            (bdd-maybe-cut
+                                              (bdd-or acc-bdd
+                                                      (bdd-and match-bdd
+                                                               arm-bit))
+                                              (string-append "mux_"
+                                                (symbol->string sig)
+                                                "_" (number->string bit)))))
+                                        (bdd-false)
+                                        arms))
+                                    ;; Add default: (~any_match & default_bit)
+                                    (result (bdd-or or-term
+                                                    (bdd-and (bdd-not any-match)
+                                                             def-bit))))
+                               (bit-loop (+ bit 1)
+                                         (cons result acc))))))))
+             all-sigs)))))
+
+;; Extract label list from a case item (everything except the last element)
+(define (case-item-labels ci)
+  (let loop ((elts ci))
+    (if (null? (cdr elts)) '()
+        (cons (car elts) (loop (cdr elts))))))
+
+;; Build OR of all label matches: (sel == label1) | (sel == label2) | ...
+(define (case-match-or sel-bv labels)
+  (fold-left
+    (lambda (acc-bv label)
+      (let ((match-bv (expr->bv label)))
+        (bv-or acc-bv (bv-eq sel-bv match-bv))))
+    (bv-zero 1)
+    labels))
+
+;; Count the depth of an if-else chain
+(define (if-chain-depth stmt)
+  (if (and (pair? stmt) (eq? 'if (car stmt)) (> (length stmt) 3))
+      (+ 1 (if-chain-depth (cadddr stmt)))
+      1))
+
+;; Flatten an if-else chain into ((cond-expr . body-stmt) ...)
+;; with a final else body (or #f)
+(define (flatten-if-chain stmt)
+  (if (and (pair? stmt) (eq? 'if (car stmt)))
+      (let* ((cond-expr (cadr stmt))
+             (then-body (caddr stmt))
+             (rest (if (> (length stmt) 3)
+                       (flatten-if-chain (cadddr stmt))
+                       (cons '() #f))))
+        (cons (cons (cons cond-expr then-body) (car rest))
+              (cdr rest)))
+      ;; Bare else body
+      (cons '() stmt)))
+
+;; Compile a long if-else chain using decoder+MUX decomposition.
+;; Same principle as compile-case-bv-decomp: build each arm's
+;; condition and body independently, then combine with priority MUX.
+;; Uses priority encoding because if-else chains have priority semantics:
+;;   match_k is gated by ~match_0 & ~match_1 & ... & ~match_{k-1}
+(define (compile-if-chain-decomp stmt)
+  (let* ((flat (flatten-if-chain stmt))
+         (pairs (car flat))
+         (else-body (cdr flat))
+         (saved-env *bv-env*))
+    ;; Phase 1: Build all condition BDDs and arm bodies independently
+    (let* ((arms
+             (map (lambda (pair)
+                    (let* ((cond-expr (car pair))
+                           (body-stmt (cdr pair))
+                           (cond-bdd (car (bv-reduce-or (expr->bv cond-expr))))
+                           (dummy (set! *bv-env* saved-env))
+                           (body-assigns (stmt->bv-assigns body-stmt))
+                           (dummy2 (set! *bv-env* saved-env)))
+                      (cons cond-bdd body-assigns)))
+                  pairs))
+           ;; Build else body
+           (dummy (set! *bv-env* saved-env))
+           (else-assigns (if else-body
+                             (stmt->bv-assigns else-body)
+                             '()))
+           (dummy2 (set! *bv-env* saved-env)))
+
+      ;; Phase 2: Combine with priority encoding
+      ;; For each output bit:
+      ;;   pri_0 = match_0
+      ;;   pri_1 = match_1 & ~match_0
+      ;;   pri_k = match_k & ~match_0 & ... & ~match_{k-1}
+      ;;   output = OR_k(pri_k & body_k) | (~any & default)
+      ;;
+      ;; Build priority signals incrementally to keep BDDs small
+      (let* ((all-sigs (sv-delete-dups
+                         (append (apply append (map (lambda (arm)
+                                                      (map car (cdr arm)))
+                                                    arms))
+                                 (map car else-assigns))))
+             ;; Build priority-encoded match signals
+             (pri-matches
+               (let loop ((arms arms) (not-prev (bdd-true)) (acc '()))
+                 (if (null? arms) (reverse acc)
+                     (let* ((match-bdd (caar arms))
+                            (pri (bdd-and match-bdd not-prev))
+                            (new-not-prev (bdd-and not-prev
+                                                   (bdd-not match-bdd))))
+                       (loop (cdr arms) new-not-prev
+                             (cons pri acc))))))
+             (any-match (fold-left bdd-or (bdd-false) pri-matches)))
+        (map (lambda (sig)
+               (let* ((w (width-get sig))
+                      (default-bv (assq-bv sig else-assigns w)))
+                 (cons sig
+                       (let bit-loop ((bit 0) (acc '()))
+                         (if (>= bit w) (reverse acc)
+                             (let* ((def-bit (list-ref default-bv bit))
+                                    (or-term
+                                      (fold-left
+                                        (lambda (acc-bdd arm-pair)
+                                          (let* ((pri-bdd (car arm-pair))
+                                                 (arm-assigns (cdr arm-pair))
+                                                 (arm-bv (assq-bv sig
+                                                           arm-assigns w))
+                                                 (arm-bit (list-ref arm-bv bit)))
+                                            (bdd-maybe-cut
+                                              (bdd-or acc-bdd
+                                                      (bdd-and pri-bdd arm-bit))
+                                              (string-append "mux_"
+                                                (symbol->string sig)
+                                                "_" (number->string bit)))))
+                                        (bdd-false)
+                                        (map cons pri-matches
+                                             (map cdr arms))))
+                                    (result (bdd-or or-term
+                                                    (bdd-and (bdd-not any-match)
+                                                             def-bit))))
+                               (bit-loop (+ bit 1)
+                                         (cons result acc))))))))
+             all-sigs)))))
 
 (define (find-default items)
   (cond
