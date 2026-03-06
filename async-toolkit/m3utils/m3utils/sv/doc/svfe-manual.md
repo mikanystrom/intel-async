@@ -495,14 +495,19 @@ with a C reference emulator and BDD-synthesized ALU.
 | `sv/6502/emu/emu6502.c` | Test harness (64KB memory, Dormann test) |
 | `sv/6502/emu/alu_bdd_eval.h` | Generated C functions from BDD synthesis |
 
-### 9.2 Running the emulator
+### 9.2 Running all 6502 tests
 
 ```
-$ sv/6502/run-6502-test.sh
+$ sv/6502/run-6502-tests.sh
 ```
 
-This builds the emulator, runs the Klaus Dormann 6502 functional test
-suite (~30M instructions), and verifies parse of the SV models.
+This runs three tests in sequence:
+
+1. **BDD-to-C generation**: Parses ALU.sv, builds BDDs, emits C eval functions
+2. **Exhaustive ALU verification**: Compares BDD-generated C against a reference
+   C implementation for all 15 ops × 256 × 256 × 2 = 1,966,080 test vectors
+3. **Dormann functional test**: Runs the reference emulator (fake6502) through
+   Klaus Dormann's 6502 functional test suite (~30M instructions, 96M cycles)
 
 ### 9.3 ALU synthesis
 
@@ -521,6 +526,19 @@ $ sv/6502/gen-c-eval.sh
 
 Generates `alu_bdd_eval.h` — C functions that evaluate the ALU
 combinational logic using ternary expressions derived from BDDs.
+The generated header contains ~12,900 temp variables across 5 output
+functions (result, carry_out, zero_out, sign_out, overflow_out).
+
+### 9.5 Exhaustive ALU test
+
+```
+$ gcc -O2 -o test_alu sv/6502/emu/test_alu.c -I sv/6502/emu
+$ ./test_alu
+```
+
+Verifies every BDD-generated eval function against a hand-written
+reference C implementation of the 6502 ALU.  Tests all 15 ALU operations
+across all 8-bit input combinations with both carry states.
 
 
 ## 10. Preprocessor (svpp.py)
