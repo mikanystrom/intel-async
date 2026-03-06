@@ -1578,15 +1578,15 @@ BEGIN
       IF pp.keywordPresent("--template") OR pp.keywordPresent("-T") THEN
         WITH tfn = pp.getNext() DO
           IF TE(tfn, "HLP") THEN
-            LoadTemplate("hlp_pg_template.sv")
+            LoadTemplate("hlp_pg_template.sv.tmpl.tmpl")
           ELSIF TE (tfn, "DEFAULT") OR TE(tfn, "MST") THEN
-            LoadTemplate("pg_template.sv")
+            LoadTemplate("pg_template.sv.tmpl")
           ELSE
             LoadTemplate(tfn)
           END
         END
       ELSE
-        LoadTemplate("pg_template.sv")
+        LoadTemplate("pg_template.sv.tmpl")
       END;
 
       IF pp.keywordPresent("--display-template") THEN
