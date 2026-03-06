@@ -103,6 +103,7 @@ port_decl:
   scoped_only               T_IDENT T_SCOPE T_IDENT T_IDENT opt_unpacked_dims
   user_typed_bare           T_IDENT T_IDENT opt_unpacked_dims
   interface_port            T_IDENT '.' T_IDENT T_IDENT opt_unpacked_dims
+  wire_bare                 T_WIRE T_IDENT opt_unpacked_dims
   dotnamed                  '.' T_IDENT '(' opt_expression ')'
   dotstar                   T_DOTSTAR
   ident_only                T_IDENT
@@ -390,7 +391,6 @@ opt_else:
 opt_assert_else:
   yes                       T_ELSE statement
   bare                      ';'
-  empty
 
 case_keyword:
   case                      T_CASE
