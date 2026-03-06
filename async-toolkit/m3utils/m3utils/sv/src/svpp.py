@@ -273,6 +273,8 @@ def _expand_once(line, defines):
                             body = macro.body
                             for p, a in zip(macro.params, full_args):
                                 body = body.replace(p, a)
+                            # Handle `` (token pasting operator)
+                            body = body.replace('``', '')
                             result.append(body)
                             i = end
                             continue
