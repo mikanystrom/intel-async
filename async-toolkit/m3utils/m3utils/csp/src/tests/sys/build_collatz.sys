@@ -1,0 +1,12 @@
+system Collatz;
+  process Seq = %[%
+    int n;
+    n = 27;
+    print("" + n);
+    *[ n != 1 -> [ n % 2 == 0 -> n = n / 2
+                 [] n % 2 != 0 -> n = n * 3 + 1 ];
+       print("" + n) ]
+  %]%;
+begin
+  var c : Seq;
+end.

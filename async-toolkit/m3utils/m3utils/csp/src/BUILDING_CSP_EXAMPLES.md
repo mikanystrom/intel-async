@@ -130,7 +130,90 @@ The `.procs` file format is one line per process instance:
 instance_name  cell_type  escaped_type_name  port=channel port=channel ...
 ```
 
-## Collatz example
+## Building from `.sys` files (recommended)
+
+`build-system!` is a higher-level entry point that handles the entire
+pipeline from a single `.sys` file: parsing the system description,
+running `cspfe` on each process, patching cellinfo, generating `.procs`,
+and invoking `drive!` and `cm3`.
+
+```sh
+cd /tmp/my-example
+cspc -scm /dev/stdin <<'EOF'
+(load (string-append (Env.Get "M3UTILS") "/csp/src/setup.scm"))
+(load (string-append (Env.Get "M3UTILS") "/csp/src/cspbuild.scm"))
+(build-system! "example.sys")
+(exit)
+EOF
+build/ARM64_DARWIN/sim
+```
+
+### `.sys` file format
+
+```
+system Name;
+  var ch : channel(WIDTH);                (* channel declaration      *)
+  var ch : channel(WIDTH) slack N;        (* channel with slack       *)
+  process P = "file.csp"                  (* external CSP source      *)
+    port out R : channel(WIDTH);          (* output port              *)
+  process Q = %[% print("hello") %]%     (* inline CSP body          *)
+    port in L : channel(WIDTH);           (* input port               *)
+begin
+  var p : P(R => ch);                     (* instance with binding    *)
+  var q : Q(L => ch);
+end.
+```
+
+Inline CSP bodies are delimited by `%[%` and `%]%`.  The text between
+the delimiters is passed to `cspfe` verbatim.  The sequence `%[%` cannot
+appear in legal CSP, so there is no ambiguity.  (If `%]%` appears inside
+a CSP string literal, the scanner handles it correctly.)
+
+Comments use `(* ... *)` (nestable) or `// ...` (to end of line).
+
+### Hello World
+
+```
+system Hello;
+  process Hello = %[% print("hello, world!") %]%;
+begin
+  var h : Hello;
+end.
+```
+
+### Producer-Consumer
+
+```
+system ProdCons;
+  var ch : channel(32);
+  process Producer = "producer.csp"
+    port out R : channel(32);
+  process Consumer = "consumer.csp"
+    port in L : channel(32);
+begin
+  var p : Producer(R => ch);
+  var c : Consumer(L => ch);
+end.
+```
+
+### Collatz sequence (single process)
+
+```
+system Collatz;
+  process Seq = %[%
+    int n;
+    n = 27;
+    print("" + n);
+    *[ n != 1 -> [ n % 2 == 0 -> n = n / 2
+                 [] n % 2 != 0 -> n = n * 3 + 1 ];
+       print("" + n) ]
+  %]%;
+begin
+  var c : Seq;
+end.
+```
+
+## Collatz example (pre-generated)
 
 A larger example: 20 worker processes computing Collatz sequences in
 parallel, coordinated by a manager and a tree of splitters (59 process

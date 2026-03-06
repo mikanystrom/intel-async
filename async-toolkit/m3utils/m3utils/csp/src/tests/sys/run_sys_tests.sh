@@ -176,6 +176,7 @@ run_build_test  build_bidir          build_bidir.sys
 run_build_test  build_wide           build_wide.sys
 run_build_test  build_slack          build_slack.sys
 run_build_test  build_multi_inst     build_multi_inst.sys
+run_build_test  build_collatz        build_collatz.sys
 
 echo ""
 echo "--- Error tests ---"
