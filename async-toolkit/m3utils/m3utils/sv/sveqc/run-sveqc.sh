@@ -18,7 +18,7 @@ cd "$ROOT"
 
 SVFE=sv/svparse/AMD64_LINUX/svfe
 SVSYNTH=sv/svsynth/AMD64_LINUX/svsynth
-SVPP=sv/src/svpp.py
+SVPP=sv/svpp/AMD64_LINUX/svpp
 TMPDIR=/tmp/sveqc-$$
 
 PP_FLAGS=""
@@ -83,9 +83,9 @@ parse_file() {
 
     PP_OUT="$TMPDIR/${TAG}_${BASENAME}.pp.sv"
     if [ -n "$PP_FLAGS" ]; then
-        python3 "$SVPP" $PP_FLAGS "$INPUT" > "$PP_OUT"
+        "$SVPP" $PP_FLAGS "$INPUT" > "$PP_OUT"
     else
-        python3 "$SVPP" "$INPUT" > "$PP_OUT"
+        "$SVPP" "$INPUT" > "$PP_OUT"
     fi
 
     AST_OUT="$TMPDIR/${TAG}_${BASENAME}.ast.scm"

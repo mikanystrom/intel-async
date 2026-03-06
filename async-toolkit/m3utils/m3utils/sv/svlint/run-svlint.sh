@@ -5,7 +5,7 @@
 # Usage: sv/svlint/run-svlint.sh [--pp-flags FLAGS] input.sv [input2.sv ...]
 #
 # Pipeline:
-#   svpp.py [flags] input.sv > /tmp/svlint-$$.pp.sv
+#   svpp [flags] input.sv > /tmp/svlint-$$.pp.sv
 #   svfe --scm /tmp/svlint-$$.pp.sv > /tmp/svlint-$$.ast.scm
 #   svsynth (load svlint-driver.scm with AST path)
 #
@@ -18,7 +18,7 @@ cd "$ROOT"
 
 SVFE=sv/svparse/AMD64_LINUX/svfe
 SVSYNTH=sv/svsynth/AMD64_LINUX/svsynth
-SVPP=sv/src/svpp.py
+SVPP=sv/svpp/AMD64_LINUX/svpp
 TMPDIR=/tmp/svlint-$$
 
 PP_FLAGS=""
@@ -83,9 +83,9 @@ for INPUT in "$@"; do
     # Preprocess
     PP_OUT="$TMPDIR/${BASENAME}.pp.sv"
     if [ -n "$PP_FLAGS" ]; then
-        python3 "$SVPP" $PP_FLAGS "$INPUT" > "$PP_OUT"
+        "$SVPP" $PP_FLAGS "$INPUT" > "$PP_OUT"
     else
-        python3 "$SVPP" "$INPUT" > "$PP_OUT"
+        "$SVPP" "$INPUT" > "$PP_OUT"
     fi
 
     # Parse to AST

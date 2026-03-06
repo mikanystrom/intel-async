@@ -541,12 +541,12 @@ reference C implementation of the 6502 ALU.  Tests all 15 ALU operations
 across all 8-bit input combinations with both carry states.
 
 
-## 10. Preprocessor (svpp.py)
+## 10. Preprocessor (svpp)
 
-A standalone Python preprocessor for SystemVerilog:
+A standalone Modula-3 preprocessor for SystemVerilog:
 
 ```
-$ python3 sv/src/svpp.py [-D MACRO] [-I path] input.sv
+$ sv/svpp/AMD64_LINUX/svpp [-D MACRO] [-I path] input.sv
 ```
 
 Supports:

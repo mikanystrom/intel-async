@@ -1,0 +1,3 @@
+
+wire data_out;
+wire clk_buf;

@@ -16,7 +16,7 @@ S-expression ASTs.
   SystemVerilog        S-expression AST          Gate Netlist / C eval
   source file    -->   (via svfe --scm)    -->   (via svsynth)
       |                      |                        |
-   svpp.py              svbase.scm              svemit.scm (gate SV)
+   svpp                 svbase.scm              svemit.scm (gate SV)
   (preprocessor)        svbv.scm (BDD)          svemit-c.scm (C code)
       |                 svlint.scm                    |
       |                 svgen.scm               Verification
@@ -34,7 +34,7 @@ S-expression ASTs.
 | `sv/svparse/` | Modula-3 | LR(1) parser for SystemVerilog (`.t`/`.l`/`.y`/`.e` grammar) |
 | `sv/svparse/.../svfe` | Binary | Parser frontend: `svfe [--scm] file.sv` |
 | `sv/svsynth/` | Modula-3 | `svsynth` interpreter = mscheme + BDD primitives (22 primitives) |
-| `sv/src/svpp.py` | Python | Standalone preprocessor (`` `define ``, `` `ifdef ``, `` `include ``, etc.) |
+| `sv/svpp/` | Modula-3 | Standalone preprocessor (`` `define ``, `` `ifdef ``, `` `include ``, etc.) |
 | `sv/src/svbase.scm` | Scheme | AST navigation, file I/O, signal collection, utility functions |
 | `sv/src/svbv.scm` | Scheme | Bit-level BDD synthesis engine (multi-bit, LRM-correct widths) |
 | `sv/src/svemit.scm` | Scheme | BDD-to-gate-level SV emitter (Shannon expansion MUX decomposition) |
