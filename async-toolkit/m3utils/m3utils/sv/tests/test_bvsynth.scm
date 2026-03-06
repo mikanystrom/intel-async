@@ -1,200 +1,232 @@
 (load "sv/src/svbase.scm")
 (load "sv/src/svbv.scm")
 
-;;; Exhaustive verification: for all input combos, compare BDD evaluation
-;;; against a reference Scheme computation.
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Verification by symbolic BDD comparison.
+;;
+;; We build BDDs two independent ways from the same AST:
+;;   1. expr->bv (the synthesizer under test, from svbv.scm)
+;;   2. ref-expr->bv (a reference implementation here)
+;;
+;; Both use the same BDD variables for inputs.  Since BDDs are
+;; canonical, if two BDDs represent the same Boolean function they
+;; are the same object.  So we just compare with bdd-equal? --
+;; no enumeration of 2^N input vectors needed.
+;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; Helper: string-index for scheme
-(define (string-index-sv s ch)
-  (let loop ((i 0))
-    (if (>= i (string-length s)) #f
-        (if (char=? (string-ref s i) ch) i
-            (loop (+ i 1))))))
 
-;; Bitwise ops for reference evaluator (mscheme may not have them natively)
-(define (bitwise-and a b)
-  (if (or (= a 0) (= b 0)) 0
-      (+ (* 2 (bitwise-and (quotient a 2) (quotient b 2)))
-         (if (and (= 1 (remainder a 2)) (= 1 (remainder b 2))) 1 0))))
+;;; Reference BDD builder -- deliberately simple, independent of svbv.scm.
+;;; Uses the same bv-lookup / width-get globals (shared BDD variables),
+;;; but implements every operator from scratch.
 
-(define (bitwise-or a b)
-  (if (and (= a 0) (= b 0)) 0
-      (+ (* 2 (bitwise-or (quotient a 2) (quotient b 2)))
-         (if (or (= 1 (remainder a 2)) (= 1 (remainder b 2))) 1 0))))
-
-(define (bitwise-xor a b)
-  (if (and (= a 0) (= b 0)) 0
-      (+ (* 2 (bitwise-xor (quotient a 2) (quotient b 2)))
-         (if (not (= (remainder a 2) (remainder b 2))) 1 0))))
-
-(define (bitwise-not-w a w)
-  ;; NOT with explicit width mask
-  (bitwise-xor a (- (expt 2 w) 1)))
-
-(define (arithmetic-shift a n)
-  (if (>= n 0)
-      (* a (expt 2 n))
-      (quotient a (expt 2 (- 0 n)))))
-
-;; Reduction operators on integers of known width
-(define (reduce-and-int val w)
-  (if (= val (- (expt 2 w) 1)) 1 0))
-
-(define (reduce-or-int val w)
-  (if (= val 0) 0 1))
-
-(define (reduce-xor-int val w)
-  (let loop ((i 0) (v val) (acc 0))
-    (if (= i w) acc
-        (loop (+ i 1) (quotient v 2)
-              (bitwise-xor acc (remainder v 2))))))
-
-;; Evaluate SV expression on concrete integer values
-;; env is ((name . int-value) ...)
-;; width-env is ((name . width) ...)
-(define (eval-sv-expr node env width-env)
-  (define (lookup name)
-    (let ((e (assq name env)))
-      (if e (cdr e) 0)))
-  (define (wid name)
-    (let ((e (assq name width-env)))
-      (if e (cdr e) 32)))
-  (define (mask w) (- (expt 2 w) 1))
-
+(define (ref-expr->bv node)
   (cond
-    ((number? node) node)
+    ;; Number literal
+    ((number? node)
+     (ref-bv-const node 32))
 
+    ;; Symbol
     ((symbol? node)
      (let ((s (symbol->string node)))
        (cond
-         ((string-index-sv s #\')
+         ((string-index s #\')
           (let ((p (parse-sv-number node)))
-            (car p)))
-         ((equal? s "0") 0)
-         ((equal? s "1") 1)
-         (else (lookup node)))))
+            (ref-bv-const (car p) (cdr p))))
+         ((equal? s "0") (ref-bv-const 0 1))
+         ((equal? s "1") (ref-bv-const 1 1))
+         (else (bv-lookup node)))))
 
-    ((not (pair? node)) 0)
+    ((not (pair? node))
+     (ref-bv-const 0 1))
 
-    ((eq? 'id (car node)) (lookup (cadr node)))
+    ;; (id name)
+    ((eq? 'id (car node))
+     (bv-lookup (cadr node)))
 
-    ;; Bitwise NOT
+    ;; Bitwise NOT: (~ expr)
     ((eq? '~ (car node))
-     (let* ((a (eval-sv-expr (cadr node) env width-env))
-            ;; Infer width from context: check if the sub-expr is an (id ...)
-            (sub (cadr node))
-            (w (if (and (pair? sub) (eq? 'id (car sub)))
-                   (wid (cadr sub))
-                   32)))
-       (bitwise-and (bitwise-not-w a w) (mask w))))
+     (map bdd-not (ref-expr->bv (cadr node))))
 
-    ;; Bitwise AND
+    ;; Bitwise AND: (& a b)
     ((eq? '& (car node))
-     (bitwise-and (eval-sv-expr (cadr node) env width-env)
-                  (eval-sv-expr (caddr node) env width-env)))
+     (let* ((a (ref-expr->bv (cadr node)))
+            (b (ref-expr->bv (caddr node)))
+            (w (max (length a) (length b))))
+       (map bdd-and (ref-resize a w) (ref-resize b w))))
 
-    ;; Bitwise OR
+    ;; Bitwise OR: (| a b)
     ((eq? '| (car node))
-     (bitwise-or (eval-sv-expr (cadr node) env width-env)
-                 (eval-sv-expr (caddr node) env width-env)))
+     (let* ((a (ref-expr->bv (cadr node)))
+            (b (ref-expr->bv (caddr node)))
+            (w (max (length a) (length b))))
+       (map bdd-or (ref-resize a w) (ref-resize b w))))
 
-    ;; Bitwise XOR
+    ;; Bitwise XOR: (^ a b)
     ((eq? '^ (car node))
-     (bitwise-xor (eval-sv-expr (cadr node) env width-env)
-                  (eval-sv-expr (caddr node) env width-env)))
+     (let* ((a (ref-expr->bv (cadr node)))
+            (b (ref-expr->bv (caddr node)))
+            (w (max (length a) (length b))))
+       (map bdd-xor (ref-resize a w) (ref-resize b w))))
 
-    ;; Addition
+    ;; Reduction AND: (&-reduce expr)
+    ((eq? '&-reduce (car node))
+     (let ((bv (ref-expr->bv (cadr node))))
+       (list (fold-left bdd-and (bdd-true) bv))))
+
+    ;; Reduction OR: (|-reduce expr)
+    ((eq? '|-reduce (car node))
+     (let ((bv (ref-expr->bv (cadr node))))
+       (list (fold-left bdd-or (bdd-false) bv))))
+
+    ;; Reduction XOR: (^-reduce expr)
+    ((eq? '^-reduce (car node))
+     (let ((bv (ref-expr->bv (cadr node))))
+       (list (fold-left bdd-xor (bdd-false) bv))))
+
+    ;; Addition: (+ a b) -- ripple-carry adder
     ((eq? '+ (car node))
-     (+ (eval-sv-expr (cadr node) env width-env)
-        (eval-sv-expr (caddr node) env width-env)))
+     (let* ((a (ref-expr->bv (cadr node)))
+            (b (ref-expr->bv (caddr node)))
+            (w (max (length a) (length b)))
+            (a1 (ref-resize a w))
+            (b1 (ref-resize b w)))
+       (ref-ripple-add a1 b1 (bdd-false) w)))
 
-    ;; Subtraction
+    ;; Subtraction: (- a b) -- a + ~b with carry-in=1
     ((eq? '- (car node))
-     (- (eval-sv-expr (cadr node) env width-env)
-        (eval-sv-expr (caddr node) env width-env)))
+     (let* ((a (ref-expr->bv (cadr node)))
+            (b (ref-expr->bv (caddr node)))
+            (w (max (length a) (length b)))
+            (a1 (ref-resize a w))
+            (b1 (map bdd-not (ref-resize b w))))
+       (ref-ripple-add a1 b1 (bdd-true) w)))
 
-    ;; Equality
+    ;; Equality: (== a b)
     ((eq? '== (car node))
-     (if (= (eval-sv-expr (cadr node) env width-env)
-            (eval-sv-expr (caddr node) env width-env)) 1 0))
+     (let* ((a (ref-expr->bv (cadr node)))
+            (b (ref-expr->bv (caddr node)))
+            (w (max (length a) (length b)))
+            (a1 (ref-resize a w))
+            (b1 (ref-resize b w)))
+       (list (fold-left bdd-and (bdd-true)
+                        (map (lambda (x y) (bdd-not (bdd-xor x y)))
+                             a1 b1)))))
 
-    ;; Inequality
-    ((eq? '!= (car node))
-     (if (not (= (eval-sv-expr (cadr node) env width-env)
-                 (eval-sv-expr (caddr node) env width-env))) 1 0))
-
-    ;; Less-than (unsigned)
+    ;; Less-than: (< a b) -- unsigned
     ((eq? '< (car node))
-     (if (< (eval-sv-expr (cadr node) env width-env)
-            (eval-sv-expr (caddr node) env width-env)) 1 0))
+     (let* ((a (ref-expr->bv (cadr node)))
+            (b (ref-expr->bv (caddr node)))
+            (w (max (length a) (length b)))
+            (a1 (ref-resize a w))
+            (b1 (map bdd-not (ref-resize b w))))
+       ;; a < b iff carry-out of (a + ~b + 1) is 0
+       (let ((carry (ref-carry-out a1 b1 (bdd-true) w)))
+         (list (bdd-not carry)))))
 
-    ;; Greater-than (unsigned)
+    ;; Greater-than: (> a b)
     ((eq? '> (car node))
-     (if (> (eval-sv-expr (cadr node) env width-env)
-            (eval-sv-expr (caddr node) env width-env)) 1 0))
+     ;; a > b  <==>  b < a
+     (ref-expr->bv (list '< (caddr node) (cadr node))))
 
-    ;; Ternary
+    ;; Ternary: (?: cond then else)
     ((eq? '?: (car node))
-     (if (not (= 0 (eval-sv-expr (cadr node) env width-env)))
-         (eval-sv-expr (caddr node) env width-env)
-         (eval-sv-expr (cadddr node) env width-env)))
+     (let* ((c-bv (ref-expr->bv (cadr node)))
+            (c (fold-left bdd-or (bdd-false) c-bv))
+            (t (ref-expr->bv (caddr node)))
+            (e (ref-expr->bv (cadddr node)))
+            (w (max (length t) (length e))))
+       (map (lambda (tb eb) (bdd-ite c tb eb))
+            (ref-resize t w) (ref-resize e w))))
 
     ;; Bit index: (index expr idx)
     ((eq? 'index (car node))
-     (let ((base (eval-sv-expr (cadr node) env width-env))
-           (idx (caddr node)))
-       (if (number? idx)
-           (bitwise-and 1 (arithmetic-shift base (- 0 idx)))
-           0)))
+     (let* ((base (ref-expr->bv (cadr node)))
+            (idx (caddr node)))
+       (if (and (number? idx) (>= idx 0) (< idx (length base)))
+           (list (list-ref base idx))
+           (list (bdd-false)))))
 
     ;; Part select: (range expr hi lo)
     ((eq? 'range (car node))
-     (let ((base (eval-sv-expr (cadr node) env width-env))
-           (hi (caddr node))
-           (lo (cadddr node)))
-       (if (and (number? hi) (number? lo))
-           (let* ((h hi)
-                  (l lo)
-                  (w (+ 1 (- h l))))
-             (bitwise-and (mask w) (arithmetic-shift base (- 0 l))))
-           0)))
+     (let* ((base (ref-expr->bv (cadr node)))
+            (hi (caddr node))
+            (lo (cadddr node)))
+       (if (and (number? hi) (number? lo)
+                (>= lo 0) (< hi (length base)) (>= hi lo))
+           (list-head (list-tail base lo) (+ 1 (- hi lo)))
+           (ref-bv-const 0 (+ 1 (- hi lo))))))
 
-    ;; Reduction AND
-    ((eq? '&-reduce (car node))
-     (let* ((sub (cadr node))
-            (val (eval-sv-expr sub env width-env))
-            (w (if (and (pair? sub) (eq? 'id (car sub)))
-                   (wid (cadr sub)) 8)))
-       (reduce-and-int val w)))
-
-    ;; Reduction OR
-    ((eq? '|-reduce (car node))
-     (let ((val (eval-sv-expr (cadr node) env width-env)))
-       (reduce-or-int val 8)))
-
-    ;; Reduction XOR
-    ((eq? '^-reduce (car node))
-     (let* ((sub (cadr node))
-            (val (eval-sv-expr sub env width-env))
-            (w (if (and (pair? sub) (eq? 'id (car sub)))
-                   (wid (cadr sub)) 8)))
-       (reduce-xor-int val w)))
-
-    ;; Left shift
+    ;; Left shift: (<< a amt)
     ((eq? '<< (car node))
-     (let ((a (eval-sv-expr (cadr node) env width-env))
-           (b (eval-sv-expr (caddr node) env width-env)))
-       (arithmetic-shift a b)))
+     (let* ((a (ref-expr->bv (cadr node)))
+            (amt (caddr node))
+            (n (if (number? amt) amt
+                   (car (parse-sv-number amt))))
+            (w (length a)))
+       (if (>= n w)
+           (make-list w (bdd-false))
+           (append (make-list n (bdd-false))
+                   (list-head a (- w n))))))
 
-    ;; Right shift
+    ;; Right shift: (>> a amt)
     ((eq? '>> (car node))
-     (let ((a (eval-sv-expr (cadr node) env width-env))
-           (b (eval-sv-expr (caddr node) env width-env)))
-       (arithmetic-shift a (- 0 b))))
+     (let* ((a (ref-expr->bv (cadr node)))
+            (amt (caddr node))
+            (n (if (number? amt) amt
+                   (car (parse-sv-number amt))))
+            (w (length a)))
+       (if (>= n w)
+           (make-list w (bdd-false))
+           (append (list-tail a n)
+                   (make-list n (bdd-false))))))
 
-    (else 0)))
+    ;; Fallback
+    (else (ref-bv-const 0 1))))
 
-;; Find the expression assigned to a signal in the body
+
+;;; Reference helpers
+
+(define (ref-bv-const val width)
+  (let loop ((i 0) (v val) (acc '()))
+    (if (= i width) acc
+        (loop (+ i 1) (quotient v 2)
+              (append acc (list (if (= 1 (remainder v 2))
+                                   (bdd-true) (bdd-false))))))))
+
+(define (ref-resize bv w)
+  (let ((cur (length bv)))
+    (cond
+      ((= cur w) bv)
+      ((< cur w) (append bv (make-list (- w cur) (bdd-false))))
+      (else (list-head bv w)))))
+
+;; Ripple-carry add, returning w bits (drop carry)
+(define (ref-ripple-add a b cin w)
+  (let loop ((i 0) (carry cin) (acc '()))
+    (if (= i w) acc
+        (let* ((ai (list-ref a i))
+               (bi (list-ref b i))
+               (sum (bdd-xor (bdd-xor ai bi) carry))
+               (cout (bdd-or (bdd-and ai bi)
+                             (bdd-or (bdd-and ai carry)
+                                     (bdd-and bi carry)))))
+          (loop (+ i 1) cout (append acc (list sum)))))))
+
+;; Just the carry-out
+(define (ref-carry-out a b cin w)
+  (let loop ((i 0) (carry cin))
+    (if (= i w) carry
+        (let* ((ai (list-ref a i))
+               (bi (list-ref b i))
+               (cout (bdd-or (bdd-and ai bi)
+                             (bdd-or (bdd-and ai carry)
+                                     (bdd-and bi carry)))))
+          (loop (+ i 1) cout)))))
+
+
+;;; Find the expression assigned to a signal in the body
 (define (find-assign-expr sig body)
   (let loop ((items body))
     (if (null? items) #f
@@ -208,7 +240,8 @@
                     (loop (cdr items))))
               (loop (cdr items)))))))
 
-;;; Verify a module from an AST file
+
+;;; Verify a module: compare synthesized BDDs against reference BDDs
 (define (verify-bv-module-file filename)
   (define ast (read-sv-file filename))
   (define mod (car ast))
@@ -225,128 +258,56 @@
 
   (define port-sigs (collect-port-signals ports))
   (define inputs (sv-filter (lambda (p) (eq? 'input (car p))) port-sigs))
-  (define outputs (sv-filter (lambda (p) (eq? 'output (car p))) port-sigs))
 
-  ;; Create BDD vars for inputs
+  ;; Create BDD vars for inputs (shared by both implementations)
   (for-each (lambda (p) (bv-lookup (cadr p))) inputs)
 
-  ;; Build BDDs via synthesis
+  ;; Build BDDs via synthesizer
   (define assigns (bv-synth-combinational body))
 
-  ;; Build input info list
-  (define input-info
-    (map (lambda (p) (cons (cadr p) (width-get (cadr p)))) inputs))
-
-  ;; Total input bits
-  (define total-bits
-    (fold-left + 0 (map cdr input-info)))
-
-  (define n-vectors (expt 2 total-bits))
-
-  ;; Width env for reference evaluator
-  (define width-env
-    (map (lambda (p) (cons (cadr p) (width-get (cadr p))))
-         (append inputs outputs)))
-
   (display "  Module: ")
-  (display (symbol->string name))
-  (display " (")
-  (display (number->string total-bits))
-  (display " input bits, ")
-  (display (number->string n-vectors))
-  (displayln " vectors)")
+  (displayln (symbol->string name))
 
   (define all-pass #t)
 
   (for-each
     (lambda (asgn)
       (let* ((sig-name (car asgn))
-             (bv (cdr asgn))
-             (out-width (length bv))
-             (out-mask (- (expt 2 out-width) 1))
-             (pass #t)
-             (fail-count 0))
+             (synth-bv (cdr asgn))
+             (out-width (length synth-bv)))
 
-        ;; Find the expression for this signal in the body
+        ;; Find the AST expression for this signal
         (define expr (find-assign-expr sig-name body))
 
         (if (not expr)
             (begin
               (display "    ")
               (display (symbol->string sig-name))
-              (displayln ": SKIP (no expression found)"))
-            (begin
-              ;; Test all input vectors
-              (let vloop ((vec-num 0))
-                (if (and (< vec-num n-vectors) (< fail-count 5))
-                    (let* ((int-env (make-int-env vec-num input-info))
-                           (bdd-env (make-bdd-env vec-num input-info))
-                           ;; BDD result
-                           (bdd-val (bitwise-and (eval-bv bv bdd-env) out-mask))
-                           ;; Reference result
-                           (ref-raw (eval-sv-expr expr int-env width-env))
-                           ;; Handle negative results from subtraction
-                           (ref-val (bitwise-and
-                                      (if (< ref-raw 0)
-                                          (+ ref-raw (expt 2 out-width))
-                                          ref-raw)
-                                      out-mask)))
-                      (if (not (= bdd-val ref-val))
-                          (begin
-                            (set! pass #f)
-                            (set! all-pass #f)
-                            (set! fail-count (+ fail-count 1))
-                            (display "    FAIL ")
-                            (display (symbol->string sig-name))
-                            (display " vec=")
-                            (display (number->string vec-num))
-                            (display " bdd=")
-                            (display (number->string bdd-val))
-                            (display " ref=")
-                            (display (number->string ref-val))
-                            (newline)))
-                      (vloop (+ vec-num 1)))))
-
+              (displayln ": SKIP (no assign found)"))
+            (let* ((ref-bv (ref-resize (ref-expr->bv expr) out-width))
+                   (match (ref-bv-equal? synth-bv ref-bv)))
               (display "    ")
               (display (symbol->string sig-name))
-              (if pass
-                  (begin (display ": PASS (")
-                         (display (number->string n-vectors))
-                         (displayln " vectors)"))
-                  (begin (display ": FAIL (")
-                         (display (number->string fail-count))
-                         (displayln " mismatches)")))))))
+              (display " [")
+              (display (number->string out-width))
+              (display " bits]: ")
+              (if match
+                  (displayln "PASS")
+                  (begin
+                    (displayln "FAIL")
+                    (set! all-pass #f)))))))
     assigns)
 
   all-pass)
 
-;; Build an integer environment from a vector number
-;; input-info is ((name . width) ...)
-(define (make-int-env vec-num input-info)
-  (let loop ((info input-info) (v vec-num) (acc '()))
-    (if (null? info) acc
-        (let* ((name (caar info))
-               (w (cdar info))
-               (mask (- (expt 2 w) 1))
-               (val (bitwise-and v mask)))
-          (loop (cdr info) (arithmetic-shift v (- 0 w))
-                (cons (cons name val) acc))))))
+;; Compare two bit-vectors for BDD equality, bit by bit
+(define (ref-bv-equal? a b)
+  (cond
+    ((and (null? a) (null? b)) #t)
+    ((or (null? a) (null? b)) #f)
+    ((not (bdd-equal? (car a) (car b))) #f)
+    (else (ref-bv-equal? (cdr a) (cdr b)))))
 
-;; Build a BDD variable environment from a vector number
-(define (make-bdd-env vec-num input-info)
-  (let loop ((info input-info) (v vec-num) (acc '()))
-    (if (null? info) acc
-        (let* ((name (caar info))
-               (w (cdar info)))
-          (let iloop ((i 0) (v2 v) (acc2 acc))
-            (if (= i w)
-                (loop (cdr info) v2 acc2)
-                (let ((var-name (if (= w 1)
-                                   (symbol->string name)
-                                   (string-append (symbol->string name)
-                                                  "[" (number->string i) "]"))))
-                  (iloop (+ i 1) (quotient v2 2)
-                         (cons (cons var-name (remainder v2 2)) acc2)))))))))
 
 ;;; ================================================================
 ;;; RUN ALL TESTS
@@ -355,6 +316,7 @@
 (displayln "")
 (displayln "=============================================")
 (displayln "  Bit-Vector Synthesis Verification Suite")
+(displayln "  (symbolic BDD comparison -- no enumeration)")
 (displayln "=============================================")
 
 (define *test-results* '())
