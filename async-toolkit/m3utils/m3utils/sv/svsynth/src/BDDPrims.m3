@@ -231,13 +231,21 @@ PROCEDURE BDDNameApply(<*UNUSED*>p : SchemeProcedure.T;
     RETURN SchemeString.FromText(name)
   END BDDNameApply;
 
-(* (bdd-id b) => integer id of the node *)
+(* (bdd-id b) => integer id of the node (variable index, NOT unique) *)
 PROCEDURE BDDIdApply(<*UNUSED*>p : SchemeProcedure.T;
                      <*UNUSED*>interp : Scheme.T;
                                args : Object) : Object RAISES { E } =
   BEGIN
     RETURN SchemeLongReal.FromLR(FLOAT(BDD.GetId(CheckBDD(First(args))), LONGREAL))
   END BDDIdApply;
+
+(* (bdd-hash b) => unique hash tag of the BDD node (monotonic counter) *)
+PROCEDURE BDDHashApply(<*UNUSED*>p : SchemeProcedure.T;
+                       <*UNUSED*>interp : Scheme.T;
+                                 args : Object) : Object RAISES { E } =
+  BEGIN
+    RETURN SchemeLongReal.FromI(BDD.Hash(CheckBDD(First(args))))
+  END BDDHashApply;
 
 (**********************************************************************)
 
@@ -308,6 +316,9 @@ PROCEDURE Install(prims : SchemePrimitive.ExtDefiner) : SchemePrimitive.ExtDefin
                   1, 1);
     prims.addPrim("bdd-id", NEW(SchemeProcedure.T,
                                  apply := BDDIdApply),
+                  1, 1);
+    prims.addPrim("bdd-hash", NEW(SchemeProcedure.T,
+                                   apply := BDDHashApply),
                   1, 1);
     RETURN prims
   END Install;

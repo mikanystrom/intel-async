@@ -64,11 +64,6 @@
 (define (bv-range bv hi lo)
   (list-head (list-tail bv lo) (+ 1 (- hi lo))))
 
-(define (list-tail lst n)
-  (if (<= n 0) lst
-      (if (null? lst) '()
-          (list-tail (cdr lst) (- n 1)))))
-
 ;; Single bit extract
 (define (bv-bit bv idx)
   (list-ref bv idx))
@@ -701,11 +696,19 @@
 
     ;; Sequential block: (begin [name] stmts...)
     ((eq? 'begin (car stmt))
-     ;; Process statements in order, threading assignments
+     ;; Process statements in order, threading assignments.
+     ;; Update *bv-env* after each statement so later statements
+     ;; in the same block can reference earlier assignments
+     ;; (e.g. sum = ...; result = sum[7:0];)
      (let loop ((stmts (begin-stmts stmt)) (env '()))
        (if (null? stmts)
            env
            (let ((new-assigns (stmt->bv-assigns (car stmts))))
+             ;; Push new assignments into *bv-env* for later expr->bv
+             (for-each
+               (lambda (a)
+                 (set! *bv-env* (cons a *bv-env*)))
+               new-assigns)
              ;; Later assignments override earlier ones
              (loop (cdr stmts)
                    (merge-bv-env env new-assigns))))))
@@ -802,6 +805,29 @@
 ;; 12. MODULE-LEVEL SYNTHESIS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; (is-comb-always? item) -- check if an (always ...) is combinational
+;; i.e. has sensitivity list @(*)
+(define (is-comb-always? item)
+  (and (pair? item) (eq? 'always (car item))
+       (pair? (cdr item)) (pair? (cadr item))
+       (eq? 'sens (car (cadr item)))
+       (member '* (cdr (cadr item)))))
+
+;; (is-seq-always? item) -- check if an (always ...) is sequential
+;; i.e. has sensitivity list @(posedge ...) or @(negedge ...)
+(define (is-seq-always? item)
+  (and (pair? item) (eq? 'always (car item))
+       (pair? (cdr item)) (pair? (cadr item))
+       (eq? 'sens (car (cadr item)))
+       (not (member '* (cdr (cadr item))))
+       ;; Has at least one edge trigger
+       (let loop ((sens (cdr (cadr item))))
+         (if (null? sens) #f
+             (if (and (pair? (car sens))
+                      (memq (caar sens) '(posedge negedge)))
+                 #t
+                 (loop (cdr sens)))))))
+
 ;; (bv-synth-combinational body) -- extract BV assignments from
 ;; all combinational constructs in a module body.
 (define (bv-synth-combinational body)
@@ -809,6 +835,16 @@
   (for-each
     (lambda (item)
       (cond
+        ;; localparam/parameter: evaluate constant and store in env
+        ;; (localparam NAME () value-expr)
+        ((and (pair? item) (memq (car item) '(localparam parameter)))
+         (let* ((name (cadr item))
+                (val-expr (cadddr item))
+                (bv (expr->bv val-expr))
+                (w (length bv)))
+           (width-set! name w)
+           (set! *bv-env* (cons (cons name bv) *bv-env*))))
+
         ;; Continuous assign: (assign (= lvalue expr))
         ((and (pair? item) (eq? 'assign (car item)))
          (let* ((asgn (cadr item))
@@ -825,10 +861,19 @@
         ((and (pair? item) (eq? 'always_comb (car item)))
          (set! result (append (stmt->bv-assigns (cadr item)) result)))
 
+        ;; always @(*): treat as combinational (like always_comb)
+        ((is-comb-always? item)
+         (set! result (append (stmt->bv-assigns (sv-last item)) result)))
+
         ;; always_ff: (always_ff sensitivity stmt)
         ;; Extract the combinational cone feeding the flops.
         ;; Current flop values are treated as inputs (BDD variables).
         ((and (pair? item) (eq? 'always_ff (car item)))
+         (let ((stmt (sv-last item)))
+           (set! result (append (stmt->bv-assigns stmt) result))))
+
+        ;; always @(posedge ...): treat as sequential (like always_ff)
+        ((is-seq-always? item)
          (let ((stmt (sv-last item)))
            (set! result (append (stmt->bv-assigns stmt) result))))))
     body)
