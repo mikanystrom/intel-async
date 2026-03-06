@@ -510,10 +510,10 @@ arg_item: { val : TEXT; cnt : INTEGER; }
   empty_arg  { $$.val := "()" }
 
 function_declaration: { val : TEXT; cnt : INTEGER; }
-  x          { $$.val := "(function " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
-  user_type  { $$.val := "(function " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
-  user_type_dims { $$.val := "(function " & $1 & " (" & $2 & " " & $3 & ") " & $4 & " " & $5 & ")" }
-  bare       { $$.val := "(function " & $1 & " () " & $2 & " " & $3 & ")" }
+  x          { $$.val := "(function " & $1 & " " & $2 & " " & $3 & " " & $4 & " " & $5 & ")" }
+  user_type  { $$.val := "(function " & $1 & " " & $2 & " " & $3 & " " & $4 & " " & $5 & ")" }
+  user_type_dims { $$.val := "(function " & $1 & " (" & $2 & " " & $3 & ") " & $4 & " " & $5 & " " & $6 & ")" }
+  bare       { $$.val := "(function " & $1 & " () " & $2 & " " & $3 & " " & $4 & ")" }
 
 opt_automatic: { val : TEXT; cnt : INTEGER; }
   yes    { $$.val := "automatic" }
