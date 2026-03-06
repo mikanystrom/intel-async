@@ -1,36 +1,130 @@
-;; synth_cpu_cones.scm -- Analyze combinational cones in 6502 CPU
+;; synth_cpu_cones.scm -- Analyze and synthesize 6502 CPU combinational cones
 ;;
-;; Loads the cpu.sv AST, identifies each combinational output,
-;; builds BDDs, and reports cone complexity.
+;; Synthesizes the decode cones (branch_taken, is_rmw, is_store, continuous
+;; assigns).  The execution logic block (cone 2) is skipped because the
+;; 8-bit carry chains in ADC/SBC/CMP cause BDD blowup.
 
 (load "sv/src/svbase.scm")
 (load "sv/src/svbv.scm")
+(load "sv/src/svemit-c.scm")
 
-(define ast (read-sv-file "/tmp/6502_cpu.ast.scm"))
+(define ast (read-sv-file *cpu-ast-file*))
 (define mod (car ast))
 
-(define assigns (bv-synth-module mod))
+(bv-env-reset!)
+(width-reset!)
 
+(define name (module-name mod))
+(define ports (module-ports mod))
+(define body (module-body-items mod))
+
+(extract-port-widths ports)
+(extract-decl-widths body)
+
+(displayln "=== CPU Module: " (symbol->string name) " ===")
 (displayln "")
-(displayln "=== 6502 CPU Combinational Cone Analysis ===")
-(displayln "Total combinational outputs: " (number->string (length assigns)))
 
+;; Process localparams and functions
+(for-each
+  (lambda (item)
+    (cond
+      ((and (pair? item) (memq (car item) '(localparam parameter)))
+       (let* ((n (cadr item))
+              (val-expr (cadddr item))
+              (bv (expr->bv val-expr))
+              (w (length bv)))
+         (width-set! n w)
+         (set! *bv-env* (cons (cons n bv) *bv-env*))))
+      ((and (pair? item) (eq? 'function (car item)))
+       (let* ((rest (cdr item))
+              (rest (if (and (pair? rest) (string? (car rest))
+                             (string=? (car rest) "automatic"))
+                        (cdr rest) rest))
+              (ret-type (car rest))
+              (fname (cadr rest))
+              (fports (caddr rest))
+              (body-stmts (cdddr rest))
+              (params (map (lambda (p)
+                             (let ((pname (cadr (sv-last p)))
+                                   (pw (port-width p)))
+                               (list pname pw)))
+                           (if (and (pair? fports) (eq? 'ports (car fports)))
+                               (cdr fports) '())))
+              (ret-w (type-width ret-type)))
+         (width-set! fname ret-w)
+         (set! *bv-func-table*
+               (cons (list fname params body-stmts ret-w)
+                     *bv-func-table*))
+         (displayln "Registered function: " (symbol->string fname))))))
+  body)
+
+;; Synthesize each always_comb block individually
+;; Skip cone 2 (execution logic) -- too complex for BDDs due to carry chains
+(define cone-num 0)
 (define total-nodes 0)
-(define max-nodes 0)
-(define max-name "")
+(define all-assigns '())
 
 (for-each
-  (lambda (a)
-    (let* ((sig (car a))
-           (bv (cdr a))
-           (w (length bv))
-           (nodes (fold-left + 0 (map bdd-size bv))))
-      (set! total-nodes (+ total-nodes nodes))
-      (if (> nodes max-nodes)
-          (begin
-            (set! max-nodes nodes)
-            (set! max-name (symbol->string sig))))))
-  assigns)
+  (lambda (item)
+    (if (and (pair? item) (eq? 'always_comb (car item)))
+        (begin
+          (set! cone-num (+ cone-num 1))
+          (displayln "")
+          (if (= cone-num 2)
+              (displayln "--- Combinational cone 2 (execution logic): SKIPPED ---"
+                         *nl* "    (8-bit carry chains in ADC/SBC/CMP cause BDD blowup)")
+              (begin
+                (displayln "--- Combinational cone " (number->string cone-num) " ---")
+                (let ((assigns (stmt->bv-assigns (cadr item))))
+                  (set! all-assigns (append all-assigns assigns))
+                  (for-each
+                    (lambda (a)
+                      (let* ((sig (car a))
+                             (bv (cdr a))
+                             (w (length bv))
+                             (nodes (fold-left + 0 (map bdd-size bv))))
+                        (set! total-nodes (+ total-nodes nodes))
+                        (displayln "  " (symbol->string sig) " ["
+                                   (number->string w) " bits]: "
+                                   (number->string nodes) " BDD nodes")))
+                    assigns)))))))
+  body)
 
-(displayln "Total BDD nodes across all cones: " (number->string total-nodes))
-(displayln "Largest cone: " max-name " (" (number->string max-nodes) " nodes)")
+;; Continuous assigns
+(displayln "")
+(displayln "--- Continuous assigns ---")
+(for-each
+  (lambda (item)
+    (if (and (pair? item) (eq? 'assign (car item)))
+        (let* ((asgn (cadr item))
+               (sigs (lvalue-signals (cadr asgn)))
+               (bv (expr->bv (caddr asgn))))
+          (for-each
+            (lambda (s)
+              (let* ((rbv (bv-resize bv (width-get s)))
+                     (nodes (fold-left + 0 (map bdd-size rbv))))
+                (set! total-nodes (+ total-nodes nodes))
+                (set! all-assigns (cons (cons s rbv) all-assigns))
+                (set! *bv-env* (cons (cons s rbv) *bv-env*))
+                (displayln "  " (symbol->string s) " ["
+                           (number->string (length rbv)) " bits]: "
+                           (number->string nodes) " BDD nodes")))
+            sigs))))
+  body)
+
+(displayln "")
+(displayln "=== Total BDD nodes: " (number->string total-nodes) " ===")
+(displayln "=== Synthesized outputs: " (number->string (length all-assigns)) " ===")
+
+;; Generate C eval if output file specified
+(if *cpu-output-file*
+    (begin
+      (displayln "")
+      (displayln "Generating C evaluation functions...")
+      (define comb-inputs
+        (map (lambda (name) (list 'input name))
+             '(opcode P aaa)))
+      (define oport (open-output-file *cpu-output-file*))
+      (emit-c-eval-to-port "cpu_6502_decode" comb-inputs all-assigns oport)
+      (close-output-port oport)
+      (displayln "Written to " *cpu-output-file*)))

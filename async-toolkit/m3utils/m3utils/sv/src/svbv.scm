@@ -72,6 +72,17 @@
   (if (= n 0) (car lst)
       (list-ref (cdr lst) (- n 1))))
 
+;; Convert a BDD bitvector to a constant integer, or #f if any bit is non-constant
+(define (bv-to-const bv)
+  (let loop ((bits bv) (i 0) (val 0))
+    (if (null? bits) val
+        (cond
+          ((bdd-true? (car bits))
+           (loop (cdr bits) (+ i 1) (+ val (expt 2 i))))
+          ((bdd-false? (car bits))
+           (loop (cdr bits) (+ i 1) val))
+          (else #f)))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 2. BITWISE OPERATIONS
@@ -380,6 +391,18 @@
     body))
 
 
+;; (port-width p) -- get width from a single (port dir type dims (id name)) form
+(define (port-width p)
+  (let ((d (find-dims (cddr p))))
+    (if d (parse-dim-width d) 1)))
+
+;; (type-width type-form) -- get width from a type form like (logic [7:0])
+(define (type-width type-form)
+  (if (pair? type-form)
+      (let ((d (find-dims type-form)))
+        (if d (parse-dim-width d) 1))
+      1))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 8. BDD VARIABLE ENVIRONMENT (BIT-VECTOR VERSION)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -387,8 +410,13 @@
 ;; Maps signal names to bit-vectors of BDDs
 (define *bv-env* '())
 
+;; Function table: maps function name (symbol) to (params body-stmts return-width)
+;; params is list of (name width) pairs
+(define *bv-func-table* '())
+
 (define (bv-env-reset!)
-  (set! *bv-env* '()))
+  (set! *bv-env* '())
+  (set! *bv-func-table* '()))
 
 ;; (bv-lookup name) -- find or create BDD variables for signal NAME.
 ;; Returns a bit-vector (list of BDDs).
@@ -436,12 +464,12 @@
                 (let ((val (cond
                              ((equal? base-char "b")
                               (parse-binary digits))
-                             ((equal? base-char "h")
-                              (string->number (string-append "#x" digits)))
+                             ((or (equal? base-char "h") (equal? base-char "H"))
+                              (parse-hex digits))
                              ((equal? base-char "d")
                               (string->number digits))
                              ((equal? base-char "o")
-                              (string->number (string-append "#o" digits)))
+                              (parse-octal digits))
                              (else (string->number digits)))))
                   (if (and width val)
                       (cons val width)
@@ -460,6 +488,30 @@
           (loop (+ i 1)
                 (+ (* val 2)
                    (if (char=? c #\1) 1 0)))))))
+
+(define (parse-hex s)
+  ;; Parse a hex string like "FF" or "3a" to an integer
+  (let loop ((i 0) (val 0))
+    (if (>= i (string-length s)) val
+        (let* ((c (string-ref s i))
+               (d (cond
+                    ((and (char>=? c #\0) (char<=? c #\9))
+                     (- (char->integer c) (char->integer #\0)))
+                    ((and (char>=? c #\a) (char<=? c #\f))
+                     (+ 10 (- (char->integer c) (char->integer #\a))))
+                    ((and (char>=? c #\A) (char<=? c #\F))
+                     (+ 10 (- (char->integer c) (char->integer #\A))))
+                    (else 0))))
+          (loop (+ i 1) (+ (* val 16) d))))))
+
+(define (parse-octal s)
+  ;; Parse an octal string to an integer
+  (let loop ((i 0) (val 0))
+    (if (>= i (string-length s)) val
+        (let ((c (string-ref s i)))
+          (loop (+ i 1)
+                (+ (* val 8)
+                   (- (char->integer c) (char->integer #\0))))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -661,9 +713,48 @@
                                        "_" (symbol->string mem))))
            (bv-const 0 1))))
 
-    ;; Call: (call func args) -- uninterpreted, return opaque variable
+    ;; Call: (call (id fname) arg1 arg2 ...) -- inline function if known
     ((eq? 'call (car node))
-     (bv-const 0 1))
+     (let* ((func-id (cadr node))
+            (fname (if (and (pair? func-id) (eq? 'id (car func-id)))
+                       (cadr func-id) #f))
+            (fdef (if fname (assq fname *bv-func-table*) #f)))
+       (if (not fdef)
+           (bv-const 0 1)  ;; unknown function: return 0
+           (let* ((params (cadr fdef))
+                  (body-stmts (caddr fdef))
+                  (ret-w (cadddr fdef))
+                  (args (cddr node))
+                  ;; Evaluate arguments
+                  (arg-bvs (map expr->bv args))
+                  ;; Save env, bind params
+                  (saved-env *bv-env*))
+             ;; Bind each parameter to its argument value
+             (for-each
+               (lambda (param arg-bv)
+                 (let ((pname (car param))
+                       (pw (cadr param)))
+                   (width-set! pname pw)
+                   (set! *bv-env* (cons (cons pname (bv-resize arg-bv pw))
+                                        *bv-env*))))
+               params arg-bvs)
+             ;; Initialize return value (function name = return variable)
+             (width-set! fname ret-w)
+             (set! *bv-env* (cons (cons fname (bv-zero ret-w)) *bv-env*))
+             ;; Execute body statements
+             (for-each
+               (lambda (stmt)
+                 (let ((new-assigns (stmt->bv-assigns stmt)))
+                   (for-each
+                     (lambda (a)
+                       (set! *bv-env* (cons a *bv-env*)))
+                     new-assigns)))
+               body-stmts)
+             ;; Get return value (the function name in env)
+             (let ((ret-bv (bv-lookup fname)))
+               ;; Restore env
+               (set! *bv-env* saved-env)
+               ret-bv)))))
 
     ;; Cast: (cast type expr) -- evaluate expr, resize to type width
     ((eq? 'cast (car node))
@@ -706,11 +797,34 @@
                                           (cons s (bv-resize slice (width-get s))))
                                         sigs))))
                    (loop (cdr members) (+ offset w) new-acc))))
-           ;; Simple LHS
-           (let ((sigs (lvalue-signals lv)))
-             (map (lambda (s)
-                    (cons s (bv-resize bv (width-get s))))
-                  sigs)))))
+           ;; Indexed LHS: (index (id sig) idx-expr) -- bit-select assignment
+           (if (and (pair? lv) (eq? 'index (car lv))
+                    (pair? (cadr lv)) (eq? 'id (car (cadr lv))))
+               (let* ((sig (cadr (cadr lv)))
+                      (idx-bv (expr->bv (caddr lv)))
+                      (w (width-get sig))
+                      (cur (bv-lookup sig))
+                      (bit-val (car (bv-resize bv 1))))
+                 ;; If index is a constant, do direct bit replacement
+                 (let ((idx-val (bv-to-const idx-bv)))
+                   (if idx-val
+                       (let ((new-bv
+                               (let loop ((i 0) (bits cur) (acc '()))
+                                 (if (null? bits) (reverse acc)
+                                     (loop (+ i 1) (cdr bits)
+                                           (cons (if (= i idx-val) bit-val (car bits))
+                                                 acc))))))
+                         (list (cons sig new-bv)))
+                       ;; Non-constant index: can't handle, fall through
+                       (let ((sigs (lvalue-signals lv)))
+                         (map (lambda (s)
+                                (cons s (bv-resize bv (width-get s))))
+                              sigs)))))
+               ;; Simple LHS
+               (let ((sigs (lvalue-signals lv)))
+                 (map (lambda (s)
+                        (cons s (bv-resize bv (width-get s))))
+                      sigs))))))
 
     ;; Sequential block: (begin [name] stmts...)
     ((eq? 'begin (car stmt))
@@ -805,13 +919,24 @@
       ;; Fold regular items right-to-left over the default.
       ;; Save/restore *bv-env* around each branch so that assignments
       ;; within one branch don't pollute other branches' lookups.
+      ;; Case items may have multiple labels: (label1 label2 ... body)
+      ;; The body is the last element; all preceding elements are match labels.
       (fold-right
         (lambda (ci acc)
           (if (and (pair? ci) (> (length ci) 1))
-              (let* ((match-bv (expr->bv (car ci)))
-                     (eq-bv (bv-eq sel-bv match-bv))
+              (let* ((labels (let loop ((elts ci))
+                               (if (null? (cdr elts)) '()
+                                   (cons (car elts) (loop (cdr elts))))))
+                     (body (sv-last ci))
+                     ;; OR all label matches together
+                     (eq-bv (fold-left
+                              (lambda (acc-bv label)
+                                (let ((match-bv (expr->bv label)))
+                                  (bv-or acc-bv (bv-eq sel-bv match-bv))))
+                              (bv-zero 1)
+                              labels))
                      (saved-env *bv-env*)
-                     (item-assigns (stmt->bv-assigns (cadr ci)))
+                     (item-assigns (stmt->bv-assigns body))
                      (dummy (set! *bv-env* saved-env)))
                 (merge-conditional-bv-assigns eq-bv item-assigns acc))
               acc))
@@ -884,6 +1009,33 @@
                          ;; Store into env so later assigns can reference this wire
                          (set! *bv-env* (cons (cons s rbv) *bv-env*))))
                      sigs)))
+
+        ;; function: (function auto? return-type name (ports ...) body-stmts...)
+        ;; Register in function table for later inlining
+        ((and (pair? item) (eq? 'function (car item)))
+         (let* ((rest (cdr item))
+                ;; Skip optional "automatic" string
+                (rest (if (and (pair? rest) (string? (car rest))
+                               (string=? (car rest) "automatic"))
+                          (cdr rest) rest))
+                (ret-type (car rest))
+                (fname (cadr rest))
+                (fports (caddr rest))
+                (body-stmts (cdddr rest))
+                ;; Extract parameter names and widths from ports
+                (params (map (lambda (p)
+                               ;; (port input type dims (id name))
+                               (let ((pname (cadr (sv-last p)))
+                                     (pw (port-width p)))
+                                 (list pname pw)))
+                             (if (and (pair? fports) (eq? 'ports (car fports)))
+                                 (cdr fports) '())))
+                ;; Return width from type
+                (ret-w (type-width ret-type)))
+           (width-set! fname ret-w)
+           (set! *bv-func-table*
+                 (cons (list fname params body-stmts ret-w)
+                       *bv-func-table*))))
 
         ;; always_comb: (always_comb stmt)
         ((and (pair? item) (eq? 'always_comb (car item)))
