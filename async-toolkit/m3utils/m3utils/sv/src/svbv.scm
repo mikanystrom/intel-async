@@ -83,6 +83,50 @@
            (loop (cdr bits) (+ i 1) val))
           (else #f)))))
 
+;; Try to evaluate a simple expression to a constant integer.
+;; Uses *width-map* and *bv-env* for known constants.
+;; Returns an integer or #f if not evaluable.
+(define (try-const-eval expr)
+  (cond
+    ((number? expr) expr)
+    ((symbol? expr)
+     (let ((entry (assq expr *bv-env*)))
+       (if entry (bv-to-const (cdr entry)) #f)))
+    ((not (pair? expr)) #f)
+    ((eq? 'id (car expr))
+     (let ((entry (assq (cadr expr) *bv-env*)))
+       (if entry (bv-to-const (cdr entry)) #f)))
+    ((eq? '- (car expr))
+     (if (null? (cddr expr))
+         ;; Unary minus
+         (let ((a (try-const-eval (cadr expr))))
+           (if a (- 0 a) #f))
+         ;; Binary minus
+         (let ((a (try-const-eval (cadr expr)))
+               (b (try-const-eval (caddr expr))))
+           (if (and a b) (- a b) #f))))
+    ((eq? '+ (car expr))
+     (let ((a (try-const-eval (cadr expr)))
+           (b (try-const-eval (caddr expr))))
+       (if (and a b) (+ a b) #f)))
+    ((eq? '* (car expr))
+     (let ((a (try-const-eval (cadr expr)))
+           (b (try-const-eval (caddr expr))))
+       (if (and a b) (* a b) #f)))
+    ((eq? '/ (car expr))
+     (let ((a (try-const-eval (cadr expr)))
+           (b (try-const-eval (caddr expr))))
+       (if (and a b (not (= b 0))) (quotient a b) #f)))
+    ((eq? '<< (car expr))
+     (let ((a (try-const-eval (cadr expr)))
+           (b (try-const-eval (caddr expr))))
+       (if (and a b) (* a (expt 2 b)) #f)))
+    ((eq? '>> (car expr))
+     (let ((a (try-const-eval (cadr expr)))
+           (b (try-const-eval (caddr expr))))
+       (if (and a b) (quotient a (expt 2 b)) #f)))
+    (else #f)))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 2. BITWISE OPERATIONS
@@ -294,6 +338,34 @@
         (bv-zero w)
         (append (list-tail bv amt) (make-list amt (bdd-false))))))
 
+;; Dynamic left shift (barrel shifter): shift amount is a bitvector
+(define (bv-dyn-shl bv amt-bv)
+  (let ((w (length bv))
+        (n (length amt-bv)))
+    (let loop ((i 0) (result bv))
+      (if (>= i n)
+          result
+          (let* ((shift-amt (expt 2 i))
+                 (shifted (bv-shl result shift-amt))
+                 (sel (list-ref amt-bv i)))
+            (loop (+ i 1)
+                  (map (lambda (s r) (bdd-ite sel s r))
+                       shifted result)))))))
+
+;; Dynamic right shift (barrel shifter): shift amount is a bitvector
+(define (bv-dyn-shr bv amt-bv)
+  (let ((w (length bv))
+        (n (length amt-bv)))
+    (let loop ((i 0) (result bv))
+      (if (>= i n)
+          result
+          (let* ((shift-amt (expt 2 i))
+                 (shifted (bv-shr result shift-amt))
+                 (sel (list-ref amt-bv i)))
+            (loop (+ i 1)
+                  (map (lambda (s r) (bdd-ite sel s r))
+                       shifted result)))))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 7. WIDTH MAP -- signal name -> bit width
@@ -368,6 +440,52 @@
      (car lst))
     (else (find-dims (cdr lst)))))
 
+;; Try to compute width from a type-form, handling both simple dims [7:0]
+;; and parametric dims where [ EXPR :LO] is split across list elements.
+;; Returns width (integer) or #f.
+(define (compute-type-width type-form)
+  (if (not (pair? type-form)) #f
+      (let* ((d (find-dims type-form))
+             (simple-w (if d (parse-dim-width d) #f)))
+        (if simple-w
+            simple-w
+            ;; Check for structured parametric dim: (type [ EXPR :LO])
+            ;; where [ is a bare symbol, EXPR is a list, :LO] is a symbol
+            (let ((bracket-pos (find-bracket-struct type-form)))
+              (if bracket-pos
+                  (let* ((hi-expr (cadr bracket-pos))
+                         (lo-sym (caddr bracket-pos))
+                         (lo-str (if (symbol? lo-sym)
+                                     (symbol->string lo-sym) ""))
+                         ;; lo-str is like ":0]" -- extract the number
+                         (lo-val (if (and (> (string-length lo-str) 1)
+                                          (equal? (substring lo-str 0 1) ":"))
+                                     (let ((s2 (if (equal? (substring lo-str
+                                                     (- (string-length lo-str) 1)
+                                                     (string-length lo-str)) "]")
+                                                   (substring lo-str 1
+                                                     (- (string-length lo-str) 1))
+                                                   (substring lo-str 1
+                                                     (string-length lo-str)))))
+                                       (string->number s2))
+                                     #f))
+                         (hi-val (try-const-eval hi-expr)))
+                    (if (and hi-val lo-val)
+                        (+ 1 (- hi-val lo-val))
+                        #f))
+                  #f))))))
+
+;; Find structured bracket dim: look for symbol "[" followed by expr and ":N]"
+(define (find-bracket-struct lst)
+  (cond
+    ((null? lst) #f)
+    ((and (symbol? (car lst))
+          (equal? (symbol->string (car lst)) "[")
+          (pair? (cdr lst))
+          (pair? (cddr lst)))
+     lst)  ;; return ([ EXPR :LO] ...)
+    (else (find-bracket-struct (cdr lst)))))
+
 ;; Extract widths from local declarations in module body
 ;; (decl (logic [7:0]) (id data_q) (id data_d))
 (define (extract-decl-widths body)
@@ -380,8 +498,7 @@
                                 (cddr item))))
             ;; Look for dimensions in the type form
             (let ((width (if type-form
-                             (let ((d (find-dims type-form)))
-                               (if d (parse-dim-width d) 1))
+                             (or (compute-type-width type-form) 1)
                              1)))
               (for-each
                 (lambda (id-form)
@@ -393,15 +510,55 @@
 
 ;; (port-width p) -- get width from a single (port dir type dims (id name)) form
 (define (port-width p)
-  (let ((d (find-dims (cddr p))))
-    (if d (parse-dim-width d) 1)))
+  (or (compute-type-width (cddr p)) 1))
 
 ;; (type-width type-form) -- get width from a type form like (logic [7:0])
 (define (type-width type-form)
   (if (pair? type-form)
-      (let ((d (find-dims type-form)))
-        (if d (parse-dim-width d) 1))
+      (or (compute-type-width type-form) 1)
       1))
+
+;; (extract-param-defaults params-form) -- extract parameter default values
+;; from a (parameters (parameter TYPE NAME VALUE) ...) form.
+;; Stores constants in *bv-env* and widths in *width-map*.
+(define (extract-param-defaults params-form)
+  (if (and (pair? params-form) (eq? 'parameters (car params-form)))
+      (for-each
+        (lambda (p)
+          (if (and (pair? p) (eq? 'parameter (car p)))
+              (let* ((second (cadr p))
+                     (name (cond
+                             ((symbol? second) second)
+                             ((pair? second)
+                              ;; (parameter TYPE NAME VALUE)
+                              (if (and (symbol? (caddr p))
+                                       (not (null? (cdddr p))))
+                                  (caddr p)
+                                  ;; (parameter TYPE (id NAME VALUE))
+                                  (let ((last (sv-last p)))
+                                    (if (and (pair? last) (eq? 'id (car last)))
+                                        (cadr last) #f))))
+                             (else #f)))
+                     (val-expr (cond
+                                 ((symbol? second)
+                                  (if (not (null? (cdddr p)))
+                                      (cadddr p) #f))
+                                 ((pair? second)
+                                  (if (and (symbol? (caddr p))
+                                           (not (null? (cdddr p))))
+                                      (cadddr p)
+                                      (let ((last (sv-last p)))
+                                        (if (and (pair? last) (eq? 'id (car last))
+                                                 (not (null? (cddr last))))
+                                            (caddr last) #f))))
+                                 (else #f))))
+                (if (and name val-expr)
+                    (let* ((bv (expr->bv val-expr))
+                           (w (length bv)))
+                      (width-set! name w)
+                      (set! *bv-env* (cons (cons name bv) *bv-env*)))))))
+        (cdr params-form))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; 8. BDD VARIABLE ENVIRONMENT (BIT-VECTOR VERSION)
@@ -650,8 +807,9 @@
     ;; Bit index: (index expr idx)
     ((eq? 'index (car node))
      (let* ((base (expr->bv (cadr node)))
-            (idx (caddr node)))
-       (if (number? idx)
+            (idx-raw (caddr node))
+            (idx (if (number? idx-raw) idx-raw (try-const-eval idx-raw))))
+       (if (and idx (number? idx))
            (if (and (>= idx 0) (< idx (length base)))
                (list (bv-bit base idx))
                (list (bdd-false)))
@@ -662,12 +820,16 @@
     ;; Part select: (range expr hi lo)
     ((eq? 'range (car node))
      (let* ((base (expr->bv (cadr node)))
-            (hi (caddr node))
-            (lo (cadddr node)))
-       (if (and (number? hi) (number? lo))
+            (hi-raw (caddr node))
+            (lo-raw (cadddr node))
+            (hi (if (number? hi-raw) hi-raw (try-const-eval hi-raw)))
+            (lo (if (number? lo-raw) lo-raw (try-const-eval lo-raw))))
+       (if (and hi lo)
            (if (and (>= lo 0) (< hi (length base)) (>= hi lo))
                (bv-range base hi lo)
-               (bv-zero (+ 1 (- hi lo))))
+               (if (and (>= hi lo))
+                   (bv-zero (+ 1 (- hi lo)))
+                   (bv-zero 1)))
            ;; Dynamic range -- uninterpreted
            (bv-zero 1))))
 
@@ -678,30 +840,47 @@
     ;; Replication: (replicate count expr ...)
     ((eq? 'replicate (car node))
      (let* ((count-expr (cadr node))
-            (count (if (number? count-expr)
-                       count-expr
-                       (let ((p (parse-sv-number count-expr)))
-                         (car p))))
+            (count (cond
+                     ((number? count-expr) count-expr)
+                     ((symbol? count-expr)
+                      (or (try-const-eval count-expr)
+                          (let ((p (parse-sv-number count-expr)))
+                            (car p))))
+                     (else (or (try-const-eval count-expr) 1))))
             (inner (bv-concat-list (map expr->bv (cddr node)))))
        (let loop ((n count) (acc '()))
          (if (<= n 0) acc
              (loop (- n 1) (append acc inner))))))
 
-    ;; Left shift: (<< a b) -- treat b as constant if possible
+    ;; Left shift: (<< a b) -- use barrel shifter for dynamic amounts
     ((eq? '<< (car node))
      (let* ((a (expr->bv (cadr node)))
-            (b-node (caddr node))
-            (amt (if (number? b-node) b-node
-                     (let ((p (parse-sv-number b-node))) (car p)))))
-       (bv-shl a amt)))
+            (b-node (caddr node)))
+       (cond
+         ((number? b-node) (bv-shl a b-node))
+         ((symbol? b-node)
+          (let ((c (try-const-eval b-node)))
+            (if c (bv-shl a c)
+                (bv-dyn-shl a (expr->bv b-node)))))
+         (else
+          (let ((c (try-const-eval b-node)))
+            (if c (bv-shl a c)
+                (bv-dyn-shl a (expr->bv b-node))))))))
 
-    ;; Right shift: (>> a b)
+    ;; Right shift: (>> a b) -- use barrel shifter for dynamic amounts
     ((eq? '>> (car node))
      (let* ((a (expr->bv (cadr node)))
-            (b-node (caddr node))
-            (amt (if (number? b-node) b-node
-                     (let ((p (parse-sv-number b-node))) (car p)))))
-       (bv-shr a amt)))
+            (b-node (caddr node)))
+       (cond
+         ((number? b-node) (bv-shr a b-node))
+         ((symbol? b-node)
+          (let ((c (try-const-eval b-node)))
+            (if c (bv-shr a c)
+                (bv-dyn-shr a (expr->bv b-node)))))
+         (else
+          (let ((c (try-const-eval b-node)))
+            (if c (bv-shr a c)
+                (bv-dyn-shr a (expr->bv b-node))))))))
 
     ;; Field access: (field expr member)
     ((eq? 'field (car node))
@@ -984,19 +1163,94 @@
 ;; (bv-synth-combinational body) -- extract BV assignments from
 ;; all combinational constructs in a module body.
 (define (bv-synth-combinational body)
+  ;; First pass: extract localparams/parameters so decl widths can use them
+  (for-each
+    (lambda (item)
+      (if (and (pair? item) (memq (car item) '(localparam parameter)))
+          (let* ((second (cadr item))
+                 (name (cond
+                         ((symbol? second) second)
+                         ((pair? second)
+                          (let ((last (sv-last item)))
+                            (cond
+                              ((and (pair? last) (eq? 'id (car last)))
+                               (cadr last))
+                              ((and (symbol? (caddr item))
+                                    (not (null? (cdddr item))))
+                               (caddr item))
+                              (else #f))))
+                         (else #f)))
+                 (val-expr (cond
+                             ((symbol? second)
+                              (if (not (null? (cdddr item)))
+                                  (cadddr item) #f))
+                             ((pair? second)
+                              (let ((last (sv-last item)))
+                                (cond
+                                  ((and (pair? last) (eq? 'id (car last))
+                                        (not (null? (cddr last))))
+                                   (caddr last))
+                                  ((not (null? (cdddr item)))
+                                   (cadddr item))
+                                  (else #f))))
+                             (else #f))))
+            (if (and name val-expr)
+                (let* ((bv (expr->bv val-expr))
+                       (w (length bv)))
+                  (width-set! name w)
+                  (set! *bv-env* (cons (cons name bv) *bv-env*)))))))
+    body)
+  ;; Re-evaluate decl widths now that localparams are known
+  (extract-decl-widths body)
+  ;; Second pass: process all constructs
   (define result '())
   (for-each
     (lambda (item)
       (cond
         ;; localparam/parameter: evaluate constant and store in env
-        ;; (localparam NAME () value-expr)
+        ;; Shape 1: (localparam NAME () value-expr)  -- Verilog-2001
+        ;; Shape 2: (localparam TYPE (id NAME value-expr))  -- SystemVerilog
+        ;; Shape 3: (parameter TYPE NAME value-expr)  -- parameters
         ((and (pair? item) (memq (car item) '(localparam parameter)))
-         (let* ((name (cadr item))
-                (val-expr (cadddr item))
-                (bv (expr->bv val-expr))
-                (w (length bv)))
-           (width-set! name w)
-           (set! *bv-env* (cons (cons name bv) *bv-env*))))
+         (let* ((second (cadr item))
+                (name (cond
+                        ;; Shape 1: second element is a symbol (the name)
+                        ((symbol? second) second)
+                        ;; Shape 2/3: second element is a type (pair)
+                        ((pair? second)
+                         (let ((last (sv-last item)))
+                           (cond
+                             ;; (id NAME VALUE) form
+                             ((and (pair? last) (eq? 'id (car last)))
+                              (cadr last))
+                             ;; (parameter TYPE NAME VALUE) -- name is 3rd
+                             ((and (symbol? (caddr item))
+                                   (not (null? (cdddr item))))
+                              (caddr item))
+                             (else #f))))
+                        (else #f)))
+                (val-expr (cond
+                            ;; Shape 1: value is 4th element
+                            ((symbol? second)
+                             (if (not (null? (cdddr item)))
+                                 (cadddr item) #f))
+                            ;; Shape 2: value inside (id NAME VALUE)
+                            ((pair? second)
+                             (let ((last (sv-last item)))
+                               (cond
+                                 ((and (pair? last) (eq? 'id (car last))
+                                       (not (null? (cddr last))))
+                                  (caddr last))
+                                 ;; Shape 3: value is 4th element
+                                 ((not (null? (cdddr item)))
+                                  (cadddr item))
+                                 (else #f))))
+                            (else #f))))
+           (if (and name val-expr)
+               (let* ((bv (expr->bv val-expr))
+                      (w (length bv)))
+                 (width-set! name w)
+                 (set! *bv-env* (cons (cons name bv) *bv-env*))))))
 
         ;; Continuous assign: (assign (= lvalue expr))
         ((and (pair? item) (eq? 'assign (car item)))
