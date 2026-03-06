@@ -688,11 +688,29 @@
     ;; Blocking assign: (= lvalue expr)
     ;; Non-blocking assign: (<= lvalue expr)  -- treated same for synthesis
     ((or (eq? '= (car stmt)) (eq? '<= (car stmt)))
-     (let ((sigs (lvalue-signals (cadr stmt)))
+     (let ((lv (cadr stmt))
            (bv (expr->bv (caddr stmt))))
-       (map (lambda (s)
-              (cons s (bv-resize bv (width-get s))))
-            sigs)))
+       (if (and (pair? lv) (eq? 'concat (car lv)))
+           ;; Concat LHS: split RHS bits among members.
+           ;; SV concat {a, b, c} = a is MSB, c is LSB.
+           ;; Our BV list is LSB-first.  Reverse the concat members
+           ;; so we slice from LSB to MSB.
+           (let loop ((members (reverse (cdr lv))) (offset 0) (acc '()))
+             (if (null? members)
+                 acc
+                 (let* ((sigs (lvalue-signals (car members)))
+                        (w (if (null? sigs) 1 (width-get (car sigs))))
+                        (slice (list-head (list-tail bv offset) w))
+                        (new-acc (append acc
+                                   (map (lambda (s)
+                                          (cons s (bv-resize slice (width-get s))))
+                                        sigs))))
+                   (loop (cdr members) (+ offset w) new-acc))))
+           ;; Simple LHS
+           (let ((sigs (lvalue-signals lv)))
+             (map (lambda (s)
+                    (cons s (bv-resize bv (width-get s))))
+                  sigs)))))
 
     ;; Sequential block: (begin [name] stmts...)
     ((eq? 'begin (car stmt))
@@ -714,12 +732,16 @@
                    (merge-bv-env env new-assigns))))))
 
     ;; Conditional: (if cond then [else])
+    ;; Save/restore *bv-env* around each branch to prevent cross-contamination.
     ((eq? 'if (car stmt))
      (let* ((cond-bv (expr->bv (cadr stmt)))
+            (saved-env *bv-env*)
             (then-assigns (stmt->bv-assigns (caddr stmt)))
+            (dummy (set! *bv-env* saved-env))
             (else-assigns (if (> (length stmt) 3)
                               (stmt->bv-assigns (cadddr stmt))
-                              '())))
+                              '()))
+            (dummy2 (set! *bv-env* saved-env)))
        (merge-conditional-bv-assigns cond-bv then-assigns else-assigns)))
 
     ;; Case: (case expr (match stmt) ...)
@@ -775,16 +797,22 @@
                                        (and (pair? ci)
                                             (not (eq? 'default (car ci)))))
                                      case-items))
+           (saved-env *bv-env*)
            (default-assigns (if default-item
                                 (stmt->bv-assigns (cadr default-item))
-                                '())))
-      ;; Fold regular items right-to-left over the default
+                                '()))
+           (dummy (set! *bv-env* saved-env)))
+      ;; Fold regular items right-to-left over the default.
+      ;; Save/restore *bv-env* around each branch so that assignments
+      ;; within one branch don't pollute other branches' lookups.
       (fold-right
         (lambda (ci acc)
           (if (and (pair? ci) (> (length ci) 1))
               (let* ((match-bv (expr->bv (car ci)))
                      (eq-bv (bv-eq sel-bv match-bv))
-                     (item-assigns (stmt->bv-assigns (cadr ci))))
+                     (saved-env *bv-env*)
+                     (item-assigns (stmt->bv-assigns (cadr ci)))
+                     (dummy (set! *bv-env* saved-env)))
                 (merge-conditional-bv-assigns eq-bv item-assigns acc))
               acc))
         default-assigns
