@@ -427,11 +427,12 @@
 ;;   plain integers: 42 => (val=42, width=32 default)
 ;;   1'b0, 1'b1 => (val=0/1, width=1)
 (define (parse-sv-number tok)
-  ;; tok is a symbol like |4'b0011| or a number
+  ;; tok is a symbol like 4:b0011 or a number
+  ;; Sized literals use ':' as separator (lexer replaces ' with :)
   (if (number? tok)
       (cons tok 32)
       (let ((s (if (symbol? tok) (symbol->string tok) tok)))
-        (let ((apos (string-index s #\')))
+        (let ((apos (string-index s #\:)))
           (if apos
               (let* ((width-str (substring s 0 apos))
                      (width (string->number width-str))
@@ -456,12 +457,6 @@
                     (cons val 32)
                     (cons 0 1))))))))
 
-(define (string-index s ch)
-  (let loop ((i 0))
-    (if (>= i (string-length s)) #f
-        (if (char=? (string-ref s i) ch) i
-            (loop (+ i 1))))))
-
 (define (parse-binary s)
   ;; Parse a binary string like "0011" to an integer
   (let loop ((i 0) (val 0))
@@ -483,12 +478,15 @@
     ((number? node)
      (bv-const node 32))
 
-    ;; Symbol -- could be a number literal like |4'b0011| or a bare name
+    ;; Symbol -- could be a number literal like 4:b0011 or a bare name
     ((symbol? node)
      (let ((s (symbol->string node)))
        (cond
-         ;; Sized literal
-         ((string-index s #\')
+         ;; Sized literal (lexer encodes 4'b0011 as 4:b0011)
+         ((and (string-index s #\:)
+               (let ((i (string-index s #\:)))
+                 (and (> i 0) (< (+ i 1) (string-length s))
+                      (memv (string-ref s (+ i 1)) '(#\b #\B #\h #\H #\d #\D #\o #\O)))))
           (let ((parsed (parse-sv-number node)))
             (bv-const (car parsed) (cdr parsed))))
          ;; SystemVerilog 0/1
@@ -693,7 +691,8 @@
     ((not (pair? stmt)) '())
 
     ;; Blocking assign: (= lvalue expr)
-    ((eq? '= (car stmt))
+    ;; Non-blocking assign: (<= lvalue expr)  -- treated same for synthesis
+    ((or (eq? '= (car stmt)) (eq? '<= (car stmt)))
      (let ((sigs (lvalue-signals (cadr stmt)))
            (bv (expr->bv (caddr stmt))))
        (map (lambda (s)
@@ -824,7 +823,14 @@
 
         ;; always_comb: (always_comb stmt)
         ((and (pair? item) (eq? 'always_comb (car item)))
-         (set! result (append (stmt->bv-assigns (cadr item)) result)))))
+         (set! result (append (stmt->bv-assigns (cadr item)) result)))
+
+        ;; always_ff: (always_ff sensitivity stmt)
+        ;; Extract the combinational cone feeding the flops.
+        ;; Current flop values are treated as inputs (BDD variables).
+        ((and (pair? item) (eq? 'always_ff (car item)))
+         (let ((stmt (sv-last item)))
+           (set! result (append (stmt->bv-assigns stmt) result))))))
     body)
   (reverse result))
 

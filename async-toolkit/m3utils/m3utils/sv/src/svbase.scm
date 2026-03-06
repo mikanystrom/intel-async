@@ -101,6 +101,13 @@
   (string-append (spaces n) str))
 
 
+;; (string-index s ch) -- return index of first occurrence of ch in s, or #f.
+(define (string-index s ch)
+  (let loop ((i 0))
+    (if (>= i (string-length s)) #f
+        (if (char=? (string-ref s i) ch) i
+            (loop (+ i 1))))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; 2. FILE I/O

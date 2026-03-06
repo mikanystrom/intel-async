@@ -72,12 +72,21 @@
 (define *unary-ops*
   '((~ . "~") (! . "!") (- . "-") (+ . "+")))
 
+;; Convert sized literal encoding back to SV syntax: "2:b00" -> "2'b00"
+(define (unsized-literal s)
+  (let ((i (string-index s #\:)))
+    (if (and i (> i 0)
+             (< (+ i 1) (string-length s))
+             (memv (string-ref s (+ i 1)) '(#\b #\B #\h #\H #\d #\D #\o #\O)))
+        (string-append (substring s 0 i) "'" (substring s (+ i 1) (string-length s)))
+        s)))
+
 ;; (emit-expr node) -- convert an expression AST node to a string.
 (define (emit-expr node)
   (cond
     ;; Atoms: symbols become their string representation.
-    ;; Numbers like 8'hFF are stored as symbols by the Scheme reader.
-    ((symbol? node) (symbol->string node))
+    ;; Sized literals like 8:hFF are stored as symbols (lexer uses : for ')
+    ((symbol? node) (unsized-literal (symbol->string node)))
     ((number? node) (number->string node))
     ((string? node) node)
     ((not (pair? node)) "???")
