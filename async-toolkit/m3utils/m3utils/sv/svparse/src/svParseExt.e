@@ -70,6 +70,12 @@ import_item: { val : TEXT; cnt : INTEGER; }
   specific  { $$.val := $1 & "::" & $2 }
   wildcard  { $$.val := $1 & "::*" }
 
+dpi_export_declaration: { val : TEXT; cnt : INTEGER; }
+  function      { $$.val := "(dpi-export " & $1 & " function " & $2 & ")" }
+  task          { $$.val := "(dpi-export " & $1 & " task " & $2 & ")" }
+  function_cid  { $$.val := "(dpi-export " & $1 & " function " & $3 & " :c-name " & $2 & ")" }
+  task_cid      { $$.val := "(dpi-export " & $1 & " task " & $3 & " :c-name " & $2 & ")" }
+
 module_declaration: { val : TEXT; cnt : INTEGER; }
   x  { $$.val := "(module " & $1 & " " & $2 & $3 & " " & $4 & " " & $5 & ")" }
 
@@ -121,6 +127,10 @@ port_decl: { val : TEXT; cnt : INTEGER; }
   logic       { $$.val := "(port " & $1 & " logic " & $2 & " " & $3 & " " & $4 & ")" }
   integer     { $$.val := "(port " & $1 & " integer " & $2 & ")" }
   int         { $$.val := "(port " & $1 & " int " & $2 & " " & $3 & ")" }
+  bit         { $$.val := "(port " & $1 & " bit " & $2 & " " & $3 & " " & $4 & ")" }
+  byte        { $$.val := "(port " & $1 & " byte " & $2 & ")" }
+  shortint    { $$.val := "(port " & $1 & " shortint " & $2 & ")" }
+  longint     { $$.val := "(port " & $1 & " longint " & $2 & ")" }
   string_dir  { $$.val := "(port " & $1 & " string " & $2 & ")" }
   user_typed  { $$.val := "(port " & $1 & " " & $2 & " (id " & $3 & " " & $4 & "))" }
   dir_only    { $$.val := "(port " & $1 & " " & $2 & $3 & ")" }
@@ -214,6 +224,7 @@ module_item: { val : TEXT; cnt : INTEGER; }
   function_item   { $$.val := $1 }
   task_item       { $$.val := $1 }
   attribute       { $$.val := $2 }
+  dpi_export      { $$.val := $1 }
   if_gen          { $$.val := "(if-generate " & $1 & " " & $2 & " " & $3 & ")" }
   for_gen         { $$.val := "(for-generate " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
   case_item       { $$.val := "(" & $1 & " " & $2 & " " & $3 & ")" }
