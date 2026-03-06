@@ -49,9 +49,14 @@
                  " bits]: " (number->string nodes) " BDD nodes")))
   assigns)
 
+;; Filter assigns to only output port signals
+(define output-names (map cadr outputs))
+(define output-assigns
+  (sv-filter (lambda (a) (memq (car a) output-names)) assigns))
+
 ;; Generate C header -- write directly to file port
 (displayln "Generating C evaluation functions...")
 (define oport (open-output-file *gen-c-output-file*))
-(emit-c-eval-to-port (symbol->string name) inputs assigns oport)
+(emit-c-eval-to-port (symbol->string name) inputs output-assigns oport)
 (close-output-port oport)
 (displayln "Written to " *gen-c-output-file*)
