@@ -213,13 +213,30 @@
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; (find-bare-before-id lst) -- find a bare symbol preceding an (id) form.
+;; Handles (port dir name (id)) where name is a bare symbol.
+(define (find-bare-before-id lst)
+  (cond
+    ((null? lst) #f)
+    ((and (symbol? (car lst))
+          (not (null? (cdr lst)))
+          (pair? (cadr lst))
+          (eq? 'id (caadr lst)))
+     (car lst))
+    (else (find-bare-before-id (cdr lst)))))
+
 ;; (find-id-in-list lst) -- find the first (id ...) form in a list.
 ;; Used to locate the signal name within a port declaration that
 ;; contains type qualifiers, dimensions, etc. before the identifier.
+;; Handles the dir_only:bare case where the format is (name (id))
+;; -- when (id) has no name, the preceding bare symbol is the name.
 (define (find-id-in-list lst)
   (cond
     ((null? lst) #f)
-    ((and (pair? (car lst)) (eq? 'id (caar lst))) (car lst))
+    ((and (pair? (car lst)) (eq? 'id (caar lst)))
+     (if (null? (cdar lst))
+         #f   ;; (id) with no name -- caller should use preceding symbol
+         (car lst)))
     (else (find-id-in-list (cdr lst)))))
 
 ;; (collect-port-signals ports-form) -- extract (direction name) pairs
@@ -236,10 +253,15 @@
                (if (and (pair? p) (eq? 'port (car p)))
                    ;; (port direction type ... (id name dims))
                    ;; direction is (cadr p), (id ...) is somewhere in (cddr p)
+                   ;; For dir_only:bare format (port dir name (id)),
+                   ;; find-id-in-list returns #f; use last bare symbol before (id).
                    (let ((id-form (find-id-in-list (cddr p))))
                      (if id-form
                          (list (cadr p) (cadr id-form))
-                         #f))
+                         (let ((bare (find-bare-before-id (cddr p))))
+                           (if bare
+                               (list (cadr p) bare)
+                               #f))))
                    #f))
              (cdr ports)))))
 
