@@ -816,8 +816,10 @@
                 (sigs (lvalue-signals (cadr asgn)))
                 (bv (expr->bv (caddr asgn))))
            (for-each (lambda (s)
-                       (set! result (cons (cons s (bv-resize bv (width-get s)))
-                                          result)))
+                       (let ((rbv (bv-resize bv (width-get s))))
+                         (set! result (cons (cons s rbv) result))
+                         ;; Store into env so later assigns can reference this wire
+                         (set! *bv-env* (cons (cons s rbv) *bv-env*))))
                      sigs)))
 
         ;; always_comb: (always_comb stmt)
