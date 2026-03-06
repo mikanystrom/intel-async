@@ -212,7 +212,8 @@ def expand_macros(line, defines):
 def _process_inline_conditionals(text, defines):
     """Handle `ifdef/`ifndef/`else/`endif that appear after macro expansion."""
     # These can appear on a single line from multi-line macro bodies joined together
-    cond_re = re.compile(r'`(ifdef|ifndef|elsif|else|endif)\b\s*(\w*)')
+    # Only ifdef/ifndef/elsif take a name argument; else/endif do not
+    cond_re = re.compile(r'`(ifdef|ifndef|elsif)\b\s*(\w+)|`(else|endif)\b')
     if not cond_re.search(text):
         return text
     # Process by splitting into segments
@@ -220,8 +221,8 @@ def _process_inline_conditionals(text, defines):
     cond_stack = []
     pos = 0
     for m in cond_re.finditer(text):
-        directive = m.group(1)
-        name = m.group(2)
+        directive = m.group(1) or m.group(3)
+        name = m.group(2)  # None for else/endif
         # Add text before this directive if currently active
         if all(cond_stack) if cond_stack else True:
             result.append(text[pos:m.start()])

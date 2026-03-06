@@ -55,7 +55,27 @@ run_suite "ibex/rtl" "$IBEX"/rtl/*.sv
 
 echo ""
 echo "=== ibex prim/rtl ==="
-run_suite "prim/rtl" "$PRIM"/*.sv
+TMP2="/tmp/_svfe_preamble_$$.sv"
+trap "rm -f $TMP $TMP2" EXIT
+run_suite_with_preamble() {
+    suite="$1"
+    preamble="$2"
+    shift 2
+    pass=0
+    fail=0
+    for f in "$@"; do
+        { echo "$preamble"; cat "$f"; } > "$TMP2"
+        python3 "$PP" $PP_FLAGS "$TMP2" > "$TMP" 2>/dev/null
+        if "$SVFE" "$TMP" > /dev/null 2>&1; then
+            pass=$((pass + 1))
+        else
+            fail=$((fail + 1))
+            echo "  FAIL: $(basename "$f")"
+        fi
+    done
+    echo "$suite: $pass pass, $fail fail"
+}
+run_suite_with_preamble "prim/rtl" '`include "prim_assert.sv"' "$PRIM"/*.sv
 
 echo ""
 echo "=== verify ==="
