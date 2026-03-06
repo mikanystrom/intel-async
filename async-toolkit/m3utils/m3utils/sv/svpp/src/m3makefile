@@ -1,0 +1,6 @@
+import("libm3")
+
+Sequence("Bool", "Boolean")
+
+implementation("Main")
+program("svpp")

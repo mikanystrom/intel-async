@@ -13,7 +13,7 @@ cd "$ROOT"
 
 SVFE=sv/svparse/AMD64_LINUX/svfe
 SVSYNTH=sv/svsynth/AMD64_LINUX/svsynth
-SVPP=sv/src/svpp.py
+SVPP=sv/svpp/AMD64_LINUX/svpp
 TESTDIR=sv/tests/lint
 TMPDIR=/tmp/lint-tests-$$
 
@@ -42,7 +42,7 @@ run_lint() {
     PP_OUT="$TMPDIR/${BASENAME}.pp.sv"
     AST_OUT="$TMPDIR/${BASENAME}.ast.scm"
 
-    python3 "$SVPP" "$INPUT" > "$PP_OUT"
+    "$SVPP" "$INPUT" > "$PP_OUT"
     "$SVFE" --scm "$PP_OUT" > "$AST_OUT"
 
     DRIVER="$TMPDIR/${BASENAME}_lint.scm"
@@ -73,7 +73,7 @@ run_lint_clean() {
     PP_OUT="$TMPDIR/${BASENAME}.pp.sv"
     AST_OUT="$TMPDIR/${BASENAME}.ast.scm"
 
-    python3 "$SVPP" "$INPUT" > "$PP_OUT"
+    "$SVPP" "$INPUT" > "$PP_OUT"
     "$SVFE" --scm "$PP_OUT" > "$AST_OUT"
 
     DRIVER="$TMPDIR/${BASENAME}_lint.scm"

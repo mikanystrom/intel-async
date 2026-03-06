@@ -13,7 +13,7 @@ cd "$ROOT"
 
 SVFE=sv/svparse/AMD64_LINUX/svfe
 SVSYNTH=sv/svsynth/AMD64_LINUX/svsynth
-SVPP=sv/src/svpp.py
+SVPP=sv/svpp/AMD64_LINUX/svpp
 
 if [ ! -x "$SVFE" ]; then
     echo "ERROR: svfe not found at $SVFE" >&2
@@ -30,7 +30,7 @@ mkdir -p "$TMPDIR"
 trap "rm -rf $TMPDIR" EXIT
 
 echo "=== Parsing ALU.sv ==="
-python3 "$SVPP" sv/6502/rtl/ALU.sv > "$TMPDIR/ALU.pp.sv"
+"$SVPP" sv/6502/rtl/ALU.sv > "$TMPDIR/ALU.pp.sv"
 "$SVFE" --scm "$TMPDIR/ALU.pp.sv" > "$TMPDIR/ALU.ast.scm"
 echo "  Parse OK"
 

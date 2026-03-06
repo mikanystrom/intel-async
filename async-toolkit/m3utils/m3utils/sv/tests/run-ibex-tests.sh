@@ -13,7 +13,7 @@ set -e
 
 IBEX="${1:-/tmp/ibex}"
 SVFE="$(dirname "$0")/../svparse/AMD64_LINUX/svfe"
-PP="$(dirname "$0")/../src/svpp.py"
+PP="$(dirname "$0")/../svpp/AMD64_LINUX/svpp"
 
 if [ ! -d "$IBEX/rtl" ]; then
     echo "ibex not found at $IBEX"
@@ -39,7 +39,7 @@ run_suite() {
     pass=0
     fail=0
     for f in "$@"; do
-        python3 "$PP" $PP_FLAGS "$f" > "$TMP" 2>/dev/null
+        "$PP" $PP_FLAGS "$f" > "$TMP" 2>/dev/null
         if "$SVFE" "$TMP" > /dev/null 2>&1; then
             pass=$((pass + 1))
         else
@@ -65,7 +65,7 @@ run_suite_with_preamble() {
     fail=0
     for f in "$@"; do
         { echo "$preamble"; cat "$f"; } > "$TMP2"
-        python3 "$PP" $PP_FLAGS "$TMP2" > "$TMP" 2>/dev/null
+        "$PP" $PP_FLAGS "$TMP2" > "$TMP" 2>/dev/null
         if "$SVFE" "$TMP" > /dev/null 2>&1; then
             pass=$((pass + 1))
         else

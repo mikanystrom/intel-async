@@ -1,0 +1,6 @@
+
+
+module test;
+  assign y = ((x) > (3) ? (x) : (3));
+  assign z = ((x) < (((a) > (b) ? (a) : (b))) ? (x) : (((a) > (b) ? (a) : (b))));
+endmodule
