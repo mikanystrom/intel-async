@@ -45,6 +45,12 @@ import_item:
   specific                  T_IDENT T_SCOPE T_IDENT
   wildcard                  T_IDENT T_SCOPE '*'
 
+dpi_export_declaration:
+  function                  T_EXPORT T_STRLIT T_FUNCTION T_IDENT
+  task                      T_EXPORT T_STRLIT T_TASK T_IDENT
+  function_cid              T_EXPORT T_STRLIT T_IDENT '=' T_FUNCTION T_IDENT
+  task_cid                  T_EXPORT T_STRLIT T_IDENT '=' T_TASK T_IDENT
+
 
 module_declaration:
   x                         T_MODULE T_IDENT opt_module_imports opt_param_port_list opt_port_list ';' module_body T_ENDMODULE opt_end_label
@@ -97,6 +103,10 @@ port_decl:
   logic                     port_direction T_LOGIC opt_signing opt_packed_dims port_ident
   integer                   port_direction T_INTEGER port_ident
   int                       port_direction T_INT opt_signing port_ident
+  bit                       port_direction T_BIT opt_signing opt_packed_dims port_ident
+  byte                      port_direction T_BYTE port_ident
+  shortint                  port_direction T_SHORTINT port_ident
+  longint                   port_direction T_LONGINT port_ident
   string_dir                port_direction T_STRING port_ident
   user_typed                port_direction T_IDENT T_IDENT opt_unpacked_dims
   dir_only                  port_direction T_IDENT dir_only_rest
@@ -190,6 +200,7 @@ module_item:
   function_item             function_declaration
   task_item                 task_declaration
   attribute                 T_ATTRIBUTE module_item
+  dpi_export                dpi_export_declaration ';'
   if_gen                    T_IF '(' expression ')' generate_block opt_gen_else
   for_gen                   T_FOR '(' genvar_init ';' expression ';' genvar_step ')' generate_block
   case_item                 case_keyword '(' expression ')' case_item_list T_ENDCASE
