@@ -25,7 +25,7 @@
 \title{Performance Analysis of the \texttt{kyacc} Parser Generator\\[4pt]
        \large Applied to the SystemVerilog Grammar}
 \author{Mika Nystrom}
-\date{March 7, 2026 \quad 10:30 PST}
+\date{March 7, 2026 \quad (revised with K1 results)}
 
 \begin{document}
 \maketitle
@@ -518,8 +518,10 @@ END;
 \end{lstlisting}
 
 A typical state has transitions on 5--15 symbols.  This reduces the
-inner loop from 160 iterations to $\sim$10, a potential
-\textbf{10--20$\times$ speedup} on the state construction phase.
+inner loop from 160 iterations to $\sim$10.  \textbf{Note:}
+implementation and testing (Section~7) showed only a 13\% improvement,
+indicating \texttt{Step()} is not the dominant cost---\texttt{Expand()}
+is the true bottleneck.
 
 \subsubsection{K2: Memoize Epsilon Closures}
 
@@ -624,7 +626,7 @@ Fixes are ranked by effort-to-impact ratio:
 \toprule
 Priority & Fix & Impact & Effort & Speedup \\
 \midrule
-1 & K1: Relevant symbols only & High   & Low      & 10--20$\times$ \\
+1 & K1: Relevant symbols only & Low    & Low      & 1.13$\times$ \emph{(measured)} \\
 2 & G1: Flatten expressions   & High   & Moderate & 3--5$\times$ \\
 3 & K4: Better hash function  & Moderate & Low    & 1.5--2$\times$ \\
 4 & K2: Memoize closures      & High   & Moderate & 5--10$\times$ \\
@@ -641,17 +643,127 @@ Priority & Fix & Impact & Effort & Speedup \\
 \label{tab:fixes}
 \end{table}
 
-The pragmatic path is to implement K1 (relevant symbols only)
-first---it is a small, localized change to \texttt{PDA.m3} that
-should deliver an immediate 10--20$\times$ speedup.  Grammar
-refactoring (G1) can proceed in parallel.  Together, these should
-bring the SV grammar build time down to a tolerable 5--15 seconds.
+K1 (relevant symbols only) has been implemented and delivers a
+measured 13\% improvement (see Section~7).  This confirms that the
+\texttt{Step()} symbol loop is \emph{not} the dominant cost.
 
-The ideal long-term fix is K3 (LALR(1) core merging), which would
+The pragmatic path forward is K2 (memoize epsilon closures),
+targeting the confirmed bottleneck in \texttt{Expand()}/\texttt{AddMark()}.
+Combined with grammar refactoring (G1, flatten expression hierarchy),
+these should bring the SV grammar build time down to a tolerable
+range of 10--30 seconds.
+
+The ideal long-term fix remains K3 (LALR(1) core merging), which would
 make grammar size essentially irrelevant to build performance.
 However, this requires understanding the trade-offs: \texttt{kyacc}'s
 current return-address mechanism may resolve certain conflicts that
 LALR(1) cannot, and those cases would need alternative handling.
+
+%======================================================================
+\section{Experimental Results: K1 Implementation}
+
+We implemented optimization K1 (relevant symbols only) and tested it
+on the SV grammar.  The implementation adds two new procedures to
+\texttt{RuleListState}:
+
+\begin{lstlisting}[language=Modula2]
+PROCEDURE CollectRelevantCodes(self: T;
+                               relevant: REF ARRAY OF BOOLEAN);
+(* Set relevant[code] := TRUE for each symbol code
+   at a dot position in self's mark list *)
+
+PROCEDURE QuickAction(self: T; code: INTEGER): Action;
+(* Fast action for a code NOT at any dot position.
+   Returns Reduce(finish), Accept, or Error. *)
+\end{lstlisting}
+
+In \texttt{PDA.BuildStatesList}, a boolean array indexed by symbol code
+is allocated once outside the main loop.  Before the per-symbol
+iteration in each state, the array is cleared and populated by
+\texttt{CollectRelevantCodes}.  The inner loop then dispatches:
+
+\begin{lstlisting}[language=Modula2]
+FOR i := 0 TO LAST(self.codes^) DO
+  code := self.codes[i];
+  IF relevant[code] THEN
+    action := Step(curState, code, self.symNames[code]);
+  ELSE
+    action := QuickAction(curState, code);
+  END;
+  ...
+END;
+\end{lstlisting}
+
+\texttt{QuickAction} avoids scanning the mark list entirely---it
+checks only the \texttt{start} status and the \texttt{finish} field
+(for default reductions) plus a single hash table lookup in the
+\texttt{call} table.
+
+\subsection{Results}
+
+\begin{center}
+\begin{tabular}{@{}lrrl@{}}
+\toprule
+Configuration & Wall time & User time & Speedup \\
+\midrule
+Baseline (original kyacc)  & 5m 16s & 5m 12s & --- \\
+With K1 optimization       & 4m 36s & 4m 33s & 13\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Output was verified identical (diff of generated parser interfaces
+showed only the expected name difference).
+
+\subsection{Analysis: Why Only 13\%?}
+
+The 13\% improvement---far short of the predicted 10--20$\times$---reveals
+that \textbf{\texttt{Step()} is not the dominant cost}.  The per-symbol
+loop accounts for only $\sim$15\% of total runtime.
+
+The true bottleneck is \texttt{Expand()}/\texttt{AddMark()}, which
+rebuilds the epsilon closure for every new state.  For the SV grammar,
+with its 16-level expression hierarchy and $\sim$50 contexts referencing
+\texttt{expression}, each \texttt{Expand()} call triggers thousands
+of recursive \texttt{AddMark()} invocations chasing call and return
+edges through the grammar.  This work is repeated identically in
+every state that references the same nonterminals.
+
+This shifts the priority ranking:
+
+\begin{itemize}[nosep]
+\item \textbf{K2 (memoize closures)} is now the highest-impact
+  generator-level fix, targeting the actual bottleneck
+\item \textbf{G1 (flatten expressions)} remains high-impact, as it
+  reduces the recursion depth that makes \texttt{Expand()} expensive
+\item \textbf{K1 is still worth keeping}---it eliminates unnecessary
+  work and its 13\% gain is free
+\end{itemize}
+
+\subsection{Revised Priority Table}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}clccl@{}}
+\toprule
+Priority & Fix & Impact & Effort & Speedup \\
+\midrule
+1 & K2: Memoize closures      & High   & Moderate & 5--10$\times$ (est.) \\
+2 & G1: Flatten expressions   & High   & Moderate & 3--5$\times$ (est.) \\
+3 & K4: Better hash function  & Moderate & Low    & 1.5--2$\times$ (est.) \\
+4 & K1: Relevant symbols only & Low    & Low      & \textbf{1.13$\times$ (measured)} \\
+5 & G3: Inline optionals      & Moderate & Low    & 1.5--2$\times$ (est.) \\
+6 & G2: Factor prefixes       & Moderate & Moderate & 1.5--2$\times$ (est.) \\
+7 & K5: Array mark sets       & Moderate & Moderate & 2--3$\times$ (est.) \\
+8 & K3: LALR(1) rewrite       & Transformative & High & 100--1000$\times$ (est.) \\
+\bottomrule
+\end{tabular}
+\caption{Revised priorities after K1 implementation.  K2 (memoize
+  closures) is now the recommended next step, as \texttt{Expand()} is
+  the confirmed bottleneck.  K1's measured 1.13$\times$ replaces the
+  original 10--20$\times$ estimate.}
+\label{tab:revised-fixes}
+\end{table}
 
 %======================================================================
 \section{Source File Reference}
