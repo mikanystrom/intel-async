@@ -41,6 +41,31 @@
   belowskip=0.8em,
   float=htbp,
 }
+\lstdefinestyle{clang}{
+  language=C,
+  basicstyle=\ttfamily\footnotesize,
+  keywordstyle=\bfseries,
+  commentstyle=\itshape\color{gray},
+  frame=single,
+  columns=flexible,
+  keepspaces=true,
+  xleftmargin=1.5em,
+  aboveskip=0.8em,
+  belowskip=0.8em,
+  float=htbp,
+}
+\lstdefinestyle{asm}{
+  language={},
+  basicstyle=\ttfamily\footnotesize,
+  commentstyle=\itshape\color{gray},
+  frame=single,
+  columns=flexible,
+  keepspaces=true,
+  xleftmargin=1.5em,
+  aboveskip=0.8em,
+  belowskip=0.8em,
+  float=htbp,
+}
 
 \title{MiniMIPS~II: An Asynchronous MIPS~I Processor\\
 in Communicating Sequential Processes}
@@ -659,8 +684,8 @@ User code calls ordinary C functions.  Inline assembly places the syscall
 number in \texttt{\$v0} and the argument in \texttt{\$a0}, then executes the
 MIPS \texttt{SYSCALL} instruction:
 
-\begin{lstlisting}[style=csp,caption={Syscall wrappers in C (using GCC inline assembly)},
-  language=C,morekeywords={void,register,int,asm,volatile}]
+\begin{lstlisting}[style=clang,caption={Syscall wrappers in C (using GCC inline assembly)},
+  morekeywords={register,asm,volatile}]
 void print_int(int n) {
     register int a0 asm("a0") = n;
     register int v0 asm("v0") = 1;
@@ -677,8 +702,7 @@ The compiler emits a MIPS~I \texttt{SYSCALL} (opcode~0,
 funct~\texttt{0x0C}).  The Collatz test illustrates the compiled
 calling convention:
 
-\begin{lstlisting}[style=csp,caption={Collatz sequence --- C source and MIPS disassembly (excerpt)},
-  language=C,morekeywords={void,int,while,if,else,return}]
+\begin{lstlisting}[style=clang,caption={Collatz sequence --- C source}]
 // collatz.c --- Collatz sequence from 27
 int main(void) {
     int n = 27;
@@ -692,8 +716,7 @@ int main(void) {
 }
 \end{lstlisting}
 
-\begin{lstlisting}[style=csp,caption={Collatz disassembly (selected instructions, \texttt{-O1})},
-  language={},morekeywords={}]
+\begin{lstlisting}[style=asm,caption={Collatz disassembly (selected instructions, \texttt{-O1})}]
 main:   addiu $sp, $sp, -32       # stack frame
         sw    $ra, 28($sp)        # save return address
         addiu $16, $zero, 27      # n = 27 (in $s0)
