@@ -17,5 +17,4 @@ bin/
 .bindir
 *.done
 *.pdf
-*.tex
 build/
