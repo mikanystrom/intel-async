@@ -317,10 +317,13 @@
     (case (get-stmt-type s)
       ((assign)
        (if (member (get-designator-id (get-assign-lhs s)) ids)
-           (begin
-             (dis "delete-referencing-stmts : assign : " s dnl)
-             'skip
-             )
+           (if (check-side-effects (get-assign-rhs s))
+               (begin
+                 (dis "delete-referencing-stmts : assign : " s dnl)
+                 'skip)
+               (begin
+                 (dis "delete-referencing-stmts : keeping side-effecting assign : " s dnl)
+                 s))
            s))
 
       ((var1)

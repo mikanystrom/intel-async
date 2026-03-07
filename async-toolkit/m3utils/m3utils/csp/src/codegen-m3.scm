@@ -1595,6 +1595,9 @@
         ((and (eq? 'native cat) (eq? '>> op))
          (builder (sa "Word.Shift( " a-arg " , -( " b-arg " ) )")))
 
+        ((and (eq? 'native cat) (eq? '<< op))
+         (builder (sa "Word.Shift( " a-arg " , " b-arg " )")))
+
         ((and (eq? 'native cat) (member op m3-binary-word-ops))
          (builder (sa (m3-map-word-op op) "( " a-arg " , " b-arg " )")))
         
