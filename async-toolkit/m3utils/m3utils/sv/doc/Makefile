@@ -3,20 +3,25 @@
 # Requires: pandoc, a LaTeX distribution (texlive recommended)
 #
 # Targets:
-#   make pdf    -- build PDF via pandoc + LaTeX
+#   make pdf    -- build all PDFs
 #   make clean  -- remove generated files
 
 PANDOC   ?= pandoc
-SOURCES  := svfe-manual.md
-PDF      := svfe-manual.pdf
+LATEX    ?= xelatex
+
+MANUAL_SRC := svfe-manual.md
+MANUAL_PDF := svfe-manual.pdf
+
+SOP_SRC    := sop-report.tex
+SOP_PDF    := sop-report.pdf
 
 .PHONY: all pdf clean
 
 all: pdf
 
-pdf: $(PDF)
+pdf: $(MANUAL_PDF) $(SOP_PDF)
 
-$(PDF): $(SOURCES)
+$(MANUAL_PDF): $(MANUAL_SRC)
 	$(PANDOC) -f markdown -o $@ \
 		--pdf-engine=xelatex \
 		-V geometry:margin=1in \
@@ -25,5 +30,11 @@ $(PDF): $(SOURCES)
 		--highlight-style=tango \
 		$<
 
+$(SOP_PDF): $(SOP_SRC)
+	$(LATEX) -interaction=nonstopmode $<
+	$(LATEX) -interaction=nonstopmode $<
+	rm -f sop-report.aux sop-report.log sop-report.out
+
 clean:
-	rm -f $(PDF)
+	rm -f $(MANUAL_PDF) $(SOP_PDF)
+	rm -f sop-report.aux sop-report.log sop-report.out
