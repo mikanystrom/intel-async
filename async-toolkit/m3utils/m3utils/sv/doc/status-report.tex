@@ -1,0 +1,423 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{titlesec}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue!70!black}\bfseries,
+  commentstyle=\color{green!50!black}\itshape,
+  breaklines=true,
+  frame=single,
+  framesep=3pt,
+  columns=fullflexible,
+  xleftmargin=1em,
+  xrightmargin=1em,
+}
+
+\definecolor{pass}{RGB}{0,128,0}
+\definecolor{fail}{RGB}{200,0,0}
+
+\title{SystemVerilog Tool Suite (svfe)\\[4pt]
+       \large Project Status Report}
+\author{Mika Nystrom}
+\date{March 7, 2026 \quad 09:00 PST}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This report summarizes the development of the SystemVerilog front-end
+tool suite (\texttt{svfe}) within the \texttt{m3utils} repository.
+Work began on March 5, 2026 and is ongoing.  In three days,
+the project has produced a complete SystemVerilog parser,
+a standalone preprocessor, an RTL lint tool, a BDD-based logic
+synthesizer with formal equivalence checking, a SOP equation
+generator, a hand-written MOS~6502 CPU model verified against the
+Klaus Dormann functional test suite, and a cycle-accurate 6502
+emulator with BDD-generated C evaluation backends.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+%======================================================================
+\section{Project Overview}
+
+The \texttt{sv/} subtree of \texttt{m3utils} implements a suite of
+tools for parsing, analyzing, synthesizing, and verifying
+SystemVerilog RTL designs.  All tools share a common parser front-end
+(\texttt{svfe}) built with the Caltech \texttt{parserlib}
+infrastructure in Modula-3.  Analysis and synthesis passes are
+implemented in Scheme, running on the \texttt{mscheme} interpreter
+embedded in the \texttt{svsynth} program, which extends mscheme with
+BDD primitives from the CM3 BDD library.
+
+\subsection{Timeline}
+
+\begin{description}[leftmargin=3cm,style=nextline]
+\item[March 5] Parser front-end (Phase~1 and~2), preprocessor,
+  Scheme analysis libraries (base, lint, codegen), BDD synthesis
+  engine, gate-level emitter, round-trip verification, ibex test
+  suite (30/30 RTL, 161/161 primitives).
+\item[March 6] Bit-level BDD synthesis with LRM-correct widths,
+  svlint (7 rules), sveqc (equivalence checker), 6502 ALU synthesis,
+  BDD-to-C code generation, 6502 emulator, carry-cut multi-level
+  synthesis, MUX/decoder decomposition, SOP output via Caltech
+  espresso library, syntax-directed BDD decomposition, Modula-3
+  preprocessor rewrite.
+\item[March 7] 6502 CPU RTL debugging---8 bugs found and fixed via
+  iverilog simulation.  Klaus Dormann 6502 functional test passes
+  at 102 million cycles.
+\end{description}
+
+%======================================================================
+\section{Components}
+
+\subsection{Parser Front-End (\texttt{svfe})}
+
+\begin{tabular}{@{}ll@{}}
+\toprule
+Source & \texttt{sv/svparse/src/} \\
+Files  & \texttt{sv.t}, \texttt{sv.l}, \texttt{sv.y},
+         \texttt{svLexExt.e}, \texttt{svParseExt.e}, \texttt{Main.m3} \\
+Lines  & $\sim$1,885 \\
+Output & S-expression AST (\texttt{--scm} flag) \\
+\bottomrule
+\end{tabular}
+
+\medskip\noindent
+Supported constructs:
+\begin{itemize}[nosep]
+\item Modules, packages, interfaces, modports, typedefs, enums, structs
+\item \texttt{always\_ff}, \texttt{always\_comb}, \texttt{always\_latch},
+      plain \texttt{always}
+\item \texttt{if}/\texttt{case}/\texttt{for}/\texttt{while}/\texttt{generate}
+\item Functions, tasks, \texttt{export "DPI-C"}
+\item Delay controls (\texttt{\#}), event controls (\texttt{@})
+\item Type casts, streaming operators, signed/unsigned ports
+\item Escaped identifiers, \texttt{unique}/\texttt{priority case}
+\item Full expression hierarchy including ternary, concatenation,
+      replication, bit/part selects
+\end{itemize}
+
+\subsection{Preprocessor (\texttt{svpp})}
+
+Two implementations exist:
+
+\begin{tabular}{@{}lll@{}}
+\toprule
+Implementation & Source & Lines \\
+\midrule
+Python & \texttt{sv/svpp/svpp.py} & $\sim$400 \\
+Modula-3 & \texttt{sv/svpp/src/Main.m3} & 881 \\
+\bottomrule
+\end{tabular}
+
+\medskip\noindent
+Features: \texttt{`define} with parameters, \texttt{`ifdef}/\texttt{`ifndef}/\texttt{`elsif}/\texttt{`else}/\texttt{`endif},
+\texttt{`include}, \texttt{``} token pasting, \texttt{-D} and \texttt{-I} command-line flags.
+
+\subsection{Scheme Analysis Libraries}
+
+All libraries live in \texttt{sv/src/} and run under \texttt{svsynth}
+(mscheme + BDD primitives).
+
+\begin{longtable}{@{}llr p{6.5cm}@{}}
+\toprule
+File & Role & Lines & Description \\
+\midrule
+\texttt{svbase.scm} & AST utilities & 420 &
+  AST navigation, signal collection, port/width extraction \\
+\texttt{svlint.scm} & RTL lint & 644 &
+  7 lint rules (undriven, unused, multi-driver, latches,
+  width mismatch, blocking-in-ff, combinational loops) \\
+\texttt{svgen.scm} & SV regeneration & 591 &
+  Regenerate SystemVerilog source from AST \\
+\texttt{svbv.scm} & BDD synthesis & 1,742 &
+  Bit-level BDD construction with LRM-correct width inference,
+  supports \texttt{always\_comb}, \texttt{always\_ff},
+  \texttt{assign}, \texttt{case}, ternary, arithmetic, shifts,
+  comparisons, concatenation, replication \\
+\texttt{svemit.scm} & Gate-level emitter & 188 &
+  Shannon expansion MUX decomposition, emits structural SV \\
+\texttt{svemit-c.scm} & C code emitter & 150 &
+  BDD-to-C: generates \texttt{static inline} eval functions \\
+\texttt{svsynth.scm} & Synthesis driver & 391 &
+  Top-level synthesis orchestration \\
+\texttt{svverify.scm} & Verification & 373 &
+  Round-trip equivalence checking (behavioral $\to$ BDD $\to$
+  gate-level $\to$ BDD $\to$ compare) \\
+\texttt{svfec.scm} & Formal EC & 369 &
+  Two-design formal equivalence checking \\
+\texttt{svgates.scm} & Gate library & 497 &
+  Standard cell definitions for synthesis output \\
+\texttt{svsop.scm} & SOP equations & 287 &
+  Interface to Caltech SOP/espresso library \\
+\texttt{sveqc-driver.scm} & EQC driver & 209 &
+  Standalone equivalence checking wrapper \\
+\texttt{svlint-driver.scm} & Lint driver & 17 &
+  Standalone lint wrapper \\
+\texttt{svread.scm} & Loader & 16 &
+  Backward-compatible library loader \\
+\midrule
+\multicolumn{2}{@{}l}{\textbf{Total}} & \textbf{5,894} & \\
+\bottomrule
+\end{longtable}
+
+\subsection{BDD Synthesis Engine (\texttt{svsynth})}
+
+\begin{tabular}{@{}ll@{}}
+\toprule
+Source & \texttt{sv/svsynth/src/} \\
+Lines  & $\sim$491 (Modula-3, BDD primitive bindings) \\
+Base   & CM3 BDD library (\texttt{m3-libs/BDD/}) \\
+\bottomrule
+\end{tabular}
+
+\medskip\noindent
+Extends mscheme with: \texttt{bdd-var}, \texttt{bdd-and},
+\texttt{bdd-or}, \texttt{bdd-not}, \texttt{bdd-ite},
+\texttt{bdd-equal?}, \texttt{bdd-hash}, \texttt{bdd-id},
+\texttt{bdd-size}, \texttt{bdd-restrict}, etc.
+
+Key synthesis features:
+\begin{itemize}[nosep]
+\item Bit-level BDD construction for multi-bit signals (up to 32 bits)
+\item Carry-cut mechanism for multi-level synthesis of wide arithmetic
+\item Decoder + MUX case decomposition for large \texttt{case} statements
+\item Syntax-directed BDD decomposition to prevent blowup on wide equality
+\item Shannon expansion for gate-level output
+\end{itemize}
+
+\subsection{RTL Lint Tool (\texttt{svlint})}
+
+Seven lint rules, tested on 7 purpose-built test cases and validated
+on all 30 ibex RTL files:
+
+\begin{enumerate}[nosep]
+\item Undriven output ports
+\item Unused declared signals
+\item Multiple drivers on same signal
+\item Latch inference (incomplete \texttt{if}/\texttt{case} in combinational blocks)
+\item Width mismatches in assignments
+\item Blocking assignments in \texttt{always\_ff}
+\item Combinational loops (cycle detection in assign dependency graph)
+\end{enumerate}
+
+\subsection{Equivalence Checker (\texttt{sveqc})}
+
+Self-equivalence and two-design formal equivalence checking via BDD
+comparison.  Flow: parse $\to$ build BDDs $\to$ emit gate-level SV
+$\to$ re-parse $\to$ build BDDs $\to$ compare bit-by-bit with
+\texttt{bdd-equal?}.
+
+%======================================================================
+\section{MOS 6502 CPU}
+
+\subsection{RTL Model}
+
+\begin{tabular}{@{}ll@{}}
+\toprule
+Source & \texttt{sv/6502/rtl/cpu.sv} \\
+Lines  & $\sim$1,100 \\
+Style  & Multi-cycle FSM, single-file, no submodules \\
+ISA    & Full NMOS 6502 including BCD decimal mode \\
+\bottomrule
+\end{tabular}
+
+\medskip\noindent
+The CPU implements:
+\begin{itemize}[nosep]
+\item All 56 official opcodes (151 opcode bytes) across 13 addressing modes
+\item BCD arithmetic for ADC and SBC with correct NMOS flag behavior
+\item IRQ, NMI (edge-triggered), and BRK interrupt handling
+\item Stack operations (PHA/PLA/PHP/PLP, JSR/RTS, RTI)
+\item All read-modify-write instructions (ASL, ROL, LSR, ROR, INC, DEC)
+\item Page-crossing address calculation with correct carry propagation
+\end{itemize}
+
+\subsection{Verification}
+
+\begin{tabular}{@{}lll@{}}
+\toprule
+Test & Result & Notes \\
+\midrule
+Simple test (5 tests) & \textcolor{pass}{\textbf{PASS}} & LDA, STA, ADC, INX, JSR/RTS \\
+Klaus Dormann functional & \textcolor{pass}{\textbf{PASS}} & 102,236,223 cycles, all opcodes + BCD \\
+\bottomrule
+\end{tabular}
+
+\medskip\noindent
+Eight bugs were found and fixed during simulation:
+\begin{enumerate}[nosep]
+\item JSR return address (push PC$-$1, not PC)
+\item BRK push order (PCH before PCL)
+\item RTI stack pull sequence
+\item S\_DECODE to S\_EXEC transition for implied-mode instructions
+\item BRK/IRQ handler: split S\_BRK1 into S\_BRK1+S\_BRK2 to fix
+      double non-blocking assignment clobbering stack write address
+\item Page-crossing carry propagation in abs,X / abs,Y / (ind),Y
+      (use 16-bit addition instead of concatenation)
+\item Accumulator-mode shifts reading stale \texttt{exec\_operand}
+      instead of \texttt{A} directly
+\item Missing BCD decimal mode for ADC and SBC
+\end{enumerate}
+
+\subsection{Testbench}
+
+\begin{tabular}{@{}ll@{}}
+\toprule
+Source & \texttt{sv/6502/tb/cpu\_tb.sv} \\
+Simulator & Icarus Verilog 11.0 (\texttt{-g2012}) \\
+Memory & 64\,KB, loaded via \texttt{\$readmemh} \\
+Detection & 3-value stuck-loop detector (catches JMP/BNE patterns) \\
+Plusargs & \texttt{+hexfile=}, \texttt{+reset=}, \texttt{+success=}, \texttt{+max\_cycles=} \\
+\bottomrule
+\end{tabular}
+
+\subsection{BDD Synthesis of CPU}
+
+The combinational cones of the 6502 have been extracted and
+synthesized through the BDD engine:
+\begin{itemize}[nosep]
+\item ALU: fully synthesized (21 input bits), equivalence verified
+\item Decoder/control cones: synthesized with MUX-level BDD cuts
+\item SOP equations generated for all cones via Caltech espresso
+\item C evaluation functions generated from BDDs
+  (\texttt{alu\_bdd\_eval.h}: 13,090 lines;
+   \texttt{cpu\_decode\_eval.h}: 4,828 lines)
+\end{itemize}
+
+\subsection{6502 Emulator}
+
+\begin{tabular}{@{}ll@{}}
+\toprule
+Source & \texttt{sv/6502/emu/} \\
+Reference & \texttt{fake6502.c} (public domain, 981 lines) \\
+Emulator & \texttt{emu6502.c} (158 lines) \\
+ALU test & \texttt{test\_alu.c} (137 lines, exhaustive comparison) \\
+\bottomrule
+\end{tabular}
+
+\medskip\noindent
+The emulator supports selectable backends (reference, BDD-generated C)
+and loads binary images for execution with stuck-loop detection.
+
+%======================================================================
+\section{Test Suites}
+
+\begin{longtable}{@{}lllp{6cm}@{}}
+\toprule
+Suite & Script & Result & Scope \\
+\midrule
+BDD synthesis & \texttt{run-bvsynth-tests.sh} & 8/8 \textcolor{pass}{PASS} &
+  Combinational modules: adder, ALU, comparator, mux, priority, decoder, parity, mixed \\
+Round-trip verify & \texttt{run-roundtrip-test.sh} & \textcolor{pass}{PASS} &
+  Behavioral $\to$ gates $\to$ BDD comparison \\
+Flop pipeline & \texttt{run-flop-demo.sh} & \textcolor{pass}{PASS} &
+  \texttt{always\_ff} ALU pipeline \\
+Equivalence & \texttt{run-eqc-tests.sh} & \textcolor{pass}{PASS} &
+  Self-equivalence on verify modules \\
+Lint & \texttt{lint/run-lint-tests.sh} & 7/7 \textcolor{pass}{PASS} &
+  All 7 lint rules \\
+Ibex RTL parse & \texttt{run-ibex-tests.sh} & 30/30 \textcolor{pass}{PASS} &
+  lowRISC ibex RISC-V core \\
+Ibex primitives & \texttt{run-ibex-tests.sh} & 161/161 \textcolor{pass}{PASS} &
+  ibex \texttt{prim/rtl/} \\
+6502 simple test & \texttt{run-6502-tests.sh} & \textcolor{pass}{PASS} &
+  Basic instruction verification \\
+6502 Dormann & \texttt{run-6502-tests.sh} & \textcolor{pass}{PASS} &
+  Full functional test, 102M cycles \\
+\bottomrule
+\end{longtable}
+
+%======================================================================
+\section{Line Counts Summary}
+
+\begin{tabular}{@{}lr@{}}
+\toprule
+Component & Lines \\
+\midrule
+Parser (\texttt{svparse/src/}) & 1,885 \\
+Preprocessor, Modula-3 (\texttt{svpp/src/}) & 881 \\
+Scheme libraries (\texttt{src/*.scm}) & 5,894 \\
+BDD primitives (\texttt{svsynth/src/}) & 491 \\
+6502 RTL + testbench & 1,263 \\
+6502 emulator + tests (C) & 1,276 \\
+6502 generated C headers & 17,918 \\
+Shell scripts and test infrastructure & $\sim$500 \\
+Verification test modules (\texttt{tests/verify/}) & $\sim$800 \\
+Documentation (\texttt{doc/}) & $\sim$600 \\
+\midrule
+\textbf{Total (hand-written)} & $\sim$\textbf{13,590} \\
+\textbf{Total (including generated)} & $\sim$\textbf{31,500} \\
+\bottomrule
+\end{tabular}
+
+%======================================================================
+\section{Architecture}
+
+The tool flow is:
+
+\begin{enumerate}[nosep]
+\item \textbf{Preprocessing:} \texttt{svpp} handles \texttt{`define},
+  \texttt{`ifdef}, \texttt{`include}, token pasting.
+\item \textbf{Parsing:} \texttt{svfe --scm} produces an S-expression AST.
+\item \textbf{Analysis:} Scheme libraries walk the AST for lint checks,
+  signal extraction, width inference.
+\item \textbf{Synthesis:} \texttt{svbv.scm} builds per-bit BDDs for
+  each output signal.  Carry cuts, MUX decomposition, and
+  syntax-directed decomposition keep BDD size manageable.
+\item \textbf{Emission:} BDDs are converted to gate-level SV
+  (\texttt{svemit.scm}), C code (\texttt{svemit-c.scm}), or SOP
+  equations (\texttt{svsop.scm}).
+\item \textbf{Verification:} Round-trip BDD comparison confirms
+  functional equivalence between behavioral and synthesized designs.
+\end{enumerate}
+
+%======================================================================
+\section{Known Limitations}
+
+\begin{itemize}[nosep]
+\item Parser does not yet support \texttt{import "DPI-C"} (with prototype)
+  or packed unions.
+\item BDD synthesis is limited to combinational cones; sequential
+  equivalence checking is not implemented.
+\item BDD blowup on designs with $>$24 independent inputs
+  (mitigated by carry cuts and decomposition, but not eliminated).
+\item The 6502 CPU model does not implement unofficial/illegal opcodes.
+\item No Verilator integration yet (would speed simulation significantly).
+\end{itemize}
+
+%======================================================================
+\section{Repository Structure}
+
+\begin{lstlisting}[language={},basicstyle=\ttfamily\footnotesize]
+sv/
+  svparse/src/     Parser front-end (Modula-3, parserlib)
+  svpp/            Preprocessor (Python + Modula-3)
+  svsynth/src/     BDD-extended mscheme (Modula-3)
+  src/             Scheme analysis/synthesis libraries (14 files)
+  tests/
+    verify/        Combinational test modules + gate-level outputs
+    lint/          Lint rule test cases
+    pp/            Preprocessor test cases
+    run-*.sh       Test runner scripts
+  sveqc/           Equivalence checker wrapper
+  svlint/          Lint tool wrapper
+  6502/
+    rtl/           CPU RTL (cpu.sv)
+    tb/            Testbench (cpu_tb.sv)
+    emu/           C emulator + generated eval headers
+    test/          Test hex images (simple_test, Dormann)
+    *.scm          Synthesis scripts (ALU, decode cones)
+  doc/             Documentation (manual, reports)
+\end{lstlisting}
+
+\end{document}
