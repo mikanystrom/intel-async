@@ -496,10 +496,12 @@ module cpu_6502 (
             // Branches (relative)
             8'h10, 8'h30, 8'h50, 8'h70,
             8'h90, 8'hB0, 8'hD0, 8'hF0: begin
+              // Branch offset comes from DI (current operand byte),
+              // not data_latch (which won't update until next cycle)
               PC <= PC + 16'd1;
               if (branch_taken) begin
-                PC <= PC + 16'd1 + branch_offset;
-                AB <= PC + 16'd1 + branch_offset;
+                PC <= PC + 16'd1 + {{8{DI[7]}}, DI};
+                AB <= PC + 16'd1 + {{8{DI[7]}}, DI};
               end
               else begin
                 AB <= PC + 16'd1;
@@ -738,15 +740,15 @@ module cpu_6502 (
           end
           // JSR
           else if (opcode == 8'h20) begin
-            // Push return address (PC-1) onto stack
-            AB <= {8'h01, SP};
-            DO <= (PC)[7:0];  // PCL (PC already points past operand high)
-            // Actually: JSR pushes PC-1 (address of last byte of JSR)
-            // PC currently = address after last operand byte
-            // We need to push PC-1
+            // 6502 pushes PC pointing to last byte of JSR (= addr of high operand)
+            // At this point, PC still holds that address (non-blocking PC+1
+            // from line above won't apply until clock edge).
+            // Push PCH first, then PCL in S_JSR0.
+            // Latch the return address in data_latch for PCL push.
             addr_lo <= {DI, bal};
+            data_latch <= PC[7:0];  // save PCL for push in S_JSR0
             AB <= {8'h01, SP};
-            DO <= PC[15:8];
+            DO <= PC[15:8];  // push PCH
             WE <= 1'b1;
             SP <= SP - 8'd1;
             state <= S_JSR0;
@@ -812,7 +814,13 @@ module cpu_6502 (
         // --- (INDIRECT,X) ---
         S_INDX0: begin
           data_latch <= DI;  // low byte of target address
-          AB <= {8'd0, bal + 8'd1};  // zero-page wrap
+          if (opcode == 8'h6C)
+            // JMP indirect: read high byte from pointer+1
+            // (with 6502 page-crossing bug: wraps within page)
+            AB <= {addr_lo[15:8], addr_lo[7:0] + 8'd1};
+          else
+            // (indirect,X): pointer is in zero page, wraps within ZP
+            AB <= {8'd0, bal + 8'd1};
           state <= S_INDX1;
         end
 
@@ -877,12 +885,9 @@ module cpu_6502 (
             AB <= addr_lo;
             DO <= write_data;
             WE <= 1'b1;
-            if (is_rmw)
-              state <= S_RMW_WR;
-            else begin
-              AB <= PC;
-              state <= S_FETCH;
-            end
+            // All writes need an extra cycle: AB must hold the write
+            // address while WE is high. S_RMW_WR advances to fetch.
+            state <= S_RMW_WR;
           end
           else begin
             AB <= PC;
@@ -932,7 +937,7 @@ module cpu_6502 (
         // --- JSR: push PCL ---
         S_JSR0: begin
           AB <= {8'h01, SP};
-          DO <= PC[7:0];  // push low byte
+          DO <= data_latch;  // push PCL (saved in S_ABS0)
           WE <= 1'b1;
           SP <= SP - 8'd1;
           state <= S_JSR1;
