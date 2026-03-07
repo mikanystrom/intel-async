@@ -39,6 +39,7 @@ S-expression ASTs.
 | `sv/src/svbv.scm` | Scheme | Bit-level BDD synthesis engine (multi-bit, LRM-correct widths) |
 | `sv/src/svemit.scm` | Scheme | BDD-to-gate-level SV emitter (Shannon expansion MUX decomposition) |
 | `sv/src/svemit-c.scm` | Scheme | BDD-to-C emitter (generates static inline eval functions) |
+| `sv/src/svsop.scm` | Scheme | BDD-to-SOP equation emitter (minimized sum-of-products) |
 | `sv/src/svlint.scm` | Scheme | RTL lint checks (7 rules) |
 | `sv/src/svgen.scm` | Scheme | SystemVerilog regeneration from AST |
 
@@ -48,6 +49,7 @@ S-expression ASTs.
 |------|--------|-------------|
 | svlint | `sv/svlint/run-svlint.sh` | RTL lint (undriven, unused, multi-driver, latches, loops, widths, blocking-in-ff) |
 | sveqc | `sv/sveqc/run-sveqc.sh` | Self-equivalence check (RTL → BDD → gate SV → BDD → compare) |
+| svsop | `sv/svsop/run-svsop.sh` | SOP equation output (RTL → BDD → minimized sum-of-products) |
 | 6502 gen | `sv/6502/gen-c-eval.sh` | Generate C eval functions from ALU BDDs |
 | 6502 test | `sv/6502/run-6502-tests.sh` | Full 6502 test suite (BDD gen + ALU exhaustive + Dormann) |
 
@@ -103,6 +105,40 @@ The bit-level BDD synthesis engine handles:
 
 Behavioral SV → BDDs → gate-level SV → BDDs → compare:
 all outputs match (symbolic BDD comparison, not enumeration).
+
+### SOP Minimization
+
+BDD → SOP conversion using Caltech `sop` library
+(`SopBDD.ConvertBool` + `invariantSimplify`).  Exposed via three
+svsynth primitives: `bdd->sop`, `bdd->sop-raw`, `bdd->sop-terms`.
+
+Tool: `sv/svsop/run-svsop.sh` — generates minimized SOP equations
+for all combinational outputs.  Supports `--cut N` flag for BDD
+decomposition on arithmetic-heavy designs.
+
+Three-tier output strategy based on BDD size:
+- ≤200 nodes: minimized SOP (`invariantSimplify`)
+- 201–500 nodes: raw SOP (no minimization, ConvertBool only)
+- >500 nodes: skipped (too expensive for SOP conversion)
+
+### SOP Test Results
+
+| Design | Cuts | Outputs | Status |
+|--------|------|---------|--------|
+| 6502 ALU | 67 | 6 | PASS (all equations, ~30s with --cut 30) |
+| 6502 CPU | 394 | 18 | PASS (8 next_P bits skipped, ~10min) |
+| test_add4 | 0 | 1 | PASS (no cuts needed) |
+| test_cmp4 | 0 | 4 | PASS |
+| test_mux4w | 0 | 1 | PASS |
+
+### Case Decomposition
+
+Large case statements and if-else chains (exceeding
+`*bv-decomp-threshold*`, default 8 arms) use decoder+MUX
+architecture: each arm's match condition and body are compiled
+independently, then combined with one-hot OR (case) or priority
+MUX (if-else), with `bdd-maybe-cut` applied during accumulation.
+This avoids BDD blowup on wide decoders.
 
 ---
 

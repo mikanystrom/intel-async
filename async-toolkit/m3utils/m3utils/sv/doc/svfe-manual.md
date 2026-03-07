@@ -449,6 +449,7 @@ logic synthesis and formal verification of combinational SV.
 | `svbv.scm` | Bit-level BDD synthesis engine (multi-bit, LRM-correct widths) |
 | `svemit.scm` | BDD-to-gate-level SV emitter (Shannon expansion) |
 | `svemit-c.scm` | BDD-to-C emitter (generates evaluation functions) |
+| `svsop.scm` | BDD-to-SOP equation emitter (minimized sum-of-products) |
 | `svlint.scm` | Lint checks (AST-only, no BDDs) |
 | `svgen.scm` | SV code regeneration from AST |
 
@@ -470,8 +471,58 @@ Available in svsynth's mscheme:
 | `(bdd-high b)` | Get high (then) child |
 | `(bdd-low b)` | Get low (else) child |
 | `(bdd-name v)` | Get variable name string |
+| `(bdd->sop b)` | Minimized SOP equation string |
+| `(bdd->sop-raw b)` | Unminimized SOP equation string |
+| `(bdd->sop-terms b)` | Product term count after minimization |
 
-### 8.3 Test suites
+The SOP primitives use the Caltech SOP library (`caltech-other/sop`),
+which converts BDDs to sum-of-products form via Shannon expansion
+(`SopBDD.ConvertBool`) and then applies greedy literal/term removal
+(`invariantSimplify`) to minimize the result.
+
+### 8.3 SOP equation output (svsop)
+
+```
+$ sv/svsop/run-svsop.sh [--cut N] [pp-flags...] input.sv
+```
+
+Parses a combinational SV module, builds BDDs for each output bit,
+then converts each BDD to a minimized sum-of-products equation.
+
+The `--cut N` flag enables BDD decomposition: when a BDD exceeds N
+nodes, it is replaced by a fresh intermediate variable.  The cut
+variables' equations are emitted first, then the output equations.
+This keeps all SOPs bounded in size.  Recommended: `--cut 30` for
+arithmetic-heavy designs (adders, ALUs).
+
+Three-tier output based on BDD size:
+- ≤200 nodes: minimized SOP (Espresso-style simplification)
+- 201–500 nodes: raw SOP (ConvertBool only, no minimization)
+- >500 nodes: skipped with a comment
+
+Example output for a 4-bit comparator:
+
+```
+gt = a[3] & ~b[3] | a[2] & ~b[2] & ~b[3] | ...;
+  // 15 product terms, 40 BDD nodes
+lt = ~a[3] & b[3] | ~a[2] & ~a[3] & b[2] | ...;
+  // 15 product terms, 39 BDD nodes
+```
+
+Example on the 6502 ALU (`--cut 30`):
+
+```
+--- Cut variables (67 intermediate wires) ---
+_cut_carry_3_0 = a_in[3] & operand[3] | a_in[2] & operand[2] & operand[3] | ...;
+  // 15 products, 39 BDD nodes
+...
+--- Output equations ---
+sign_out = _cut_mux_result_7_66 | ...;
+  // 4 products, 12 BDD nodes
+=== 67 cuts, 6 outputs ===
+```
+
+### 8.4 Test suites
 
 ```
 $ sv/tests/run-bvsynth-tests.sh     # 8 bit-level synthesis tests
@@ -606,11 +657,13 @@ Also not yet supported:
 | `sv/src/svemit-c.scm` | BDD-to-C emitter |
 | `sv/src/svlint-driver.scm` | Standalone lint driver |
 | `sv/src/sveqc-driver.scm` | Equivalence checking driver |
+| `sv/src/svsop.scm` | SOP equation output driver |
 | `sv/src/svsynth.scm` | Logic synthesis using BDDs |
 | `sv/svsynth/src/Main.m3` | svsynth command-line driver |
 | `sv/svsynth/src/BDDPrims.m3` | BDD primitives for mscheme |
 | `sv/svlint/run-svlint.sh` | svlint shell wrapper |
 | `sv/sveqc/run-sveqc.sh` | sveqc shell wrapper |
+| `sv/svsop/run-svsop.sh` | svsop shell wrapper |
 | `sv/6502/rtl/ALU.sv` | 6502 combinational ALU |
 | `sv/6502/rtl/cpu.sv` | 6502 CPU FSM |
 | `sv/6502/emu/` | 6502 C emulator + test harness |
