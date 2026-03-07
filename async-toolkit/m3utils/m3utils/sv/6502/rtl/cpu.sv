@@ -67,14 +67,18 @@ module cpu_6502 (
   logic [7:0]  bal;          // base address low (for page-cross check)
   logic        nmi_prev;     // previous NMI state for edge detection
   logic        nmi_pending;
+  logic        brk_b_flag;   // 1 = software BRK (set B in pushed P)
+  logic        brk_nmi;      // 1 = NMI vector (FFFA), 0 = IRQ/BRK vector (FFFE)
 
   // ALU wires (directly computed, no submodule to keep it all in one file)
   logic [8:0]  alu_sum;
   logic [7:0]  alu_result;
   logic        alu_carry;
+  logic [4:0]  bcd_al, bcd_ah;   // BCD low/high nibble accumulators
+  logic        bcd_lo_borrow;    // BCD low nibble borrow for SBC
 
   // FSM states
-  typedef enum logic [4:0] {
+  typedef enum logic [5:0] {
     S_RESET0,     // reset: read vector low
     S_RESET1,     // reset: read vector high
     S_FETCH,      // fetch opcode
@@ -105,8 +109,9 @@ module cpu_6502 (
     S_JSR1,       // JSR: push PCL, set PC
     S_RTS0,       // RTS: pull PCL
     S_RTS1,       // RTS: pull PCH, increment
-    S_BRK0,       // BRK/IRQ/NMI: push PCH
-    S_BRK1        // BRK/IRQ/NMI: push PCL, push P, load vector
+    S_BRK0,       // BRK/IRQ/NMI: push PCL
+    S_BRK1,       // BRK/IRQ/NMI: push P
+    S_BRK2        // BRK/IRQ/NMI: set up vector read
   } state_t;
 
   state_t state;
@@ -177,6 +182,9 @@ module cpu_6502 (
     write_data   = 8'd0;
     alu_result   = 8'd0;
     alu_carry    = 1'b0;
+    bcd_al       = 5'd0;
+    bcd_ah       = 5'd0;
+    bcd_lo_borrow = 1'b0;
 
     case (opcode)
       // --- Group 1: cc=01 ---
@@ -200,12 +208,23 @@ module cpu_6502 (
       end
       // ADC
       8'h61, 8'h65, 8'h69, 8'h6D, 8'h71, 8'h75, 8'h79, 8'h7D: begin
+        // Binary result (used for N, Z, V flags on NMOS 6502)
         alu_sum = {1'b0, A} + {1'b0, exec_operand} + {8'd0, P[F_C]};
         alu_result = alu_sum[7:0];
-        next_A = alu_result;
         next_P = set_nz(alu_result, next_P);
-        next_P[F_C] = alu_sum[8];
         next_P[F_V] = (A[7] == exec_operand[7]) && (alu_result[7] != A[7]);
+        if (P[F_D]) begin
+          // BCD mode: adjust result and carry
+          bcd_al = {1'b0, A[3:0]} + {1'b0, exec_operand[3:0]} + {4'd0, P[F_C]};
+          if (bcd_al > 5'd9) bcd_al = bcd_al + 5'd6;
+          bcd_ah = {1'b0, A[7:4]} + {1'b0, exec_operand[7:4]} + {4'd0, bcd_al[4]};
+          if (bcd_ah > 5'd9) bcd_ah = bcd_ah + 5'd6;
+          next_A = {bcd_ah[3:0], bcd_al[3:0]};
+          next_P[F_C] = bcd_ah[4];
+        end else begin
+          next_A = alu_result;
+          next_P[F_C] = alu_sum[8];
+        end
       end
       // STA
       8'h81, 8'h85, 8'h8D, 8'h91, 8'h95, 8'h99, 8'h9D: begin
@@ -226,48 +245,77 @@ module cpu_6502 (
       end
       // SBC
       8'hE1, 8'hE5, 8'hE9, 8'hED, 8'hF1, 8'hF5, 8'hF9, 8'hFD: begin
+        // Binary result (used for ALL flags on NMOS 6502)
         alu_sum = {1'b0, A} + {1'b0, ~exec_operand} + {8'd0, P[F_C]};
         alu_result = alu_sum[7:0];
-        next_A = alu_result;
         next_P = set_nz(alu_result, next_P);
         next_P[F_C] = alu_sum[8];
         next_P[F_V] = (A[7] != exec_operand[7]) && (alu_result[7] != A[7]);
+        if (P[F_D]) begin
+          // BCD mode: adjust result only (flags from binary, NMOS behavior)
+          bcd_al = {1'b0, A[3:0]} - {1'b0, exec_operand[3:0]} - {4'd0, ~P[F_C]};
+          bcd_lo_borrow = bcd_al[4];
+          if (bcd_al[4]) bcd_al = bcd_al - 5'd6;
+          bcd_ah = {1'b0, A[7:4]} - {1'b0, exec_operand[7:4]} - {4'd0, bcd_lo_borrow};
+          if (bcd_ah[4]) bcd_ah = bcd_ah - 5'd6;
+          next_A = {bcd_ah[3:0], bcd_al[3:0]};
+        end else begin
+          next_A = alu_result;
+        end
       end
 
       // --- Group 2: cc=10 (RMW / LDX / STX) ---
-      // ASL
+      // ASL (accumulator mode uses A directly, not exec_operand)
       8'h06, 8'h0A, 8'h0E, 8'h16, 8'h1E: begin
-        {alu_carry, alu_result} = {exec_operand, 1'b0};
+        if (opcode == 8'h0A) begin
+          {alu_carry, alu_result} = {A, 1'b0};
+          next_A = alu_result;
+        end else begin
+          {alu_carry, alu_result} = {exec_operand, 1'b0};
+          do_write_mem = 1'b1; write_data = alu_result;
+        end
         next_P = set_nz(alu_result, next_P);
         next_P[F_C] = alu_carry;
-        if (opcode == 8'h0A) next_A = alu_result;  // accumulator
-        else begin do_write_mem = 1'b1; write_data = alu_result; end
       end
       // ROL
       8'h26, 8'h2A, 8'h2E, 8'h36, 8'h3E: begin
-        {alu_carry, alu_result} = {exec_operand, P[F_C]};
+        if (opcode == 8'h2A) begin
+          {alu_carry, alu_result} = {A, P[F_C]};
+          next_A = alu_result;
+        end else begin
+          {alu_carry, alu_result} = {exec_operand, P[F_C]};
+          do_write_mem = 1'b1; write_data = alu_result;
+        end
         next_P = set_nz(alu_result, next_P);
         next_P[F_C] = alu_carry;
-        if (opcode == 8'h2A) next_A = alu_result;
-        else begin do_write_mem = 1'b1; write_data = alu_result; end
       end
       // LSR
       8'h46, 8'h4A, 8'h4E, 8'h56, 8'h5E: begin
-        alu_carry = exec_operand[0];
-        alu_result = {1'b0, exec_operand[7:1]};
+        if (opcode == 8'h4A) begin
+          alu_carry = A[0];
+          alu_result = {1'b0, A[7:1]};
+          next_A = alu_result;
+        end else begin
+          alu_carry = exec_operand[0];
+          alu_result = {1'b0, exec_operand[7:1]};
+          do_write_mem = 1'b1; write_data = alu_result;
+        end
         next_P = set_nz(alu_result, next_P);
         next_P[F_C] = alu_carry;
-        if (opcode == 8'h4A) next_A = alu_result;
-        else begin do_write_mem = 1'b1; write_data = alu_result; end
       end
       // ROR
       8'h66, 8'h6A, 8'h6E, 8'h76, 8'h7E: begin
-        alu_carry = exec_operand[0];
-        alu_result = {P[F_C], exec_operand[7:1]};
+        if (opcode == 8'h6A) begin
+          alu_carry = A[0];
+          alu_result = {P[F_C], A[7:1]};
+          next_A = alu_result;
+        end else begin
+          alu_carry = exec_operand[0];
+          alu_result = {P[F_C], exec_operand[7:1]};
+          do_write_mem = 1'b1; write_data = alu_result;
+        end
         next_P = set_nz(alu_result, next_P);
         next_P[F_C] = alu_carry;
-        if (opcode == 8'h6A) next_A = alu_result;
-        else begin do_write_mem = 1'b1; write_data = alu_result; end
       end
       // STX
       8'h86, 8'h8E, 8'h96: begin
@@ -419,6 +467,8 @@ module cpu_6502 (
       addr_lo     <= 16'd0;
       bal         <= 8'd0;
       exec_operand <= 8'd0;
+      brk_b_flag  <= 1'b0;
+      brk_nmi     <= 1'b0;
     end
     else if (RDY) begin
       // NMI edge detection
@@ -432,7 +482,7 @@ module cpu_6502 (
         // --- RESET ---
         S_RESET0: begin
           data_latch <= DI;
-          AB <= 16'hFFFD;
+          AB <= AB + 16'd1;
           state <= S_RESET1;
         end
         S_RESET1: begin
@@ -446,7 +496,9 @@ module cpu_6502 (
           // Check for interrupts
           if (nmi_pending) begin
             nmi_pending <= 1'b0;
-            opcode <= 8'h00;  // treat as BRK (but no B flag)
+            opcode <= 8'h00;
+            brk_b_flag <= 1'b0;  // NMI: B clear in pushed P
+            brk_nmi <= 1'b1;     // use NMI vector (FFFA)
             AB <= {8'h01, SP};
             DO <= PC[15:8];
             WE <= 1'b1;
@@ -455,6 +507,8 @@ module cpu_6502 (
           end
           else if (IRQ && !P[F_I]) begin
             opcode <= 8'h00;
+            brk_b_flag <= 1'b0;  // IRQ: B clear in pushed P
+            brk_nmi <= 1'b0;     // use IRQ vector (FFFE)
             AB <= {8'h01, SP};
             DO <= PC[15:8];
             WE <= 1'b1;
@@ -633,13 +687,11 @@ module cpu_6502 (
 
             // BRK
             8'h00: begin
-              PC <= PC + 16'd1;  // BRK skips one byte
+              PC <= PC + 16'd1;  // BRK skips padding byte
+              brk_b_flag <= 1'b1;  // software BRK: B set in pushed P
+              brk_nmi <= 1'b0;     // use IRQ vector (FFFE)
               AB <= {8'h01, SP};
-              DO <= PC[15:8] + {7'd0, DI[7]};  // PCH (PC+2 high)
-              // Actually PC is already incremented once in FETCH
-              // and once more here, so PC points past the padding byte
-              AB <= {8'h01, SP};
-              DO <= (PC + 16'd1) >> 8;
+              DO <= (PC + 16'd1) >> 8;  // push PCH of return address
               WE <= 1'b1;
               SP <= SP - 8'd1;
               state <= S_BRK0;
@@ -772,13 +824,10 @@ module cpu_6502 (
 
         // --- ABSOLUTE,X: fetch high byte ---
         S_ABSX0: begin
-          addr_lo <= {DI, bal + X};
-          AB <= {DI, bal + X};  // may need page-cross fix
+          addr_lo <= {DI, bal} + {8'd0, X};
+          AB <= {DI, bal} + {8'd0, X};
           PC <= PC + 16'd1;
-          if (bal + X < {1'b0, bal})  // no overflow, approximation
-            state <= S_ABSX1;
-          else
-            state <= S_ABSX1;
+          state <= S_ABSX1;
         end
 
         S_ABSX1: begin
@@ -794,8 +843,8 @@ module cpu_6502 (
 
         // --- ABSOLUTE,Y ---
         S_ABSY0: begin
-          addr_lo <= {DI, bal + Y};
-          AB <= {DI, bal + Y};
+          addr_lo <= {DI, bal} + {8'd0, Y};
+          AB <= {DI, bal} + {8'd0, Y};
           PC <= PC + 16'd1;
           state <= S_ABSY1;
         end
@@ -857,8 +906,8 @@ module cpu_6502 (
         end
 
         S_INDY1: begin
-          addr_lo <= {DI, data_latch + Y};
-          AB <= {DI, data_latch + Y};
+          addr_lo <= {DI, data_latch} + {8'd0, Y};
+          AB <= {DI, data_latch} + {8'd0, Y};
           state <= S_INDY2;
         end
 
@@ -983,24 +1032,24 @@ module cpu_6502 (
         end
 
         S_BRK1: begin
-          // Push P
+          // Push P to stack
           AB <= {8'h01, SP};
-          if (opcode == 8'h00 && !nmi_pending)
-            DO <= P | 8'h30;  // B flag set for BRK
+          if (brk_b_flag)
+            DO <= P | 8'h30;  // B flag set for software BRK
           else
             DO <= (P | 8'h20) & 8'hEF;  // B clear for IRQ/NMI
           WE <= 1'b1;
           SP <= SP - 8'd1;
           P[F_I] <= 1'b1;
+          state <= S_BRK2;
+        end
 
-          // Set up vector read
-          if (nmi_pending) begin
-            nmi_pending <= 1'b0;
-            AB <= 16'hFFFA;
-          end
-          else begin
-            AB <= 16'hFFFE;
-          end
+        S_BRK2: begin
+          // Set up vector read (WE cleared by default at top)
+          if (brk_nmi)
+            AB <= 16'hFFFA;  // NMI vector
+          else
+            AB <= 16'hFFFE;  // IRQ/BRK vector
           state <= S_RESET0;  // reuse reset vector read states
         end
 

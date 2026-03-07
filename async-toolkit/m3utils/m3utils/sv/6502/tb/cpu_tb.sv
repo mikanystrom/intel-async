@@ -113,8 +113,6 @@ module cpu_tb;
     if (reset_n) begin
       cycle_count <= cycle_count + 1;
 
-      //
-
       // Progress report every 1M cycles
       if (cycle_count % 1_000_000 == 0 && cycle_count > 0)
         $display("  [%0d M cycles] PC=0x%04h A=0x%02h X=0x%02h Y=0x%02h SP=0x%02h P=0x%02h",
