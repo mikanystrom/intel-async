@@ -242,7 +242,7 @@ We repeat this extraction for each pipeline stage:
   branch feedback to Fetch.
 \end{enumerate}
 
-Additionally, we extract shared resources as \emph{server processes}:
+Additionally, we extract shared resources as \emph{reactive processes}:
 
 \begin{itemize}
 \item \textbf{RegFile}: a 32-register file with two read ports (for Decode)
@@ -361,12 +361,11 @@ The complete decomposition is:
 
 \end{tikzpicture}
 \caption{MiniMIPS~II block diagram.  Five pipeline stages (blue) connected by
-  point-to-point channels; two server processes (green) for register file and
+  point-to-point channels; two reactive processes (green) for register file and
   data memory.  Instruction memory (yellow) is internal to Fetch.
-  All 35~channels use slack\,=\,1 (one-place buffer).  In Martin's formalism
-  \cite{Martin1981}, slack\,=\,0 is strict rendezvous; our simulation uses
-  slack\,=\,1, allowing the sender to proceed one token ahead
-  \cite{ManoharMartin1998}.  Dashed: branch feedback.}
+  All 35~channels use slack\,=\,1 (one-place buffer
+  \cite{ManoharMartin1998}); slack\,=\,0 is strict rendezvous
+  \cite{Martin1981}.  Dashed: branch feedback.}
 \label{fig:pipeline}
 \end{figure}
 
@@ -496,7 +495,7 @@ multiply/divide operations.  Selected instruction implementations:
 
 \subsection{RegFile Server}
 
-The register file is a \emph{server process}---it does not initiate
+The register file is a \emph{reactive process}---it does not initiate
 communication but responds to requests.  In each cycle it serves two reads
 (from Decode) and one conditional write (from Writeback), in a fixed order
 that matches the pipeline sequencing:
@@ -779,9 +778,9 @@ Iterations & MIPS instrs & Sim events & Time (s) & Instrs/s \\
 
 The simulation overhead comes from the CSP communication model: each MIPS
 instruction requires approximately 44~channel send/receive operations as data
-flows through the five pipeline stages and server processes.  Each channel
-operation involves thread synchronization (rendezvous), so the throughput is
-bounded by the host OS thread scheduler.
+flows through the five pipeline stages and reactive processes.  In this
+instance the simulator is single-threaded; throughput is bounded by the
+per-event overhead of the channel implementation.
 
 %----------------------------------------------------------------------
 \section{Implementation Notes}
