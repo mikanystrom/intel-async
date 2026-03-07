@@ -175,13 +175,22 @@
 
 ;; Reduction operators -- return 1-bit bv
 (define (bv-reduce-and bv)
-  (list (fold-left bdd-and (bdd-true) bv)))
+  (list (fold-left (lambda (acc b)
+                     (bdd-maybe-cut (bdd-and acc b) "red"))
+                   (bdd-true)
+                   (bv-maybe-cut-bits bv "red"))))
 
 (define (bv-reduce-or bv)
-  (list (fold-left bdd-or (bdd-false) bv)))
+  (list (fold-left (lambda (acc b)
+                     (bdd-maybe-cut (bdd-or acc b) "red"))
+                   (bdd-false)
+                   (bv-maybe-cut-bits bv "red"))))
 
 (define (bv-reduce-xor bv)
-  (list (fold-left bdd-xor (bdd-false) bv)))
+  (list (fold-left (lambda (acc b)
+                     (bdd-maybe-cut (bdd-xor acc b) "red"))
+                   (bdd-false)
+                   (bv-maybe-cut-bits bv "red"))))
 
 (define (fold-left fn init lst)
   (if (null? lst) init
@@ -288,13 +297,28 @@
 ;; 4. COMPARISON OPERATIONS (return 1-bit bv)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+;; Cut each bit of a bitvector that exceeds the cut threshold.
+;; Keeps downstream operations (equality, reduction) bounded.
+(define (bv-maybe-cut-bits bv hint)
+  (if (not *bv-cut-threshold*)
+      bv
+      (let loop ((i 0) (bits bv) (acc '()))
+        (if (null? bits) (reverse acc)
+            (loop (+ i 1) (cdr bits)
+                  (cons (bdd-maybe-cut (car bits)
+                          (string-append hint "_" (number->string i)))
+                        acc))))))
+
 ;; Equality: a == b
+;; Cut input bits and accumulator to prevent blowup on wide comparisons.
 (define (bv-eq a b)
   (let* ((w (max (length a) (length b)))
-         (a1 (bv-resize a w))
-         (b1 (bv-resize b w)))
-    ;; AND of per-bit XNOR
-    (list (fold-left bdd-and (bdd-true)
+         (a1 (bv-maybe-cut-bits (bv-resize a w) "eq_a"))
+         (b1 (bv-maybe-cut-bits (bv-resize b w) "eq_b")))
+    ;; AND of per-bit XNOR, with cut on accumulator
+    (list (fold-left (lambda (acc xnor)
+                       (bdd-maybe-cut (bdd-and acc xnor) "eq"))
+                     (bdd-true)
                      (map (lambda (x y) (bdd-not (bdd-xor x y))) a1 b1)))))
 
 ;; Inequality: a != b
