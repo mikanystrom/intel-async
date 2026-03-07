@@ -645,19 +645,35 @@ Priority & Fix & Impact & Effort & Speedup \\
 
 K1 (relevant symbols only) has been implemented and delivers a
 measured 13\% improvement (see Section~7).  This confirms that the
-\texttt{Step()} symbol loop is \emph{not} the dominant cost.
+\texttt{Step()} symbol loop is \emph{not} the dominant cost---the
+bottleneck is \texttt{Expand()}/\texttt{AddMark()}, which accounts
+for $\sim$87\% of total runtime.
 
-The pragmatic path forward is K2 (memoize epsilon closures),
-targeting the confirmed bottleneck in \texttt{Expand()}/\texttt{AddMark()}.
-Combined with grammar refactoring (G1, flatten expression hierarchy),
-these should bring the SV grammar build time down to a tolerable
-range of 10--30 seconds.
+This finding reshapes the entire optimization strategy.  Fixes that
+target mark-list operations outside of \texttt{AddMark()} (K1, K5)
+yield diminishing returns.  The high-value targets are:
 
-The ideal long-term fix remains K3 (LALR(1) core merging), which would
-make grammar size essentially irrelevant to build performance.
-However, this requires understanding the trade-offs: \texttt{kyacc}'s
-current return-address mechanism may resolve certain conflicts that
-LALR(1) cannot, and those cases would need alternative handling.
+\begin{enumerate}[nosep]
+\item \textbf{K2 + K4} (memoize closures, improve mark hash):
+  directly reduce \texttt{AddMark()} work.  K4 is particularly
+  attractive because it is a one-line change to \texttt{Mark.Hash}
+  that speeds up every \texttt{marksTab} probe.
+\item \textbf{G1 + G3} (flatten expressions, inline optionals):
+  reduce the recursion depth of \texttt{AddMark()} and the number of
+  distinct return-address marks, attacking both the per-state cost and
+  the total state count.
+\end{enumerate}
+
+The combination K2 + G1 should bring the SV grammar build time
+from 5 minutes to under 30 seconds.  Adding K4 and G3 could push it
+below 10 seconds.
+
+The ideal long-term fix remains K3 (LALR(1) core merging), which
+eliminates the return-address state explosion that is the root cause
+of both the high state count and the expensive closures.  This would
+reduce build time to well under 1 second, but requires a significant
+rewrite and careful handling of conflicts that the current mechanism
+resolves automatically.
 
 %======================================================================
 \section{Experimental Results: K1 Implementation}
@@ -729,16 +745,84 @@ of recursive \texttt{AddMark()} invocations chasing call and return
 edges through the grammar.  This work is repeated identically in
 every state that references the same nonterminals.
 
-This shifts the priority ranking:
+\subsection{Implications for All Proposed Optimizations}
 
-\begin{itemize}[nosep]
-\item \textbf{K2 (memoize closures)} is now the highest-impact
-  generator-level fix, targeting the actual bottleneck
-\item \textbf{G1 (flatten expressions)} remains high-impact, as it
-  reduces the recursion depth that makes \texttt{Expand()} expensive
-\item \textbf{K1 is still worth keeping}---it eliminates unnecessary
-  work and its 13\% gain is free
-\end{itemize}
+The K1 result is not just a data point about K1---it is a profiling
+result that tells us where 87\% of the time is spent.  Every proposed
+optimization must be re-evaluated against the actual bottleneck:
+\texttt{AddMark()} and its interaction with \texttt{marksTab} (the
+per-state \texttt{MarkBoolTbl}).
+
+\subsubsection{K4 (better hash): Impact revised \emph{upward}}
+
+The original analysis described K4 as improving ``state
+deduplication.''  But \texttt{Mark.Hash} is also the hash function for
+\texttt{marksTab}---the hash table used on \emph{every single}
+\texttt{AddMark()} call (line 113: \texttt{self.marksTab.get(mark,
+bool)}).  Since \texttt{AddMark()} is the bottleneck, and every
+invocation hashes a mark and probes the table, a better hash function
+with fewer collisions would reduce the cost of the hottest code path.
+K4 now targets the bottleneck directly; its expected impact increases
+to 2--3$\times$.
+
+\subsubsection{K5 (array mark sets): Impact revised \emph{downward}}
+
+K5 replaces the \texttt{marksList} linked list with sorted arrays.
+This helps \texttt{Step()} (binary search instead of linear scan),
+state \texttt{Hash()}, and state \texttt{Equal()}.  But none of these
+are the bottleneck.  Inside \texttt{Expand()}, marks live in
+\texttt{marksTab} (a hash table), not the linked list.  The list is
+only built at the end of \texttt{Expand()} via
+\texttt{BuildMarksList}.  K5's impact drops from
+2--3$\times$ to marginal.
+
+\subsubsection{G1 (flatten expressions): Impact revised \emph{upward}}
+
+G1 reduces the expression precedence chain from 16 to 5--6 levels.
+This has a \emph{double} benefit now that we know the bottleneck:
+\begin{enumerate}[nosep]
+\item \textbf{Fewer AddMark recursions}: each \texttt{expression}
+  reference recurses through 16 levels of call edges; at 5--6 levels,
+  this is a 3$\times$ reduction in recursion depth per occurrence.
+\item \textbf{Fewer distinct marks}: fewer nonterminal levels means
+  fewer distinct return-address variants, which means fewer marks per
+  state, fewer states, and fewer \texttt{Expand()} calls overall.
+\end{enumerate}
+G1's impact increases to an estimated 5--10$\times$ (previously
+3--5$\times$), as it attacks both the per-state cost and the
+state count.
+
+\subsubsection{G3 (inline optionals): Impact revised \emph{upward}}
+
+Same logic as G1: eliminating nonterminal indirection levels reduces
+\texttt{AddMark()} recursion depth and the number of distinct
+return-address marks.  Each inlined optional removes one level of call
+edges that \texttt{AddMark()} would otherwise chase.  Impact increases
+from 1.5--2$\times$ to 2--3$\times$.
+
+\subsubsection{G2 (factor prefixes): Unchanged}
+
+G2 reduces state count by sharing states across common prefixes.
+Fewer states means fewer \texttt{Expand()} calls.  The per-call cost
+of \texttt{Expand()} is unaffected.  Impact remains at
+1.5--2$\times$.
+
+\subsubsection{K2 (memoize closures): Confirmed highest priority}
+
+K2 directly targets the bottleneck: caching the result of
+\texttt{AddMark()} recursion so that identical nonterminal expansions
+are not recomputed in every state.  Now that we know
+\texttt{Expand()} is $\sim$87\% of runtime, a cache that eliminates
+most redundant recursion could yield the full 5--10$\times$.
+
+\subsubsection{K3 (LALR rewrite): Still transformative}
+
+The \texttt{return} field in \texttt{Mark.T} is the root cause of
+both the state explosion \emph{and} the \texttt{AddMark()} cost:
+different return addresses create distinct marks, which create distinct
+states, which each require their own \texttt{Expand()}.  LALR(1) core
+merging would collapse all of this.  Still estimated at
+100--1000$\times$, but requires a major rewrite.
 
 \subsection{Revised Priority Table}
 
@@ -749,19 +833,23 @@ This shifts the priority ranking:
 Priority & Fix & Impact & Effort & Speedup \\
 \midrule
 1 & K2: Memoize closures      & High   & Moderate & 5--10$\times$ (est.) \\
-2 & G1: Flatten expressions   & High   & Moderate & 3--5$\times$ (est.) \\
-3 & K4: Better hash function  & Moderate & Low    & 1.5--2$\times$ (est.) \\
-4 & K1: Relevant symbols only & Low    & Low      & \textbf{1.13$\times$ (measured)} \\
-5 & G3: Inline optionals      & Moderate & Low    & 1.5--2$\times$ (est.) \\
-6 & G2: Factor prefixes       & Moderate & Moderate & 1.5--2$\times$ (est.) \\
-7 & K5: Array mark sets       & Moderate & Moderate & 2--3$\times$ (est.) \\
+2 & G1: Flatten expressions   & High   & Moderate & 5--10$\times$ (est.~$\uparrow$) \\
+3 & K4: Better mark hash      & Moderate--High & Low & 2--3$\times$ (est.~$\uparrow$) \\
+4 & G3: Inline optionals      & Moderate & Low    & 2--3$\times$ (est.~$\uparrow$) \\
+5 & G2: Factor prefixes       & Moderate & Moderate & 1.5--2$\times$ (est.) \\
+6 & K1: Relevant symbols only & Low    & Low      & \textbf{1.13$\times$ (measured)} \\
+7 & K5: Array mark sets       & Low    & Moderate & marginal (est.~$\downarrow$) \\
 8 & K3: LALR(1) rewrite       & Transformative & High & 100--1000$\times$ (est.) \\
 \bottomrule
 \end{tabular}
-\caption{Revised priorities after K1 implementation.  K2 (memoize
-  closures) is now the recommended next step, as \texttt{Expand()} is
-  the confirmed bottleneck.  K1's measured 1.13$\times$ replaces the
-  original 10--20$\times$ estimate.}
+\caption{Revised priorities after K1 profiling.  Arrows indicate
+  estimates revised upward ($\uparrow$) or downward ($\downarrow$)
+  based on the finding that \texttt{Expand()}/\texttt{AddMark()} is
+  the true bottleneck ($\sim$87\% of runtime).  K4 moved up because
+  \texttt{Mark.Hash} is on the hot path inside \texttt{AddMark()}.
+  K5 moved down because \texttt{marksList} operations are not on the
+  hot path.  Grammar fixes G1 and G3 moved up because they reduce
+  \texttt{AddMark()} recursion depth directly.}
 \label{tab:revised-fixes}
 \end{table}
 
