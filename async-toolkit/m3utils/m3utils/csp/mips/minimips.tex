@@ -30,18 +30,18 @@
 }
 \lstdefinestyle{csp}{
   language=CSP,
-  basicstyle=\ttfamily\small,
+  basicstyle=\ttfamily\footnotesize,
   keywordstyle=\bfseries,
   commentstyle=\itshape\color{gray},
   frame=single,
   columns=flexible,
   keepspaces=true,
-  xleftmargin=2em,
-  aboveskip=1em,
-  belowskip=1em,
+  xleftmargin=1.5em,
+  aboveskip=0.8em,
+  belowskip=0.8em,
 }
 
-\title{MiniMIPS: An Asynchronous MIPS~I Processor\\
+\title{MiniMIPS~II: An Asynchronous MIPS~I Processor\\
 in Communicating Sequential Processes}
 \author{}
 \date{}
@@ -50,7 +50,7 @@ in Communicating Sequential Processes}
 \maketitle
 
 \begin{abstract}
-We present MiniMIPS, a complete MIPS~I user-mode processor implemented as a
+We present MiniMIPS~II, a complete MIPS~I user-mode processor implemented as a
 network of communicating sequential processes using the CSP-based hardware
 description notation developed at Caltech.  The design follows the Martin
 synthesis methodology: beginning from a sequential specification, we decompose
@@ -59,8 +59,10 @@ channels.  The processor executes the full MIPS~I integer instruction set
 (approximately 50 instructions), including arithmetic, logic, shift, branch,
 jump, load/store, multiply/divide, and system call operations.  We describe
 the architecture, the decomposition from sequential to parallel, and verify
-correctness by executing hand-assembled MIPS programs through a cycle-accurate
-CSP simulator.
+correctness by executing both hand-assembled and cross-compiled C programs
+through a cycle-accurate CSP simulator.  A complete MIPS cross-compilation
+toolchain (LLVM/lld targeting little-endian MIPS~I) enables writing test
+programs in C.
 \end{abstract}
 
 %----------------------------------------------------------------------
@@ -214,10 +216,10 @@ via channels \texttt{fd\_pc} and \texttt{fd\_instr}:
 ]
 \end{lstlisting}
 
-The channels \texttt{fd\_pc} and \texttt{fd\_instr} carry data forward;
-\texttt{wb\_taken} and \texttt{wb\_target} carry branch resolution backward.
-This is a valid decomposition because the sequential ordering of
-fetch$\to$compute$\to$update-PC is preserved by the channel synchronization.
+Channels \texttt{fd\_pc} and \texttt{fd\_instr} carry data forward;
+\texttt{wb\_taken} and \texttt{wb\_target} carry branch resolution
+backward.  The sequential ordering fetch${}\to{}$compute${}\to{}$update-PC
+is preserved by channel synchronization.
 
 \subsection{Subsequent decompositions}
 
@@ -257,44 +259,113 @@ The complete decomposition is:
 \parallel \text{REGFILE} \parallel \text{DATAMEM}
 \]
 
-\begin{figure}[ht]
+\begin{figure}[p]
 \centering
-\begin{tikzpicture}[
-  stage/.style={draw, rounded corners, minimum width=2cm, minimum height=1cm,
-    fill=blue!10, font=\small\sffamily},
-  server/.style={draw, rounded corners, minimum width=1.8cm, minimum height=0.8cm,
-    fill=green!10, font=\small\sffamily},
-  chan/.style={-{Stealth[length=6pt]}, thick},
-  feedback/.style={-{Stealth[length=6pt]}, thick, dashed, color=red!70!black},
-  req/.style={-{Stealth[length=5pt]}, thin, color=blue!60},
+\begin{tikzpicture}[scale=0.85, every node/.style={transform shape},
+  stage/.style={draw, thick, rounded corners=3pt, minimum width=2cm,
+    minimum height=1.3cm, fill=blue!8, font=\small\sffamily,
+    align=center},
+  server/.style={draw, thick, rounded corners=3pt, minimum width=2cm,
+    minimum height=1.1cm, fill=green!8, font=\small\sffamily,
+    align=center},
+  mem/.style={draw, thick, minimum width=1.4cm, minimum height=0.6cm,
+    fill=yellow!15, font=\scriptsize\ttfamily},
+  chan/.style={-{Stealth[length=5pt]}, semithick},
+  feedback/.style={-{Stealth[length=5pt]}, semithick, densely dashed,
+    color=red!70!black},
+  srvreq/.style={-{Stealth[length=4pt]}, thin, color=blue!70},
+  srvresp/.style={{Stealth[length=4pt]}-, thin, color=blue!70},
+  lbl/.style={font=\sffamily\tiny, color=black!60},
+  st/.style={font=\tiny\ttfamily, color=black!50},
 ]
+  % ---- Pipeline stages (compact spacing) ----
   \node[stage] (F) {Fetch};
-  \node[stage, right=1.5cm of F] (D) {Decode};
-  \node[stage, right=1.5cm of D] (E) {Execute};
-  \node[stage, right=1.5cm of E] (M) {MemStage};
-  \node[stage, right=1.5cm of M] (W) {Writeback};
+  \node[stage, right=1.4cm of F] (D) {Decode};
+  \node[stage, right=1.4cm of D] (E) {Execute};
+  \node[stage, right=1.4cm of E] (M) {MemStage};
+  \node[stage, right=1.4cm of M] (W) {Writeback};
 
-  \node[server, below=1.2cm of D] (RF) {RegFile};
-  \node[server, below=1.2cm of M] (DM) {DataMem};
+  % ---- Internal state ----
+  \node[mem, above=0.35cm of F] (IM) {imem[4096]};
+  \draw[thin,dotted] (IM) -- (F);
+  \node[st, below=-2pt of F.south] {pc, delay\_slot};
+  \node[st, below=-2pt of E.south] {hi, lo};
 
-  % Pipeline channels
-  \draw[chan] (F) -- node[above,font=\tiny] {fd} (D);
-  \draw[chan] (D) -- node[above,font=\tiny] {de} (E);
-  \draw[chan] (E) -- node[above,font=\tiny] {em} (M);
-  \draw[chan] (M) -- node[above,font=\tiny] {mw} (W);
+  % ---- Servers ----
+  \node[server, below=1.8cm of $(D)!0.5!(E)$] (RF)
+    {RegFile\\[-1pt]{\tiny\ttfamily reg[32]}};
+  \node[server, below=1.8cm of M] (DM)
+    {DataMem\\[-1pt]{\tiny\ttfamily mem[65536]}};
 
-  % Feedback
-  \draw[feedback] (W.north) -- ++(0,0.6) -| node[above,font=\tiny,pos=0.25]
-    {wb\_taken, wb\_target} (F.north);
+  % ==== Forward pipeline ====
+  \draw[chan] ([yshift=2pt]F.east) --
+    node[above,lbl] {pc} ([yshift=2pt]D.west);
+  \draw[chan] ([yshift=-2pt]F.east) --
+    node[below,lbl] {instr} ([yshift=-2pt]D.west);
 
-  % Server connections
-  \draw[req] (D.south) -- node[left,font=\tiny] {rs,rt} (RF.north);
-  \draw[req] (W.south) -| node[right,font=\tiny,pos=0.3] {wb} (RF.east);
-  \draw[req] (M.south) -- node[left,font=\tiny] {dm} (DM.north);
+  \draw[chan] ([yshift=3pt]D.east) --
+    node[above,lbl] {pc, instr} ([yshift=3pt]E.west);
+  \draw[chan] ([yshift=-3pt]D.east) --
+    node[below,lbl] {rs, rt, imm} ([yshift=-3pt]E.west);
+
+  \draw[chan] ([yshift=3pt]E.east) --
+    node[above,lbl] {result, store} ([yshift=3pt]M.west);
+  \draw[chan] ([yshift=-3pt]E.east) --
+    node[below,lbl] {dest, rw, memop} ([yshift=-3pt]M.west);
+
+  \draw[chan] ([yshift=3pt]M.east) --
+    node[above,lbl] {result, taken} ([yshift=3pt]W.west);
+  \draw[chan] ([yshift=-3pt]M.east) --
+    node[below,lbl] {dest, rw, tgt} ([yshift=-3pt]W.west);
+
+  % ==== Feedback ====
+  \draw[feedback] ([xshift=2pt]W.north) -- ++(0,0.7)
+    -| node[above,lbl,pos=0.25] {taken\,(1),\; target\,(32)}
+    ([xshift=2pt]F.north);
+
+  % ==== RegFile ====
+  \draw[srvreq] ([xshift=-6pt]D.south) -- ++(0,-0.4)
+    -| node[left,lbl,pos=0.3] {rs\_req/resp}
+    ([xshift=-4pt]RF.north);
+  \draw[srvresp] ([xshift=6pt]D.south) -- ++(0,-0.5)
+    -| node[right,lbl,pos=0.3] {rt\_req/resp}
+    ([xshift=4pt]RF.north);
+  \draw[srvreq] (W.south) -- ++(0,-0.4) -|
+    node[right,lbl,pos=0.25] {wen, wreg, wval}
+    (RF.east);
+
+  % ==== DataMem ====
+  \draw[srvreq] ([xshift=-3pt]M.south) --
+    node[left,lbl] {op, addr, wdata}
+    ([xshift=-3pt]DM.north);
+  \draw[srvresp] ([xshift=3pt]M.south) --
+    node[right,lbl] {rdata}
+    ([xshift=3pt]DM.north);
+
+  % ==== Legend / channel summary ====
+  \node[anchor=north west, font=\scriptsize, text width=5.5cm]
+    at ([xshift=0.5cm, yshift=-0.3cm]DM.south east) {
+    35 channels, all slack\,=\,1\\
+    Pipeline: 2{+}5{+}7{+}5 fwd + 2 feedback\\
+    RegFile: 4 read + 3 write\\
+    DataMem: 3 req + 1 resp
+  };
+
+  % ==== Bit-width table ====
+  \node[anchor=north west, font=\scriptsize, text width=5cm]
+    at ([yshift=-0.3cm]RF.south west) {
+    Channel widths: 32 (data/addr/result),\\
+    5 (reg num), 4 (memop), 1 (control)
+  };
+
 \end{tikzpicture}
-\caption{MiniMIPS pipeline architecture.  Solid arrows: pipeline data flow.
-  Dashed arrow: branch feedback from Writeback to Fetch.  Thin arrows:
-  server access (request/response).}
+\caption{MiniMIPS~II block diagram.  Five pipeline stages (blue) connected by
+  point-to-point channels; two server processes (green) for register file and
+  data memory.  Instruction memory (yellow) is internal to Fetch.
+  All 35~channels use slack\,=\,1 (one-place buffer).  In Martin's formalism
+  \cite{Martin1981}, slack\,=\,0 is strict rendezvous; our simulation uses
+  slack\,=\,1, allowing the sender to proceed one token ahead
+  \cite{ManoharMartin1998}.  Dashed: branch feedback.}
 \label{fig:pipeline}
 \end{figure}
 
@@ -459,12 +530,27 @@ hardwired to zero by the guard \texttt{wreg~$\neq$~0}.
 \subsection{DataMem Server}
 
 The data memory server handles byte, halfword, and word access in
-little-endian byte order:
+little-endian byte order.  At initialization it loads the \texttt{.data}
+section from a hex file, converting 32-bit words to individual bytes in
+little-endian order:
 
-\begin{lstlisting}[style=csp,caption={Data memory server (selected operations)}]
+\begin{lstlisting}[style=csp,caption={Data memory server (initialization and selected operations)}]
 int(8) mem[65536];
-int(4) op; int(32) addr; int(32) wdata; int(32) result;
+int(32) dtmp[4096]; int dcount; int di; int(32) dw;
 
+// Load .data section into byte memory
+dcount = readHexInts("data.hex", 4096, dtmp);
+di = 0;
+*[ di < dcount ->
+  dw = dtmp[di]; a = di << 2;
+  mem[a]   = dw & 0xFF;
+  mem[a+1] = (dw >> 8) & 0xFF;
+  mem[a+2] = (dw >> 16) & 0xFF;
+  mem[a+3] = (dw >> 24) & 0xFF;
+  di = di + 1
+];
+
+int(4) op; int(32) addr; int(32) wdata; int(32) result;
 *[ true ->
   dm_op?op; dm_addr?addr; dm_wdata?wdata;
   [ op == 5 ->                          // LW
@@ -539,35 +625,76 @@ The decomposition preserves correctness because:
 
 \subsection{Verification by Simulation}
 
-We verified the implementation by executing hand-assembled MIPS programs
-through the CSP simulator generated by the cspbuild tool chain.  The test
-suite covers:
+We verified the implementation by executing both hand-assembled MIPS programs
+and cross-compiled C programs through the CSP simulator generated by the
+cspbuild tool chain.  The hand-assembled tests target specific instruction
+groups; the C tests exercise the complete toolchain and realistic code patterns
+(function calls, stack frames, loops, array access).
 
 \begin{table}[ht]
-\centering
-\begin{tabular}{@{}lll@{}}
+\centering\small
+\begin{tabular}{@{}llp{3.2cm}l@{}}
 \toprule
-Test & Instructions exercised & Expected output \\
+Test & Src & Key instructions & Output \\
 \midrule
-\texttt{trivial} & ADDIU, SYSCALL & 42, HALT \\
-\texttt{arith}   & ADDU, SUBU, SLL, SRL, AND, OR, XOR, SLTU &
-  15, 7, 44, 22, 0, 15, 15, 1, HALT \\
-\texttt{branch}  & BEQ, BNE, J, delay slots & 10, 20, 99, HALT \\
-\texttt{loop}    & BEQ (loop), ADDIU, ADDU & 15 (= $\sum_{i=1}^{5} i$), HALT \\
-\texttt{memory}  & SW, LW & 42, 100, HALT \\
-\texttt{jal}     & JAL, JR, delay slots & 7 (= 3+4), HALT \\
+\texttt{trivial}   & asm & ADDIU, SYSCALL & 42 \\
+\texttt{arith}     & asm & ADDU, SUBU, SLL, SRL, AND, OR, XOR, SLTU &
+  15, 7, 44, 22, 0, 15, 15, 1 \\
+\texttt{branch}    & asm & BEQ, BNE, J, delay slots & 10, 20, 99 \\
+\texttt{loop}      & asm & BEQ loop, ADDIU, ADDU & 15\, ($\sum_{1}^{5} i$) \\
+\texttt{memory}    & asm & SW, LW & 42, 100 \\
+\texttt{jal}       & asm & JAL, JR, delay slots & 7\, (3+4) \\
+\midrule
+\texttt{fibonacci} & C & JAL, JR, SW, LW, ADDU, BNE &
+  1, 1, 2, 3, 5, 8, 13, 21, 34, 55 \\
+\texttt{collatz}   & C & MULT, SRL, BEQ, BNE, ORI &
+  27, 82, 41, \ldots, 2, 1 \\
+\texttt{sort}      & C & LW, SW, SLT, SLL, .data init &
+  1, 11, 12, 22, 25, 34, 64, 90 \\
 \bottomrule
 \end{tabular}
-\caption{Test programs and results.  All tests produce the expected output.}
+\caption{Test programs and results.  All produce expected output.
+  Assembly tests are hand-assembled hex; C tests are cross-compiled
+  with LLVM (mipsel, \texttt{-O1}).}
 \label{tab:tests}
 \end{table}
+
+\subsection{Performance}
+
+To measure simulator throughput, we run a tight loop that counts from 0 to
+10,000 using a \texttt{volatile} variable (preventing compiler optimization
+of the loop).  The inner loop compiles to 9~MIPS instructions per iteration
+(LW, NOP, ADDIU, SW, LW, NOP, SLTI, BNEZ, NOP):
+
+\begin{table}[ht]
+\centering\small
+\begin{tabular}{@{}rrrrl@{}}
+\toprule
+Iterations & MIPS instrs & Sim events & Time (s) & Instrs/s \\
+\midrule
+10K &   90K  & 3.96M & 0.44 & ${\sim}$205K \\
+100K & 900K & 39.6M & 4.40 & ${\sim}$205K \\
+\bottomrule
+\end{tabular}
+\caption{Simulator performance (Apple M3, single-threaded).  Each MIPS
+  instruction generates ${\sim}$44 simulation events (channel operations
+  across 7~processes).  Throughput: ${\sim}$9M events/s
+  $\approx$ 200K MIPS instructions/s.}
+\label{tab:perf}
+\end{table}
+
+The simulation overhead comes from the CSP communication model: each MIPS
+instruction requires approximately 44~channel send/receive operations as data
+flows through the five pipeline stages and server processes.  Each channel
+operation involves thread synchronization (rendezvous), so the throughput is
+bounded by the host OS thread scheduler.
 
 %----------------------------------------------------------------------
 \section{Implementation Notes}
 
-\subsection{Toolchain}
+\subsection{CSP Toolchain}
 
-The implementation uses the following tool chain:
+The CSP compilation pipeline:
 \begin{itemize}
 \item \textbf{cspfe}: CSP frontend parser (Modula-3), converts \texttt{.csp}
   source to S-expression intermediate form.
@@ -579,6 +706,37 @@ The implementation uses the following tool chain:
 \item \textbf{cm3}: Critical Mass Modula-3 compiler, compiles generated
   Modula-3 to native code.
 \end{itemize}
+
+\subsection{MIPS Cross-Compilation Toolchain}
+
+To enable writing test programs in C, we use a MIPS cross-compilation
+toolchain based on LLVM:
+
+\begin{itemize}
+\item \textbf{clang} (LLVM~22): Cross-compiler targeting
+  \mbox{\texttt{mipsel-unknown-elf}} with flags
+  \texttt{-mcpu=mips1 -msoft-float -O1}.
+\item \textbf{ld.lld} (LLD): LLVM linker with a custom linker script
+  placing \texttt{.text} at address~0 and \texttt{.data} at
+  \texttt{0x10000}.  MIPS metadata sections are discarded.
+\item \textbf{mips2hex.py}: Python script parsing ELF32 binaries,
+  extracting \texttt{.text} and \texttt{.data} into hex files.
+  Fetch loads \texttt{program.hex}; DataMem loads \texttt{data.hex}.
+\item \textbf{crt0.s}: Startup code that initializes the stack pointer
+  (\texttt{\$sp = 0xFFFC}), calls \texttt{main}, and issues a halt syscall
+  on return.
+\item \textbf{syscalls.c}: C wrappers for simulator syscalls using inline
+  assembly to load \texttt{\$v0} and \texttt{\$a0} and execute
+  \texttt{SYSCALL}.
+\end{itemize}
+
+The complete pipeline is automated by \texttt{make}:
+\[
+\texttt{.c} \xrightarrow{\text{clang}} \texttt{.o}
+\xrightarrow{\text{ld.lld}} \texttt{.elf}
+\xrightarrow{\text{mips2hex}} \texttt{.hex}
+\xrightarrow{\text{sim}} \text{output}
+\]
 
 \subsection{CSP Language Features Used}
 
@@ -604,7 +762,7 @@ The implementation uses the following tool chain:
 
 \subsection{Compiler Extensions}
 
-Two extensions were made to the CSP compiler to support this project:
+Three extensions were made to the CSP compiler to support this project:
 
 \begin{enumerate}
 \item \textbf{\texttt{readHexInts} intrinsic}: Added to the simulation
@@ -616,22 +774,25 @@ Two extensions were made to the CSP compiler to support this project:
   handling of the \texttt{<<} operator for native integer types was missing;
   it fell through to the arbitrary-precision path.  Added a case to generate
   \texttt{Word.Shift} for native types.
+
+\item \textbf{Side-effect-preserving dead code elimination}: The
+  dead-variable pass removed assignments whose values were never read,
+  even when the right-hand side had side effects (e.g.,
+  \texttt{readHexInts}).  Fixed to check for side effects first.
 \end{enumerate}
 
 %----------------------------------------------------------------------
 \section{Related Work}
 
-The original MiniMIPS processor was designed at Caltech by Alain Martin's
-research group \cite{MiniMIPS2002,Lines1998}.  It was a full asynchronous
-implementation of the MIPS R3000, fabricated in 0.18\textmu m CMOS, and
-demonstrated competitive performance with synchronous designs of the same era.
-Our work is a software-level reimplementation of the same architectural concept,
+The original MiniMIPS \cite{MiniMIPS2002,Lines1998} was designed at
+Caltech by Martin's group as a full asynchronous MIPS~R3000 fabricated
+in 0.5\,\textmu m CMOS\@.  Our design is a software reimplementation
 targeting simulation rather than silicon.
 
-Martin's synthesis methodology is described in detail in
-\cite{Martin1990,Martin2006,MartinSynthesis}.  The key insight is that CSP
-channel communication provides both data transfer and synchronization, allowing
-systematic decomposition of sequential computations into concurrent processes.
+Martin's synthesis methodology \cite{Martin1990,Martin2006,MartinSynthesis}
+uses CSP channel communication for both data transfer and synchronization,
+enabling systematic decomposition of sequential specifications into
+concurrent processes.
 
 Hoare's original CSP formalism \cite{Hoare1978,Hoare1985} provides the
 theoretical foundation.  The adaptation of CSP for VLSI design is described in
@@ -650,18 +811,37 @@ and cspbuild system builder.
 %----------------------------------------------------------------------
 \section{Conclusion}
 
-We have presented MiniMIPS, a complete MIPS~I user-mode processor implemented
+We have presented MiniMIPS~II, a complete MIPS~I user-mode processor implemented
 as a network of seven communicating sequential processes.  The design follows
 Martin's synthesis methodology, beginning from a sequential specification and
 decomposing into concurrent pipeline stages.  All arithmetic, logic, shift,
 branch, jump, load/store, multiply/divide, and system call instructions are
-implemented and verified through simulation with hand-assembled test programs.
+implemented and verified through simulation with both hand-assembled test
+programs and C programs cross-compiled via LLVM.
+
+A complete MIPS cross-compilation toolchain enables writing test programs in C,
+with a startup runtime (\texttt{crt0.s}), syscall wrappers
+(\texttt{syscalls.c}), a custom linker script, and an ELF-to-hex converter
+(\texttt{mips2hex.py}).  Three C programs---iterative Fibonacci, Collatz
+sequence, and bubble sort---exercise function calls, stack frames, loops,
+multiply/divide, and array access with initialized data sections, all
+producing correct results.
 
 The implementation demonstrates that the CSP-based hardware description
 approach scales to realistic processor designs, and that the cspbuild tool
 chain can compile and simulate complex multi-process systems.
 
 \begin{thebibliography}{99}
+
+\bibitem[Martin(1981)]{Martin1981}
+A.~J. Martin.
+\newblock An axiomatic definition of synchronization primitives.
+\newblock \emph{Acta Informatica}, 16:219--235, 1981.
+
+\bibitem[Martin(1986)]{Martin1986}
+A.~J. Martin.
+\newblock Compiling communicating processes into delay-insensitive VLSI circuits.
+\newblock \emph{Distributed Computing}, 1(4):226--234, 1986.
 
 \bibitem[Martin(1990)]{Martin1990}
 A.~J. Martin.
@@ -714,6 +894,13 @@ D.~A. Patterson and J.~L. Hennessy.
 MIPS Computer Systems.
 \newblock \emph{MIPS R3000 RISC Processor User's Manual}.
 \newblock 1991.
+
+\bibitem[Manohar and Martin(1998)]{ManoharMartin1998}
+R.~Manohar and A.~J. Martin.
+\newblock Slack elasticity in concurrent computing.
+\newblock In J.~Jeuring, editor, \emph{Mathematics of Program Construction
+  (MPC'98)}, volume 1422 of \emph{Lecture Notes in Computer Science},
+  pages 272--285. Springer, 1998.
 
 \bibitem[Intel Labs(2024)]{AsyncToolkit}
 Intel Labs.

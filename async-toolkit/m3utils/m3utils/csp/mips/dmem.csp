@@ -8,6 +8,10 @@
 // Operations: 0=NOP, 1=LB, 2=LBU, 3=LH, 4=LHU, 5=LW, 6=SB, 7=SH, 8=SW
 
 int(8) mem[65536];
+int(32) dtmp[4096];
+int dcount;
+int di;
+int(32) dw;
 int(4) op;
 int(32) addr;
 int(32) wdata;
@@ -17,6 +21,20 @@ int(32) b0;
 int(32) b1;
 int(32) b2;
 int(32) b3;
+
+// Load data section from hex file into byte memory
+dcount = readHexInts("data.hex", 4096, dtmp);
+di = 0;
+*[ di < dcount ->
+  dw = dtmp[di];
+  a = di << 2;
+  mem[a]     = dw & 0xFF;
+  mem[a + 1] = (dw >> 8) & 0xFF;
+  mem[a + 2] = (dw >> 16) & 0xFF;
+  mem[a + 3] = (dw >> 24) & 0xFF;
+  di = di + 1
+];
+print("dmem: loaded " + dcount + " data words");
 
 *[
   dm_op?op ; dm_addr?addr ; dm_wdata?wdata ;
