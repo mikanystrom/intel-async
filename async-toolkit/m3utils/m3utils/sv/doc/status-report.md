@@ -116,17 +116,19 @@ Tool: `sv/svsop/run-svsop.sh` — generates minimized SOP equations
 for all combinational outputs.  Supports `--cut N` flag for BDD
 decomposition on arithmetic-heavy designs.
 
-Three-tier output strategy based on BDD size:
-- ≤200 nodes: minimized SOP (`invariantSimplify`)
-- 201–500 nodes: raw SOP (no minimization, ConvertBool only)
-- >500 nodes: skipped (too expensive for SOP conversion)
+Two-tier output strategy based on BDD size:
+- ≤50 nodes: minimized SOP (`invariantSimplify`)
+- >50 nodes: MUX tree (syntax-directed BDD walk, one wire per node)
+
+BDD cuts in `bv-eq` and reduction operators prevent blowup on
+wide equality tests (e.g., zero flag `val == 8'd0`).
 
 ### SOP Test Results
 
 | Design | Cuts | Outputs | Status |
 |--------|------|---------|--------|
-| 6502 ALU | 67 | 6 | PASS (all equations, ~30s with --cut 30) |
-| 6502 CPU | 394 | 18 | PASS (8 next_P bits skipped, ~10min) |
+| 6502 ALU | 70 | 6 | PASS (all equations, ~30s with --cut 30) |
+| 6502 CPU | 417 | 18 (56 bits) | PASS (all equations, ~30s with --cut 30) |
 | test_add4 | 0 | 1 | PASS (no cuts needed) |
 | test_cmp4 | 0 | 4 | PASS |
 | test_mux4w | 0 | 1 | PASS |
