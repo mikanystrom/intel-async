@@ -1,0 +1,410 @@
+// execute.csp — Execute stage
+// Implements all MIPS I ALU operations, branch resolution, SYSCALL.
+// HI/LO registers are internal (no separate server needed).
+//
+// Ports:
+//   de_pc(32)          — in:  PC from Decode
+//   de_instr(32)       — in:  raw instruction from Decode
+//   de_rs_val(32)      — in:  rs register value from Decode
+//   de_rt_val(32)      — in:  rt register value from Decode
+//   de_imm(32)         — in:  sign-extended immediate from Decode
+//   em_result(32)      — out: ALU result to MemStage
+//   em_store_data(32)  — out: store data to MemStage
+//   em_dest(5)         — out: dest register to MemStage
+//   em_rw(1)           — out: register write enable to MemStage
+//   em_memop(4)        — out: memory operation to MemStage
+//   em_taken(1)        — out: branch taken to MemStage
+//   em_target(32)      — out: branch target to MemStage
+
+int(32) pc;
+int(32) instr;
+int(32) rs_val;
+int(32) rt_val;
+int(32) imm;
+int(6) opcode;
+int(5) rs;
+int(5) rt;
+int(5) rd;
+int(5) shamt;
+int(6) funct;
+int(26) jtarget;
+int(32) result;
+int(32) store_data;
+int(5) dest;
+int(1) reg_write;
+int(4) memop;
+int(1) taken;
+int(32) branch_target;
+int(32) hi;
+int(32) lo;
+int(32) temp;
+int(64) prod;
+bool running;
+
+hi = 0;
+lo = 0;
+running+;
+
+*[ running ->
+  de_pc?pc ; de_instr?instr ; de_rs_val?rs_val ; de_rt_val?rt_val ; de_imm?imm ;
+
+  // Decode fields using shift/mask
+  opcode = (instr >> 26) & 0x3F;
+  rs = (instr >> 21) & 0x1F;
+  rt = (instr >> 16) & 0x1F;
+  rd = (instr >> 11) & 0x1F;
+  shamt = (instr >> 6) & 0x1F;
+  funct = instr & 0x3F;
+  jtarget = instr & 0x3FFFFFF;
+
+  // Defaults
+  result = 0;
+  store_data = 0;
+  dest = 0;
+  reg_write = 0;
+  memop = 0;
+  taken = 0;
+  branch_target = 0;
+
+  [ opcode == 0 ->
+    // SPECIAL: R-type instructions
+    [ funct == 0x00 ->
+      // SLL
+      result = (rt_val << shamt) & 0xFFFFFFFF;
+      dest = rd; reg_write = 1
+
+    [] funct == 0x02 ->
+      // SRL (logical right shift)
+      result = rt_val >> shamt;
+      dest = rd; reg_write = 1
+
+    [] funct == 0x03 ->
+      // SRA (arithmetic right shift)
+      [ rt_val >= 0x80000000 ->
+        result = ((rt_val >> shamt) | (0xFFFFFFFF << (32 - shamt))) & 0xFFFFFFFF
+      [] else ->
+        result = rt_val >> shamt
+      ] ;
+      dest = rd; reg_write = 1
+
+    [] funct == 0x04 ->
+      // SLLV
+      result = (rt_val << (rs_val & 0x1F)) & 0xFFFFFFFF;
+      dest = rd; reg_write = 1
+
+    [] funct == 0x06 ->
+      // SRLV
+      result = rt_val >> (rs_val & 0x1F);
+      dest = rd; reg_write = 1
+
+    [] funct == 0x07 ->
+      // SRAV
+      temp = rs_val & 0x1F;
+      [ rt_val >= 0x80000000 ->
+        result = ((rt_val >> temp) | (0xFFFFFFFF << (32 - temp))) & 0xFFFFFFFF
+      [] else ->
+        result = rt_val >> temp
+      ] ;
+      dest = rd; reg_write = 1
+
+    [] funct == 0x08 ->
+      // JR
+      taken = 1;
+      branch_target = rs_val
+
+    [] funct == 0x09 ->
+      // JALR
+      result = pc + 8;
+      dest = rd; reg_write = 1;
+      taken = 1;
+      branch_target = rs_val
+
+    [] funct == 0x0C ->
+      // SYSCALL: rs_val=$v0, rt_val=$a0
+      [ rs_val == 1 ->
+        print("" + rt_val)
+      [] rs_val == 10 ->
+        print("HALT");
+        running-
+      [] rs_val == 11 ->
+        print("" + rt_val)
+      [] else -> skip
+      ]
+
+    [] funct == 0x0D ->
+      // BREAK
+      print("BREAK")
+
+    [] funct == 0x10 ->
+      // MFHI
+      result = hi;
+      dest = rd; reg_write = 1
+
+    [] funct == 0x11 ->
+      // MTHI
+      hi = rs_val
+
+    [] funct == 0x12 ->
+      // MFLO
+      result = lo;
+      dest = rd; reg_write = 1
+
+    [] funct == 0x13 ->
+      // MTLO
+      lo = rs_val
+
+    [] funct == 0x18 ->
+      // MULT (signed multiply — simplified)
+      prod = rs_val * rt_val;
+      lo = prod & 0xFFFFFFFF;
+      hi = (prod >> 32) & 0xFFFFFFFF
+
+    [] funct == 0x19 ->
+      // MULTU (unsigned multiply)
+      prod = rs_val * rt_val;
+      lo = prod & 0xFFFFFFFF;
+      hi = (prod >> 32) & 0xFFFFFFFF
+
+    [] funct == 0x1A ->
+      // DIV (simplified as unsigned)
+      #[ rt_val != 0 ->
+        lo = rs_val / rt_val;
+        hi = rs_val % rt_val
+      ]
+
+    [] funct == 0x1B ->
+      // DIVU
+      #[ rt_val != 0 ->
+        lo = rs_val / rt_val;
+        hi = rs_val % rt_val
+      ]
+
+    [] funct == 0x20 ->
+      // ADD (same as ADDU — no CP0 trap)
+      result = (rs_val + rt_val) & 0xFFFFFFFF;
+      dest = rd; reg_write = 1
+
+    [] funct == 0x21 ->
+      // ADDU
+      result = (rs_val + rt_val) & 0xFFFFFFFF;
+      dest = rd; reg_write = 1
+
+    [] funct == 0x22 ->
+      // SUB
+      result = (rs_val - rt_val) & 0xFFFFFFFF;
+      dest = rd; reg_write = 1
+
+    [] funct == 0x23 ->
+      // SUBU
+      result = (rs_val - rt_val) & 0xFFFFFFFF;
+      dest = rd; reg_write = 1
+
+    [] funct == 0x24 ->
+      // AND
+      result = rs_val & rt_val;
+      dest = rd; reg_write = 1
+
+    [] funct == 0x25 ->
+      // OR
+      result = rs_val | rt_val;
+      dest = rd; reg_write = 1
+
+    [] funct == 0x26 ->
+      // XOR
+      result = rs_val ^ rt_val;
+      dest = rd; reg_write = 1
+
+    [] funct == 0x27 ->
+      // NOR (bitwise NOT of OR, using XOR with all-ones)
+      result = (rs_val | rt_val) ^ 0xFFFFFFFF;
+      dest = rd; reg_write = 1
+
+    [] funct == 0x2A ->
+      // SLT (signed comparison)
+      [ rs_val >= 0x80000000 && rt_val < 0x80000000 ->
+        result = 1
+      [] rs_val < 0x80000000 && rt_val >= 0x80000000 ->
+        result = 0
+      [] rs_val < rt_val ->
+        result = 1
+      [] else ->
+        result = 0
+      ] ;
+      dest = rd; reg_write = 1
+
+    [] funct == 0x2B ->
+      // SLTU (unsigned comparison)
+      [ rs_val < rt_val -> result = 1
+      [] else -> result = 0
+      ] ;
+      dest = rd; reg_write = 1
+
+    [] else -> skip
+    ]
+
+  [] opcode == 1 ->
+    // REGIMM: BLTZ, BGEZ, BLTZAL, BGEZAL
+    branch_target = pc + 4 + (imm << 2);
+    [ rt == 0 ->
+      // BLTZ
+      [ rs_val >= 0x80000000 -> taken = 1
+      [] else -> taken = 0
+      ]
+    [] rt == 1 ->
+      // BGEZ
+      [ rs_val < 0x80000000 -> taken = 1
+      [] else -> taken = 0
+      ]
+    [] rt == 0x10 ->
+      // BLTZAL
+      [ rs_val >= 0x80000000 -> taken = 1
+      [] else -> taken = 0
+      ] ;
+      result = pc + 8;
+      dest = 31; reg_write = 1
+    [] rt == 0x11 ->
+      // BGEZAL
+      [ rs_val < 0x80000000 -> taken = 1
+      [] else -> taken = 0
+      ] ;
+      result = pc + 8;
+      dest = 31; reg_write = 1
+    [] else -> skip
+    ]
+
+  [] opcode == 2 ->
+    // J
+    branch_target = ((pc + 4) & 0xF0000000) | (jtarget << 2);
+    taken = 1
+
+  [] opcode == 3 ->
+    // JAL
+    branch_target = ((pc + 4) & 0xF0000000) | (jtarget << 2);
+    taken = 1;
+    result = pc + 8;
+    dest = 31; reg_write = 1
+
+  [] opcode == 4 ->
+    // BEQ
+    branch_target = pc + 4 + (imm << 2);
+    [ rs_val == rt_val -> taken = 1
+    [] else -> taken = 0
+    ]
+
+  [] opcode == 5 ->
+    // BNE
+    branch_target = pc + 4 + (imm << 2);
+    [ rs_val != rt_val -> taken = 1
+    [] else -> taken = 0
+    ]
+
+  [] opcode == 6 ->
+    // BLEZ
+    branch_target = pc + 4 + (imm << 2);
+    [ rs_val == 0 || rs_val >= 0x80000000 -> taken = 1
+    [] else -> taken = 0
+    ]
+
+  [] opcode == 7 ->
+    // BGTZ
+    branch_target = pc + 4 + (imm << 2);
+    [ rs_val != 0 && rs_val < 0x80000000 -> taken = 1
+    [] else -> taken = 0
+    ]
+
+  [] opcode == 0x08 ->
+    // ADDI (same as ADDIU)
+    result = (rs_val + imm) & 0xFFFFFFFF;
+    dest = rt; reg_write = 1
+
+  [] opcode == 0x09 ->
+    // ADDIU
+    result = (rs_val + imm) & 0xFFFFFFFF;
+    dest = rt; reg_write = 1
+
+  [] opcode == 0x0A ->
+    // SLTI (signed immediate comparison)
+    [ rs_val >= 0x80000000 && imm < 0x80000000 ->
+      result = 1
+    [] rs_val < 0x80000000 && imm >= 0x80000000 ->
+      result = 0
+    [] rs_val < imm ->
+      result = 1
+    [] else ->
+      result = 0
+    ] ;
+    dest = rt; reg_write = 1
+
+  [] opcode == 0x0B ->
+    // SLTIU
+    [ rs_val < imm -> result = 1
+    [] else -> result = 0
+    ] ;
+    dest = rt; reg_write = 1
+
+  [] opcode == 0x0C ->
+    // ANDI (zero-extend immediate)
+    result = rs_val & (imm & 0xFFFF);
+    dest = rt; reg_write = 1
+
+  [] opcode == 0x0D ->
+    // ORI (zero-extend immediate)
+    result = rs_val | (imm & 0xFFFF);
+    dest = rt; reg_write = 1
+
+  [] opcode == 0x0E ->
+    // XORI (zero-extend immediate)
+    result = rs_val ^ (imm & 0xFFFF);
+    dest = rt; reg_write = 1
+
+  [] opcode == 0x0F ->
+    // LUI
+    result = (imm << 16) & 0xFFFFFFFF;
+    dest = rt; reg_write = 1
+
+  // Load instructions
+  [] opcode == 0x20 ->
+    result = (rs_val + imm) & 0xFFFFFFFF;
+    memop = 1; dest = rt; reg_write = 1
+
+  [] opcode == 0x21 ->
+    result = (rs_val + imm) & 0xFFFFFFFF;
+    memop = 3; dest = rt; reg_write = 1
+
+  [] opcode == 0x23 ->
+    result = (rs_val + imm) & 0xFFFFFFFF;
+    memop = 5; dest = rt; reg_write = 1
+
+  [] opcode == 0x24 ->
+    result = (rs_val + imm) & 0xFFFFFFFF;
+    memop = 2; dest = rt; reg_write = 1
+
+  [] opcode == 0x25 ->
+    result = (rs_val + imm) & 0xFFFFFFFF;
+    memop = 4; dest = rt; reg_write = 1
+
+  // Store instructions
+  [] opcode == 0x28 ->
+    result = (rs_val + imm) & 0xFFFFFFFF;
+    store_data = rt_val; memop = 6
+
+  [] opcode == 0x29 ->
+    result = (rs_val + imm) & 0xFFFFFFFF;
+    store_data = rt_val; memop = 7
+
+  [] opcode == 0x2B ->
+    result = (rs_val + imm) & 0xFFFFFFFF;
+    store_data = rt_val; memop = 8
+
+  [] else -> skip
+  ] ;
+
+  // Send to MemStage
+  em_result!result ;
+  em_store_data!store_data ;
+  em_dest!dest ;
+  em_rw!reg_write ;
+  em_memop!memop ;
+  em_taken!taken ;
+  em_target!branch_target
+]

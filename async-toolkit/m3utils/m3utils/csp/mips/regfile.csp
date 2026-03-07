@@ -1,0 +1,26 @@
+// regfile.csp — MIPS register file server
+// 32 general-purpose 32-bit registers
+// Ports:
+//   rs_req(5) / rs_resp(32)  — Decode reads rs
+//   rt_req(5) / rt_resp(32)  — Decode reads rt
+//   wb_wen(1)  — write enable from Writeback
+//   wb_wreg(5) — register number from Writeback
+//   wb_wval(32)— value from Writeback
+
+int(32) reg[32];
+int(5) rn;
+int(1) wen;
+int(5) wreg;
+int(32) wval;
+
+// $0 is hardwired to zero
+reg[0] = 0;
+
+*[
+  // Phase 1: Decode reads rs, then rt
+  rs_req?rn ; rs_resp!reg[rn] ;
+  rt_req?rn ; rt_resp!reg[rn] ;
+  // Phase 2: Writeback conditional write (never write $0)
+  wb_wen?wen ; wb_wreg?wreg ; wb_wval?wval ;
+  #[ wen != 0 && wreg != 0 -> reg[wreg] = wval ]
+]

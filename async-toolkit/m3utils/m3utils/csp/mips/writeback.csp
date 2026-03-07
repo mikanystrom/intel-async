@@ -1,0 +1,31 @@
+// writeback.csp — Writeback stage
+// Writes result to register file and sends branch feedback to Fetch.
+//
+// Ports:
+//   mw_result(32)  — in:  result from MemStage
+//   mw_dest(5)     — in:  dest register from MemStage
+//   mw_rw(1)       — in:  register write enable from MemStage
+//   mw_taken(1)    — in:  branch taken from MemStage
+//   mw_target(32)  — in:  branch target from MemStage
+//   wb_wen(1)      — out: write enable to RegFile
+//   wb_wreg(5)     — out: register number to RegFile
+//   wb_wval(32)    — out: value to RegFile
+//   wb_taken(1)    — out: branch taken to Fetch
+//   wb_target(32)  — out: branch target to Fetch
+
+int(32) result;
+int(5) dest;
+int(1) rw;
+int(1) tk;
+int(32) tgt;
+
+*[
+  mw_result?result ; mw_dest?dest ; mw_rw?rw ;
+  mw_taken?tk ; mw_target?tgt ;
+
+  // Write to register file
+  wb_wen!rw ; wb_wreg!dest ; wb_wval!result ;
+
+  // Send branch feedback to Fetch
+  wb_taken!tk ; wb_target!tgt
+]

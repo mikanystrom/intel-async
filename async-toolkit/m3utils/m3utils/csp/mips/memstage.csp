@@ -1,0 +1,48 @@
+// memstage.csp — Memory access stage
+// Routes load/store requests to DataMem server.
+// For non-memory instructions, passes result through unchanged.
+//
+// Ports:
+//   em_result(32)      — in:  ALU result / effective address from Execute
+//   em_store_data(32)  — in:  store data from Execute
+//   em_dest(5)         — in:  dest register from Execute
+//   em_rw(1)           — in:  register write enable from Execute
+//   em_memop(4)        — in:  memory operation from Execute
+//   em_taken(1)        — in:  branch taken from Execute
+//   em_target(32)      — in:  branch target from Execute
+//   mw_result(32)      — out: result to Writeback
+//   mw_dest(5)         — out: dest register to Writeback
+//   mw_rw(1)           — out: register write enable to Writeback
+//   mw_taken(1)        — out: branch taken to Writeback
+//   mw_target(32)      — out: branch target to Writeback
+//   dm_op(4)           — out: operation to DataMem
+//   dm_addr(32)        — out: address to DataMem
+//   dm_wdata(32)       — out: write data to DataMem
+//   dm_rdata(32)       — in:  read data from DataMem
+
+int(32) result;
+int(32) store_data;
+int(5) dest;
+int(1) rw;
+int(4) memop;
+int(1) tk;
+int(32) tgt;
+int(32) mem_result;
+
+*[
+  em_result?result ; em_store_data?store_data ;
+  em_dest?dest ; em_rw?rw ; em_memop?memop ;
+  em_taken?tk ; em_target?tgt ;
+
+  // Send memory request to DataMem
+  dm_op!memop ; dm_addr!result ; dm_wdata!store_data ;
+  dm_rdata?mem_result ;
+
+  // For loads, the result comes from memory; for others, keep ALU result
+  [ memop != 0 && memop <= 5 ->
+    mw_result!mem_result
+  [] else ->
+    mw_result!result
+  ] ;
+  mw_dest!dest ; mw_rw!rw ; mw_taken!tk ; mw_target!tgt
+]

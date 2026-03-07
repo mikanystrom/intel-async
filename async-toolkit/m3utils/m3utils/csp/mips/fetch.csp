@@ -1,0 +1,49 @@
+// fetch.csp — Instruction fetch stage
+// Loads program from hex file into instruction memory at startup.
+// Implements delay slot handling via a 2-state FSM.
+//
+// Ports:
+//   fd_pc(32)     — out: current PC to Decode
+//   fd_instr(32)  — out: fetched instruction to Decode
+//   wb_taken(1)   — in:  branch taken flag from Writeback
+//   wb_target(32) — in:  branch target from Writeback
+
+int(32) imem[4096];
+int count;
+int(32) pc;
+int(32) instr;
+int(1) fb_taken;
+int(32) fb_target;
+bool in_delay_slot;
+int(32) delay_target;
+
+// Load program into instruction memory
+count = readHexInts("program.hex", 4096, imem);
+print("loaded " + count + " words");
+pc = 0;
+in_delay_slot-;
+
+*[
+  // Fetch instruction at current PC (word-aligned, index = PC >> 2)
+  instr = imem[pc >> 2];
+  fd_pc!pc ; fd_instr!instr ;
+
+  // Wait for writeback feedback
+  wb_taken?fb_taken ; wb_target?fb_target ;
+
+  [ in_delay_slot ->
+    // Just finished delay slot: jump to saved target
+    pc = delay_target;
+    in_delay_slot-
+  [] ~in_delay_slot ->
+    [ fb_taken != 0 ->
+      // Taken branch: save target, next fetch is delay slot (PC+4)
+      delay_target = fb_target;
+      in_delay_slot+;
+      pc = pc + 4
+    [] else ->
+      // No branch: advance sequentially
+      pc = pc + 4
+    ]
+  ]
+]

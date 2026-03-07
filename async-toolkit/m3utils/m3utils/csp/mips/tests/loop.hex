@@ -1,0 +1,39 @@
+// MIPS loop test: sum 1..5 = 15
+// Expected output: 15 HALT
+//
+// $t0 = counter (starts at 5, counts down to 0)
+// $t1 = accumulator (sum)
+//
+// 0x00: addiu $t0, $zero, 5       $t0 = 5
+24080005
+// 0x04: addiu $t1, $zero, 0       $t1 = 0
+24090000
+//
+// loop:
+// 0x08: beq $t0, $zero, +4        if ($t0 == 0) goto done (0x08+4+16=0x1C)
+// BEQ: opcode=4, rs=$t0=8, rt=$zero=0, offset=4
+11000004
+// 0x0C: nop (delay slot)
+00000000
+// 0x10: addu $t1, $t1, $t0        $t1 += $t0
+01284821
+// 0x14: addiu $t0, $t0, -1        $t0--
+// ADDIU: opcode=9, rs=$t0=8, rt=$t0=8, imm=-1=0xFFFF
+2508FFFF
+// 0x18: j loop (target word = 0x08/4 = 2)
+// J: opcode=2, target=2
+08000002
+// 0x1C: nop (delay slot)
+00000000
+//
+// done:
+// 0x20: addiu $v0, $zero, 1       print_int
+24020001
+// 0x24: addu $a0, $zero, $t1      $a0 = $t1
+00092021
+// 0x28: syscall
+0000000C
+// 0x2C: addiu $v0, $zero, 10      halt
+2402000A
+// 0x30: syscall
+0000000C

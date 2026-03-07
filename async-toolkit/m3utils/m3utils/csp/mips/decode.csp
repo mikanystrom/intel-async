@@ -1,0 +1,55 @@
+// decode.csp — Instruction decode stage
+// Extracts fields, reads register file, sign-extends immediate.
+// Special-cases SYSCALL: reads $v0(reg2) and $a0(reg4).
+//
+// Ports:
+//   fd_pc(32)     — in:  PC from Fetch
+//   fd_instr(32)  — in:  instruction from Fetch
+//   de_pc(32)     — out: PC to Execute
+//   de_instr(32)  — out: raw instruction to Execute
+//   de_rs_val(32) — out: rs register value to Execute
+//   de_rt_val(32) — out: rt register value to Execute
+//   de_imm(32)    — out: sign-extended immediate to Execute
+//   rs_req(5)     — out: rs register number to RegFile
+//   rs_resp(32)   — in:  rs value from RegFile
+//   rt_req(5)     — out: rt register number to RegFile
+//   rt_resp(32)   — in:  rt value from RegFile
+
+int(32) pc;
+int(32) instr;
+int(6) opcode;
+int(5) rs;
+int(5) rt;
+int(6) funct;
+int(32) rs_val;
+int(32) rt_val;
+int(16) imm16;
+int(32) imm_sx;
+
+*[
+  fd_pc?pc ; fd_instr?instr ;
+
+  // Extract fields using shift/mask (no bit-field access)
+  opcode = (instr >> 26) & 0x3F;
+  rs = (instr >> 21) & 0x1F;
+  rt = (instr >> 16) & 0x1F;
+  funct = instr & 0x3F;
+  imm16 = instr & 0xFFFF;
+
+  // Sign-extend the 16-bit immediate
+  [ imm16 >= 0x8000 -> imm_sx = 0xFFFF0000 | imm16
+  [] else -> imm_sx = imm16
+  ] ;
+
+  // SYSCALL special case: read $v0 and $a0 instead of rs/rt
+  [ opcode == 0 && funct == 0x0C ->
+    rs_req!2 ; rs_resp?rs_val ;    // $v0
+    rt_req!4 ; rt_resp?rt_val      // $a0
+  [] else ->
+    rs_req!rs ; rs_resp?rs_val ;
+    rt_req!rt ; rt_resp?rt_val
+  ] ;
+
+  // Send decoded values to Execute
+  de_pc!pc ; de_instr!instr ; de_rs_val!rs_val ; de_rt_val!rt_val ; de_imm!imm_sx
+]

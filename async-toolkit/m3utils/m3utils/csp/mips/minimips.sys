@@ -1,0 +1,169 @@
+// minimips.sys — MiniMIPS sequential processor
+// 5-stage pipeline: Fetch -> Decode -> Execute -> MemStage -> Writeback
+// Server processes: RegFile, DataMem
+
+system MiniMIPS;
+
+  // Pipeline channels: Fetch -> Decode
+  var fd_pc    : channel(32);
+  var fd_instr : channel(32);
+
+  // Pipeline channels: Decode -> Execute
+  var de_pc     : channel(32);
+  var de_instr  : channel(32);
+  var de_rs_val : channel(32);
+  var de_rt_val : channel(32);
+  var de_imm    : channel(32);
+
+  // Pipeline channels: Execute -> MemStage
+  var em_result     : channel(32);
+  var em_store_data : channel(32);
+  var em_dest       : channel(5);
+  var em_rw         : channel(1);
+  var em_memop      : channel(4);
+  var em_taken      : channel(1);
+  var em_target     : channel(32);
+
+  // Pipeline channels: MemStage -> Writeback
+  var mw_result : channel(32);
+  var mw_dest   : channel(5);
+  var mw_rw     : channel(1);
+  var mw_taken  : channel(1);
+  var mw_target : channel(32);
+
+  // Feedback: Writeback -> Fetch
+  var wb_taken  : channel(1);
+  var wb_target : channel(32);
+
+  // RegFile channels
+  var rs_req  : channel(5);
+  var rs_resp : channel(32);
+  var rt_req  : channel(5);
+  var rt_resp : channel(32);
+  var wb_wen  : channel(1);
+  var wb_wreg : channel(5);
+  var wb_wval : channel(32);
+
+  // DataMem channels
+  var dm_op    : channel(4);
+  var dm_addr  : channel(32);
+  var dm_wdata : channel(32);
+  var dm_rdata : channel(32);
+
+  // Process definitions
+  process Fetch = "fetch.csp"
+    port out fd_pc    : channel(32)
+    port out fd_instr : channel(32)
+    port in  wb_taken : channel(1)
+    port in  wb_target: channel(32);
+
+  process Decode = "decode.csp"
+    port in  fd_pc     : channel(32)
+    port in  fd_instr  : channel(32)
+    port out de_pc     : channel(32)
+    port out de_instr  : channel(32)
+    port out de_rs_val : channel(32)
+    port out de_rt_val : channel(32)
+    port out de_imm    : channel(32)
+    port out rs_req    : channel(5)
+    port in  rs_resp   : channel(32)
+    port out rt_req    : channel(5)
+    port in  rt_resp   : channel(32);
+
+  process Execute = "execute.csp"
+    port in  de_pc         : channel(32)
+    port in  de_instr      : channel(32)
+    port in  de_rs_val     : channel(32)
+    port in  de_rt_val     : channel(32)
+    port in  de_imm        : channel(32)
+    port out em_result     : channel(32)
+    port out em_store_data : channel(32)
+    port out em_dest       : channel(5)
+    port out em_rw         : channel(1)
+    port out em_memop      : channel(4)
+    port out em_taken      : channel(1)
+    port out em_target     : channel(32);
+
+  process MemStage = "memstage.csp"
+    port in  em_result     : channel(32)
+    port in  em_store_data : channel(32)
+    port in  em_dest       : channel(5)
+    port in  em_rw         : channel(1)
+    port in  em_memop      : channel(4)
+    port in  em_taken      : channel(1)
+    port in  em_target     : channel(32)
+    port out mw_result     : channel(32)
+    port out mw_dest       : channel(5)
+    port out mw_rw         : channel(1)
+    port out mw_taken      : channel(1)
+    port out mw_target     : channel(32)
+    port out dm_op         : channel(4)
+    port out dm_addr       : channel(32)
+    port out dm_wdata      : channel(32)
+    port in  dm_rdata      : channel(32);
+
+  process Writeback = "writeback.csp"
+    port in  mw_result : channel(32)
+    port in  mw_dest   : channel(5)
+    port in  mw_rw     : channel(1)
+    port in  mw_taken  : channel(1)
+    port in  mw_target : channel(32)
+    port out wb_wen    : channel(1)
+    port out wb_wreg   : channel(5)
+    port out wb_wval   : channel(32)
+    port out wb_taken  : channel(1)
+    port out wb_target : channel(32);
+
+  process RegFile = "regfile.csp"
+    port in  rs_req  : channel(5)
+    port out rs_resp : channel(32)
+    port in  rt_req  : channel(5)
+    port out rt_resp : channel(32)
+    port in  wb_wen  : channel(1)
+    port in  wb_wreg : channel(5)
+    port in  wb_wval : channel(32);
+
+  process DataMem = "dmem.csp"
+    port in  dm_op    : channel(4)
+    port in  dm_addr  : channel(32)
+    port in  dm_wdata : channel(32)
+    port out dm_rdata : channel(32);
+
+begin
+  var fetch     : Fetch    (fd_pc => fd_pc, fd_instr => fd_instr,
+                            wb_taken => wb_taken, wb_target => wb_target);
+  var decode    : Decode   (fd_pc => fd_pc, fd_instr => fd_instr,
+                            de_pc => de_pc, de_instr => de_instr,
+                            de_rs_val => de_rs_val, de_rt_val => de_rt_val,
+                            de_imm => de_imm,
+                            rs_req => rs_req, rs_resp => rs_resp,
+                            rt_req => rt_req, rt_resp => rt_resp);
+  var execute   : Execute  (de_pc => de_pc, de_instr => de_instr,
+                            de_rs_val => de_rs_val, de_rt_val => de_rt_val,
+                            de_imm => de_imm,
+                            em_result => em_result, em_store_data => em_store_data,
+                            em_dest => em_dest, em_rw => em_rw,
+                            em_memop => em_memop,
+                            em_taken => em_taken, em_target => em_target);
+  var memstage  : MemStage (em_result => em_result, em_store_data => em_store_data,
+                            em_dest => em_dest, em_rw => em_rw,
+                            em_memop => em_memop,
+                            em_taken => em_taken, em_target => em_target,
+                            mw_result => mw_result, mw_dest => mw_dest,
+                            mw_rw => mw_rw,
+                            mw_taken => mw_taken, mw_target => mw_target,
+                            dm_op => dm_op, dm_addr => dm_addr,
+                            dm_wdata => dm_wdata, dm_rdata => dm_rdata);
+  var writeback : Writeback(mw_result => mw_result, mw_dest => mw_dest,
+                            mw_rw => mw_rw,
+                            mw_taken => mw_taken, mw_target => mw_target,
+                            wb_wen => wb_wen, wb_wreg => wb_wreg,
+                            wb_wval => wb_wval,
+                            wb_taken => wb_taken, wb_target => wb_target);
+  var regfile   : RegFile  (rs_req => rs_req, rs_resp => rs_resp,
+                            rt_req => rt_req, rt_resp => rt_resp,
+                            wb_wen => wb_wen, wb_wreg => wb_wreg,
+                            wb_wval => wb_wval);
+  var datamem   : DataMem  (dm_op => dm_op, dm_addr => dm_addr,
+                            dm_wdata => dm_wdata, dm_rdata => dm_rdata);
+end.

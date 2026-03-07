@@ -1,0 +1,63 @@
+// MIPS branch and jump test
+// Expected output: 10 20 99 HALT
+//
+// Test 1: BEQ taken path
+// 0x00: addiu $t0, $zero, 5
+24080005
+// 0x04: addiu $t1, $zero, 5
+24090005
+// 0x08: beq $t0, $t1, +2 (target = 0x08+4+8 = 0x14)
+// BEQ: opcode=4, rs=$t0=8, rt=$t1=9, offset=2
+11090002
+// 0x0C: nop (delay slot)
+00000000
+// 0x10: addiu $t0, $zero, 77 (should be skipped)
+2408004D
+// 0x14: addiu $a0, $zero, 10
+2404000A
+// 0x18: addiu $v0, $zero, 1
+24020001
+// 0x1C: syscall (print 10)
+0000000C
+//
+// Test 2: BNE taken path
+// 0x20: addiu $t0, $zero, 3
+24080003
+// 0x24: addiu $t1, $zero, 7
+24090007
+// 0x28: bne $t0, $t1, +2 (target = 0x28+4+8 = 0x34)
+// BNE: opcode=5, rs=$t0=8, rt=$t1=9, offset=2
+15090002
+// 0x2C: nop (delay slot)
+00000000
+// 0x30: addiu $t0, $zero, 88 (should be skipped)
+24080058
+// 0x34: addiu $a0, $zero, 20
+24040014
+// 0x38: addiu $v0, $zero, 1
+24020001
+// 0x3C: syscall (print 20)
+0000000C
+//
+// Test 3: J (unconditional jump)
+// 0x40: j 0x50 (target word addr = 0x50/4 = 0x14)
+// J: opcode=2, target=0x14
+08000014
+// 0x44: nop (delay slot)
+00000000
+// 0x48: addiu $t0, $zero, 88 (should be skipped)
+24080058
+// 0x4C: addiu $t0, $zero, 88 (should be skipped)
+24080058
+// 0x50: addiu $a0, $zero, 99
+24040063
+// 0x54: addiu $v0, $zero, 1
+24020001
+// 0x58: syscall (print 99)
+0000000C
+//
+// Halt
+// 0x5C: addiu $v0, $zero, 10
+2402000A
+// 0x60: syscall
+0000000C

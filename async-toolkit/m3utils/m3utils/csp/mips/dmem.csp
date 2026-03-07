@@ -1,0 +1,89 @@
+// dmem.csp — Byte-addressable data memory server (64KB)
+// Ports:
+//   dm_op(4)     — memory operation code
+//   dm_addr(32)  — byte address
+//   dm_wdata(32) — write data (for stores)
+//   dm_rdata(32) — read data (for loads) / ack (for stores)
+//
+// Operations: 0=NOP, 1=LB, 2=LBU, 3=LH, 4=LHU, 5=LW, 6=SB, 7=SH, 8=SW
+
+int(8) mem[65536];
+int(4) op;
+int(32) addr;
+int(32) wdata;
+int(32) result;
+int(32) a;
+int(32) b0;
+int(32) b1;
+int(32) b2;
+int(32) b3;
+
+*[
+  dm_op?op ; dm_addr?addr ; dm_wdata?wdata ;
+  [ op == 0 ->
+    // NOP: pass through
+    result = 0
+
+  [] op == 1 ->
+    // LB: load byte, sign-extend
+    b0 = mem[addr & 0xFFFF];
+    [ b0 >= 128 -> result = 0xFFFFFF00 | b0
+    [] else -> result = b0
+    ]
+
+  [] op == 2 ->
+    // LBU: load byte, zero-extend
+    result = mem[addr & 0xFFFF]
+
+  [] op == 3 ->
+    // LH: load halfword, sign-extend (little-endian)
+    a = addr & 0xFFFF;
+    b0 = mem[a];
+    b1 = mem[a + 1];
+    result = (b1 << 8) | b0;
+    [ result >= 0x8000 -> result = result | 0xFFFF0000
+    [] else -> skip
+    ]
+
+  [] op == 4 ->
+    // LHU: load halfword, zero-extend (little-endian)
+    a = addr & 0xFFFF;
+    b0 = mem[a];
+    b1 = mem[a + 1];
+    result = (b1 << 8) | b0
+
+  [] op == 5 ->
+    // LW: load word (little-endian)
+    a = addr & 0xFFFC;
+    b0 = mem[a];
+    b1 = mem[a + 1];
+    b2 = mem[a + 2];
+    b3 = mem[a + 3];
+    result = (b3 << 24) | (b2 << 16) | (b1 << 8) | b0
+
+  [] op == 6 ->
+    // SB: store byte
+    mem[addr & 0xFFFF] = wdata & 0xFF;
+    result = 0
+
+  [] op == 7 ->
+    // SH: store halfword (little-endian)
+    a = addr & 0xFFFF;
+    mem[a] = wdata & 0xFF;
+    mem[a + 1] = (wdata >> 8) & 0xFF;
+    result = 0
+
+  [] op == 8 ->
+    // SW: store word (little-endian)
+    a = addr & 0xFFFC;
+    mem[a] = wdata & 0xFF;
+    mem[a + 1] = (wdata >> 8) & 0xFF;
+    mem[a + 2] = (wdata >> 16) & 0xFF;
+    mem[a + 3] = (wdata >> 24) & 0xFF;
+    result = 0
+
+  [] else ->
+    result = 0
+  ] ;
+  dm_rdata!result
+]

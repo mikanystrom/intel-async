@@ -1,0 +1,32 @@
+// MIPS JAL/JR test: function call and return
+// Expected output: 7 HALT
+//
+// main:
+// 0x00: addiu $a0, $zero, 3
+24040003
+// 0x04: addiu $a1, $zero, 4
+24050004
+// 0x08: jal func (byte 0x28 = word 0x0A)
+0C00000A
+// 0x0C: nop (delay slot)
+00000000
+// 0x10: addu $a0, $zero, $v0    (return val in $v0)
+00022021
+// 0x14: addiu $v0, $zero, 1
+24020001
+// 0x18: syscall (print 7)
+0000000C
+// 0x1C: addiu $v0, $zero, 10
+2402000A
+// 0x20: syscall (halt)
+0000000C
+// 0x24: nop (padding)
+00000000
+//
+// func: add $a0 + $a1, return in $v0
+// 0x28: addu $v0, $a0, $a1
+00851021
+// 0x2C: jr $ra
+03E00008
+// 0x30: nop (delay slot)
+00000000

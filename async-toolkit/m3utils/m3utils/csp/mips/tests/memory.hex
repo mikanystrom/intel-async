@@ -1,0 +1,37 @@
+// MIPS memory test: SW then LW
+// Expected output: 42 100 HALT
+//
+// 0x00: addiu $t0, $zero, 42      $t0 = 42
+2408002A
+// 0x04: addiu $t1, $zero, 256     $t1 = 256 (memory address)
+24090100
+// 0x08: sw $t0, 0($t1)            mem[256] = 42
+// SW: opcode=0x2B, rs=$t1=9, rt=$t0=8, offset=0
+AD280000
+// 0x0C: addiu $t0, $zero, 100     $t0 = 100
+24080064
+// 0x10: sw $t0, 4($t1)            mem[260] = 100
+// SW: opcode=0x2B, rs=$t1=9, rt=$t0=8, offset=4
+AD280004
+// 0x14: lw $t2, 0($t1)            $t2 = mem[256] = 42
+// LW: opcode=0x23, rs=$t1=9, rt=$t2=10, offset=0
+8D2A0000
+// 0x18: addiu $v0, $zero, 1       print_int
+24020001
+// 0x1C: addu $a0, $zero, $t2      $a0 = 42
+000A2021
+// 0x20: syscall
+0000000C
+// 0x24: lw $t2, 4($t1)            $t2 = mem[260] = 100
+8D2A0004
+// 0x28: addiu $v0, $zero, 1       print_int
+24020001
+// 0x2C: addu $a0, $zero, $t2      $a0 = 100
+000A2021
+// 0x30: syscall
+0000000C
+// Halt
+// 0x34: addiu $v0, $zero, 10
+2402000A
+// 0x38: syscall
+0000000C

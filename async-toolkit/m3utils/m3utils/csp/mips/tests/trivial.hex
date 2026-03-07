@@ -1,0 +1,11 @@
+// Trivial MIPS test: print 42, then halt
+// 0x00: addiu $v0, $zero, 1     => syscall print_int
+// 0x04: addiu $a0, $zero, 42    => arg = 42
+// 0x08: syscall
+// 0x0C: addiu $v0, $zero, 10    => syscall halt
+// 0x10: syscall
+24020001
+2404002A
+0000000C
+2402000A
+0000000C
