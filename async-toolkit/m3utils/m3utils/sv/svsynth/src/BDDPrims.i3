@@ -23,6 +23,9 @@ PROCEDURE Install(prims : SchemePrimitive.ExtDefiner) : SchemePrimitive.ExtDefin
        (bdd-format b)          => string representation
        (bdd-size b)            => node count
        (bdd-equal? a b)        => boolean equality
+       (bdd->sop b)            => minimized SOP equation string
+       (bdd->sop-raw b)        => unminimized SOP equation string
+       (bdd->sop-terms b)      => product term count after minimization
   *)
 
 END BDDPrims.

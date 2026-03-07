@@ -8,6 +8,7 @@ IMPORT SchemePrimitive, SchemeProcedure, Scheme;
 IMPORT SchemeString, SchemeBoolean, SchemeLongReal;
 IMPORT SchemeUtils, Atom;
 IMPORT BDD, BDDImpl;
+IMPORT SopBDD, SopBDDRep;
 FROM SchemeUtils IMPORT First, Second, Third;
 FROM SchemeBoolean IMPORT True, False;
 FROM Scheme IMPORT Object, E;
@@ -247,6 +248,50 @@ PROCEDURE BDDHashApply(<*UNUSED*>p : SchemeProcedure.T;
     RETURN SchemeLongReal.FromI(BDD.Hash(CheckBDD(First(args))))
   END BDDHashApply;
 
+(* (bdd->sop b) => minimized SOP string *)
+PROCEDURE BDDToSopApply(<*UNUSED*>p : SchemeProcedure.T;
+                        <*UNUSED*>interp : Scheme.T;
+                                  args : Object) : Object RAISES { E } =
+  VAR
+    b   : BDD.T;
+    sop : SopBDD.T;
+    tr  : BDD.T;
+  BEGIN
+    b := CheckBDD(First(args));
+    tr := BDD.True();
+    sop := SopBDD.ConvertBool(b).invariantSimplify(tr, tr, tr);
+    RETURN SchemeString.FromText(sop.format(NIL))
+  END BDDToSopApply;
+
+(* (bdd->sop-raw b) => unminimized SOP string *)
+PROCEDURE BDDToSopRawApply(<*UNUSED*>p : SchemeProcedure.T;
+                           <*UNUSED*>interp : Scheme.T;
+                                     args : Object) : Object RAISES { E } =
+  VAR
+    b   : BDD.T;
+    sop : SopBDD.T;
+  BEGIN
+    b := CheckBDD(First(args));
+    sop := SopBDD.ConvertBool(b);
+    RETURN SchemeString.FromText(sop.format(NIL))
+  END BDDToSopRawApply;
+
+(* (bdd->sop-terms b) => number of product terms after minimization *)
+PROCEDURE BDDToSopTermsApply(<*UNUSED*>p : SchemeProcedure.T;
+                             <*UNUSED*>interp : Scheme.T;
+                                       args : Object) : Object RAISES { E } =
+  VAR
+    b   : BDD.T;
+    sop : SopBDD.T;
+    tr  : BDD.T;
+  BEGIN
+    b := CheckBDD(First(args));
+    tr := BDD.True();
+    sop := SopBDD.ConvertBool(b).invariantSimplify(tr, tr, tr);
+    RETURN SchemeLongReal.FromLR(
+             FLOAT(NUMBER(NARROW(sop, SopBDDRep.Private).rep^), LONGREAL))
+  END BDDToSopTermsApply;
+
 (**********************************************************************)
 
 PROCEDURE Install(prims : SchemePrimitive.ExtDefiner) : SchemePrimitive.ExtDefiner =
@@ -319,6 +364,15 @@ PROCEDURE Install(prims : SchemePrimitive.ExtDefiner) : SchemePrimitive.ExtDefin
                   1, 1);
     prims.addPrim("bdd-hash", NEW(SchemeProcedure.T,
                                    apply := BDDHashApply),
+                  1, 1);
+    prims.addPrim("bdd->sop", NEW(SchemeProcedure.T,
+                                   apply := BDDToSopApply),
+                  1, 1);
+    prims.addPrim("bdd->sop-raw", NEW(SchemeProcedure.T,
+                                       apply := BDDToSopRawApply),
+                  1, 1);
+    prims.addPrim("bdd->sop-terms", NEW(SchemeProcedure.T,
+                                         apply := BDDToSopTermsApply),
                   1, 1);
     RETURN prims
   END Install;

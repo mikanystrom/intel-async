@@ -5,6 +5,7 @@ import("schemesig")
 import("modula3scheme")
 import("parseparams")
 import("bdd")
+import("sop")
 
 interface("BDDPrims")
 module("BDDPrims")
