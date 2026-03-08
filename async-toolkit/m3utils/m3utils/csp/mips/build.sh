@@ -10,7 +10,14 @@ set -euo pipefail
 
 MIPSDIR="$(cd "$(dirname "$0")" && pwd)"
 M3UTILS="$(cd "$MIPSDIR/../.." && pwd)"
-CSPC="$M3UTILS/csp/ARM64_DARWIN/cspc"
+
+# Determine cm3 target (e.g., ARM64_DARWIN, AMD64_LINUX)
+if [ -f "$M3UTILS/.bindir" ]; then
+    TARGET="$(cat "$M3UTILS/.bindir")"
+else
+    TARGET="$("$M3UTILS/m3arch.sh")"
+fi
+CSPC="$M3UTILS/csp/$TARGET/cspc"
 CM3_INSTALL="$(cd "$M3UTILS/../../../../install/bin" 2>/dev/null && pwd)" || true
 MAX_RETRIES="${1:-5}"
 CRASH_DIR="$MIPSDIR/crash-reports"
