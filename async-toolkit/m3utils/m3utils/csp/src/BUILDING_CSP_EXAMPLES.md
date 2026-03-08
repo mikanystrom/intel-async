@@ -71,7 +71,7 @@ cd build/src
 cm3 -build -override
 
 # Run the simulator
-../ARM64_DARWIN/sim
+../$(../../m3arch.sh)/sim
 ```
 
 Expected output:
@@ -145,7 +145,7 @@ cspc -scm /dev/stdin <<'EOF'
 (build-system! "example.sys")
 (exit)
 EOF
-build/ARM64_DARWIN/sim
+build/$(../../m3arch.sh)/sim
 ```
 
 ### `.sys` file format
@@ -230,7 +230,7 @@ EOF
 
 cd build/src
 cm3 -build -override
-../ARM64_DARWIN/sim
+../$(../../m3arch.sh)/sim
 ```
 
 The simulation runs 20 workers computing Collatz sequences for odd
@@ -253,7 +253,7 @@ The generated `sim` binary accepts several command-line options:
 ### Interactive Scheme session
 
 ```sh
-../ARM64_DARWIN/sim -scm
+../$(../../m3arch.sh)/sim -scm
 ```
 
 This builds the simulation and drops into a Scheme REPL where you can

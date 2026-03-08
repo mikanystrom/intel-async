@@ -477,8 +477,8 @@ cd csp/cspparse/src
 cm3 -build -override
 ```
 
-The built binary is at `../ARM64_DARWIN/cspfe` (or the appropriate target
-directory).
+The built binary is at `../<TARGET>/cspfe` where `<TARGET>` is the cm3
+target directory (e.g., `ARM64_DARWIN`, `AMD64_LINUX`).
 
 ## Testing
 

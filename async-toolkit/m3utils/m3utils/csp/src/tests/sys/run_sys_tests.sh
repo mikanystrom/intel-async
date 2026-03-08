@@ -7,12 +7,19 @@ set -u
 # --- Environment -----------------------------------------------------------
 
 M3UTILS="${M3UTILS:-/Users/mika/cm3/intel-async/async-toolkit/m3utils/m3utils}"
-CSPC="${CSPC:-$M3UTILS/csp/ARM64_DARWIN/cspc}"
 CM3DIR="${CM3DIR:-/Users/mika/cm3/install/bin}"
 TESTDIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Determine cm3 target (e.g., ARM64_DARWIN, AMD64_LINUX)
+if [ -f "$M3UTILS/.bindir" ]; then
+    TARGET="$(cat "$M3UTILS/.bindir")"
+else
+    TARGET="$("$M3UTILS/m3arch.sh")"
+fi
+CSPC="${CSPC:-$M3UTILS/csp/$TARGET/cspc}"
+
 # Ensure cm3, sstubgen, and cspfe are on PATH
-export PATH="$CM3DIR:$M3UTILS/csp/cspparse/ARM64_DARWIN:$PATH"
+export PATH="$CM3DIR:$M3UTILS/csp/cspparse/$TARGET:$PATH"
 
 PASS=0
 FAIL=0
@@ -94,10 +101,8 @@ EOF
 
     # Check exit code and presence of simulator binary
     sim=""
-    if [ -f "$tdir/build/ARM64_DARWIN/sim" ]; then
-        sim="$tdir/build/ARM64_DARWIN/sim"
-    elif [ -f "$tdir/build/src/ARM64_DARWIN/sim" ]; then
-        sim="$tdir/build/src/ARM64_DARWIN/sim"
+    if [ -f "$tdir/build/$TARGET/sim" ]; then
+        sim="$tdir/build/$TARGET/sim"
     fi
 
     if [ $_RC -eq 0 ] && [ -n "$sim" ]; then

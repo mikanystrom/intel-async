@@ -2,7 +2,13 @@
 # CSP parser test suite
 # Usage: sh run_tests.sh
 
-CSPFE=../ARM64_DARWIN/cspfe
+M3UTILS="${M3UTILS:-$(cd "$(dirname "$0")"/../../.. && pwd)}"
+if [ -f "$M3UTILS/.bindir" ]; then
+    TARGET="$(cat "$M3UTILS/.bindir")"
+else
+    TARGET="$("$M3UTILS/m3arch.sh")"
+fi
+CSPFE=../$TARGET/cspfe
 PASS=0
 FAIL=0
 TOTAL=0

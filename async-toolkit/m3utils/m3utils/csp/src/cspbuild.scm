@@ -572,10 +572,27 @@
 ;;  6. SCM file generation (cspfe invocation + patching)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(define *m3-target* #f)
+
+(define (m3-target)
+  ;; Determine cm3 target directory (e.g., ARM64_DARWIN, AMD64_LINUX)
+  ;; Caches result in *m3-target*
+  (if *m3-target*
+      *m3-target*
+      (let* ((raw (run-command (string-append (Env.Get "M3UTILS")
+                                              "/m3arch.sh")))
+             (len (string-length raw))
+             (result (if (and (> len 0)
+                              (char=? (string-ref raw (- len 1)) #\newline))
+                         (substring raw 0 (- len 1))
+                         raw)))
+        (set! *m3-target* result)
+        result)))
+
 (define (find-cspfe)
   ;; Locate the cspfe binary relative to M3UTILS
   (string-append (Env.Get "M3UTILS")
-                 "/csp/cspparse/ARM64_DARWIN/cspfe"))
+                 "/csp/cspparse/" (m3-target) "/cspfe"))
 
 (define (shell-quote s)
   ;; Simple quoting: wrap in single quotes, escaping embedded single quotes
@@ -740,7 +757,7 @@
           (if opt-run
               (begin
                 (dis "cspbuild: running simulator ..." dnl)
-                (system "./build/src/ARM64_DARWIN/sim")))
+                (system (string-append "./build/" (m3-target) "/sim"))))
 
           (dis "cspbuild: done." dnl)
           'ok)))))
