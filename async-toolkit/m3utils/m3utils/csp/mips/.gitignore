@@ -1,0 +1,27 @@
+# Build artifacts
+build/
+
+# Generated intermediate files (cspc output)
+*.procs
+*.scm
+*.tmp
+
+# Working copies of hex files
+program.hex
+data.hex
+
+# LaTeX build artifacts
+*.aux
+*.log
+*.out
+
+# Crash reports
+crash-reports/
+
+# Backup files
+*.structchan
+
+# Cross-compiler intermediate files
+tests/*.o
+tests/*.elf
+tests/*.dis
