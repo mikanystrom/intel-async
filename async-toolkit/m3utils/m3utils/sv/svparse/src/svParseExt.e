@@ -127,12 +127,20 @@ param_port_decl: { val : TEXT; cnt : INTEGER; }
   bare_typed_dims  { $$.val := "(parameter " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
   bare_range       { $$.val := "(parameter " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
   bare_bare        { $$.val := "(parameter " & $1 & $2 & ")" }
-  param_type       { $$.val := "(parameter-type " & $1 & " " & $2 & ")" }
+  param_type            { $$.val := "(parameter-type " & $1 & " " & $2 & ")" }
+  param_type_user       { $$.val := "(parameter-type " & $1 & " " & $2 & ")" }
+  param_type_bare       { $$.val := "(parameter-type " & $1 & ")" }
+  localparam_type       { $$.val := "(localparam-type " & $1 & " " & $2 & ")" }
+  localparam_type_user  { $$.val := "(localparam-type " & $1 & " " & $2 & ")" }
+  bare_type             { $$.val := "(parameter-type " & $1 & " " & $2 & ")" }
+  bare_type_user        { $$.val := "(parameter-type " & $1 & " " & $2 & ")" }
 
 param_ident_rest: { val : TEXT; cnt : INTEGER; }
-  scoped      { $$.val := "::" & $1 & " " & $2 & " " & $3 }
-  user_typed  { $$.val := " " & $1 & " " & $2 }
-  plain       { $$.val := " () " & $1 }
+  scoped          { $$.val := "::" & $1 & " " & $2 & " " & $3 }
+  user_typed      { $$.val := " " & $1 & " " & $2 }
+  user_typed_dims { $$.val := " " & $1 & " " & $2 & " " & $3 }
+  plain           { $$.val := " () " & $1 }
+  plain_dims      { $$.val := " " & $1 & " " & $2 }
 
 opt_port_list: { val : TEXT; cnt : INTEGER; }
   yes           { $$.val := "(ports " & $1 & ")" }
@@ -252,6 +260,22 @@ module_item: { val : TEXT; cnt : INTEGER; }
   dpi_import      { $$.val := $1 }
   extern_item     { $$.val := $1 }
   timeunit_item   { $$.val := $1 }
+  assert_mod      { $$.val := "(assert-property " & $1 & " " & $2 & ")" }
+  assume_mod      { $$.val := "(assume-property " & $1 & " " & $2 & ")" }
+  cover_mod       { $$.val := "(cover-property " & $1 & ")" }
+  assert_imm_mod  { $$.val := "(assert-deferred " & $1 & " " & $2 & " " & $3 & ")" }
+  assert_final_mod { $$.val := "(assert-final " & $1 & " " & $2 & ")" }
+  assume_imm_mod  { $$.val := "(assume-deferred " & $1 & " " & $2 & " " & $3 & ")" }
+  assume_final_mod { $$.val := "(assume-final " & $1 & " " & $2 & ")" }
+  cover_imm_mod   { $$.val := "(cover-deferred " & $1 & " " & $2 & ")" }
+  cover_final_mod { $$.val := "(cover-final " & $1 & ")" }
+  labeled_assert  { $$.val := "(labeled " & $1 & " (assert-property " & $2 & " " & $3 & "))" }
+  labeled_assume  { $$.val := "(labeled " & $1 & " (assume-property " & $2 & " " & $3 & "))" }
+  labeled_cover   { $$.val := "(labeled " & $1 & " (cover-property " & $2 & "))" }
+  labeled_assert_imm { $$.val := "(labeled " & $1 & " (assert-deferred " & $2 & " " & $3 & " " & $4 & "))" }
+  labeled_assume_imm { $$.val := "(labeled " & $1 & " (assume-deferred " & $2 & " " & $3 & " " & $4 & "))" }
+  labeled_cover_imm  { $$.val := "(labeled " & $1 & " (cover-deferred " & $2 & " " & $3 & "))" }
+
   if_gen          { $$.val := "(if-generate " & $1 & " " & $2 & " " & $3 & ")" }
   for_gen         { $$.val := "(for-generate " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
   case_item       { $$.val := "(" & $1 & " " & $2 & " " & $3 & ")" }
@@ -352,9 +376,12 @@ struct_member_list: { val : TEXT; cnt : INTEGER; }
   cons    { $$.val := $1 & " " & $2 }
 
 struct_member: { val : TEXT; cnt : INTEGER; }
-  typed       { $$.val := Wrap2("member", $1, $2) }
-  user_type   { $$.val := "(member " & $1 & " " & $2 & ")" }
-  void_member { $$.val := "(member void " & $1 & ")" }
+  typed        { $$.val := Wrap2("member", $1, $2) }
+  user_type    { $$.val := "(member " & $1 & " " & $2 & ")" }
+  void_member  { $$.val := "(member void " & $1 & ")" }
+  struct_typed { $$.val := Wrap2("member", $1, $2) }
+  union_typed  { $$.val := Wrap2("member", $1, $2) }
+  enum_typed   { $$.val := Wrap2("member", $1, $2) }
 
 typedef_declaration: { val : TEXT; cnt : INTEGER; }
   data    { $$.val := "(typedef " & $1 & " " & $2 & " " & $3 & ")" }
@@ -379,11 +406,15 @@ parameter_declaration: { val : TEXT; cnt : INTEGER; }
   typed        { $$.val := "(parameter " & $1 & " " & $2 & ")" }
   range        { $$.val := "(parameter " & $1 & " " & $2 & " " & $3 & ")" }
   ident_start  { $$.val := "(parameter " & $1 & " " & $2 & ")" }
+  type_decl    { $$.val := "(parameter-type " & $1 & " " & $2 & ")" }
+  type_user    { $$.val := "(parameter-type " & $1 & " " & $2 & ")" }
 
 localparam_declaration: { val : TEXT; cnt : INTEGER; }
   typed        { $$.val := "(localparam " & $1 & " " & $2 & ")" }
   range        { $$.val := "(localparam " & $1 & " " & $2 & " " & $3 & ")" }
   ident_start  { $$.val := "(localparam " & $1 & " " & $2 & ")" }
+  type_decl    { $$.val := "(localparam-type " & $1 & " " & $2 & ")" }
+  type_user    { $$.val := "(localparam-type " & $1 & " " & $2 & ")" }
 
 decl_ident_rest: { val : TEXT; cnt : INTEGER; }
   user_typed   { $$.val := " (id " & $1 & " " & $2 & " " & $3 & ")" }
@@ -452,7 +483,18 @@ statement: { val : TEXT; cnt : INTEGER; }
   dec_stmt       { $$.val := "(-- " & $1 & ")" }
   preinc_stmt    { $$.val := "(++ " & $1 & ")" }
   predec_stmt    { $$.val := "(-- " & $1 & ")" }
-  assert_stmt    { $$.val := "(assert " & $1 & " " & $2 & ")" }
+  assert_stmt          { $$.val := "(assert " & $1 & " " & $2 & ")" }
+  assert_deferred      { $$.val := "(assert-deferred " & $1 & " " & $2 & " " & $3 & ")" }
+  assert_final         { $$.val := "(assert-final " & $1 & " " & $2 & ")" }
+  assert_property_stmt { $$.val := "(assert-property " & $1 & " " & $2 & ")" }
+  assume_stmt          { $$.val := "(assume " & $1 & " " & $2 & ")" }
+  assume_deferred      { $$.val := "(assume-deferred " & $1 & " " & $2 & " " & $3 & ")" }
+  assume_final         { $$.val := "(assume-final " & $1 & " " & $2 & ")" }
+  assume_property_stmt { $$.val := "(assume-property " & $1 & " " & $2 & ")" }
+  cover_stmt           { $$.val := "(cover " & $1 & ")" }
+  cover_deferred       { $$.val := "(cover-deferred " & $1 & " " & $2 & ")" }
+  cover_final          { $$.val := "(cover-final " & $1 & ")" }
+  cover_property_stmt  { $$.val := "(cover-property " & $1 & ")" }
   delay_stmt     { $$.val := "(delay " & $1 & " " & $2 & ")" }
   event_ctrl_stmt { $$.val := "(event-ctrl " & $1 & " " & $2 & ")" }
   foreach_stmt    { $$.val := "(foreach " & $1 & " " & $2 & " " & $3 & ")" }
@@ -477,6 +519,11 @@ opt_else: { val : TEXT; cnt : INTEGER; }
 opt_assert_else: { val : TEXT; cnt : INTEGER; }
   yes    { $$.val := $1 }
   bare   { $$.val := "()" }
+
+property_expr: { val : TEXT; cnt : INTEGER; }
+  expr              { $$.val := $1 }
+  clocked           { $$.val := $1 & " " & $2 }
+  clocked_disable   { $$.val := $1 & " (disable-iff " & $4 & ") " & $5 }
 
 case_keyword: { val : TEXT; cnt : INTEGER; }
   case           { $$.val := "case" }
