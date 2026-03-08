@@ -4,7 +4,7 @@ import ("parserlib")
 
 Token("sv")
 Lexer("sv","sv")
-Parser("sv","sv")
+ParserLALR("sv","sv")
 
 Extended("svLexExt")
 Extended("svParseExt")
