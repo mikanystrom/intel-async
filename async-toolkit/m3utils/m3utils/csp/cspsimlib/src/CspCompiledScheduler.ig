@@ -39,6 +39,7 @@ PROCEDURE ScheduleWait(from, toSchedule : Process.Closure);
 PROCEDURE Run(mt     : CARDINAL    := 0;
               greedy               := FALSE;
               nondet               := FALSE;
+              eager                := FALSE;
               worker : CspWorker.T := NIL);
 
 CONST SchedulingLoop = Run;

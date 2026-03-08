@@ -226,21 +226,34 @@ PROCEDURE GetTime() : Word.T =
   BEGIN RETURN masterTime END GetTime;
 
 VAR masterTime : Word.T := 0;
+VAR eagerMode := FALSE;
 
 PROCEDURE Run1(t : T) =
   BEGIN
     (* run *)
     t.time := masterTime;
-    
+
     LOOP
       IF doDebug THEN
         Debug.Out(F("=====  @ %s Scheduling loop %s: np = %s",
                     Int(t.time),
-                    Int(t.id), Int(t.np))) 
+                    Int(t.id), Int(t.np)))
       END;
 
       IF t.np = 0 THEN
         RETURN
+      END;
+
+      IF eagerMode THEN
+        WHILE t.np = 1 DO
+          VAR cl := t.next[0]; BEGIN
+            t.np := 0;
+            INC(masterTime);
+            t.time := masterTime;
+            cl.run();
+          END
+        END;
+        IF t.np = 0 THEN RETURN END;
       END;
 
       VAR
@@ -353,12 +366,14 @@ PROCEDURE NewWriterFrame(cd : CspRemoteChannel.T;
     RETURN res
   END NewWriterFrame;
   
-PROCEDURE Run(mt : CARDINAL; greedy, nondet : BOOLEAN; worker : CspWorker.T) =
+PROCEDURE Run(mt : CARDINAL; greedy, nondet, eager : BOOLEAN; worker : CspWorker.T) =
   BEGIN
+    eagerMode := eager;
+
     IF worker # NIL AND mt = 0 THEN
       mt := 1
     END;
-    
+
     IF mt = 0 THEN
       theScheduler := NEW(T,
                           id     := 0,
