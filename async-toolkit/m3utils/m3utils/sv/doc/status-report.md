@@ -31,7 +31,7 @@ S-expression ASTs.
 
 | File | Language | Description |
 |------|----------|-------------|
-| `sv/svparse/` | Modula-3 | LR(1) parser for SystemVerilog (`.t`/`.l`/`.y`/`.e` grammar) |
+| `sv/svparse/` | Modula-3 | LR(1)/LALR(1) parser for SystemVerilog (`.t`/`.l`/`.y`/`.e` grammar) |
 | `sv/svparse/.../svfe` | Binary | Parser frontend: `svfe [--scm] file.sv` |
 | `sv/svsynth/` | Modula-3 | `svsynth` interpreter = mscheme + BDD primitives (22 primitives) |
 | `sv/svpp/` | Modula-3 | Standalone preprocessor (`` `define ``, `` `ifdef ``, `` `include ``, etc.) |
@@ -65,11 +65,49 @@ full expression hierarchy, module instantiation, signed/unsigned,
 type casts, streaming operators, DPI-C export, escaped identifiers,
 unique/priority case.
 
+### LALR(1) Parser Construction
+
+The parserlib metacompiler (kyacc) now supports optional LALR(1)
+table construction via the DeRemer-Pennello algorithm, activated by
+setting the `yaccLALR` environment variable.  The canonical LR(1)
+builder remains the default and is untouched.
+
+| Metric | Canonical LR(1) | LALR(1) |
+|--------|-----------------|---------|
+| States | ~68,000 | 1,162 |
+| Build time | 5 min 49 s | 11 s |
+| Speedup | — | **31×** |
+
+Both builders produce identical parse results on all test suites.
+
+**Conflict resolution heuristic:** LALR state merging introduces
+shift/reduce conflicts not present in canonical LR.  These are
+resolved by an epsilon-based heuristic:
+
+- **Epsilon reduce → shift wins** — handles dangling else correctly
+  (`opt_else → ε` should not reduce when `else` is available to shift)
+- **Non-epsilon reduce → reduce wins** — handles declaration-vs-statement
+  ambiguity (`T_IDENT` should reduce to `hierarchical_id` before
+  attempting subscript operations)
+
+This heuristic is specific to the SV grammar and encoded in
+`LALR.m3:BuildTransitions`.
+
+**Implementation files** (in `~/cm3-git/caltech-parser/parserlib/kyacc/src/`):
+
+| File | Changes |
+|------|---------|
+| `LALR.i3` / `LALR.m3` | New: LALR(1) construction (LR(0) core + lookahead propagation) |
+| `PDA.i3` / `PDA.m3` | LALR routing via `self.lalr`; removed buggy `relevant` optimization |
+| `RuleListState.i3` / `.m3` | Removed unused `CollectRelevantCodes`, `QuickAction`, `CoreKey`, `PropagateAttrs` |
+| `Main.m3` | Read `yaccLALR` env var, pass to PDA constructor |
+| `m3makefile` | Added `Module("LALR")` |
+
 ### Parser Test Results
 
 | Test Suite | Files | Pass | Status |
 |------------|-------|------|--------|
-| sv/tests/verify/ | 21 | 21 | 100% |
+| sv/tests/verify/ | 22 | 22 | 100% |
 | ibex/rtl/ | 30 | 30 | 100% |
 | ibex prim/rtl/ | 161 | 161 | 100% |
 
