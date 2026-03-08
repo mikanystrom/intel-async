@@ -40,7 +40,7 @@ PROCEDURE Export(VAR data : ARRAY OF Word.T; t : T) =
       data[i] := 0
     END;
     
-    WITH count = (P.c_sizeinbase(ADR(t), 2) + numb - 1) DIV numb DO
+    WITH count = (P.c_sizeinbase(ADR(t.val), 2) + numb - 1) DIV numb DO
       IF count > NUMBER(data) THEN
         (* number is too big, truncate it *)
         VAR
