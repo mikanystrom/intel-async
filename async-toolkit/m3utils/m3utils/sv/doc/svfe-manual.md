@@ -37,6 +37,18 @@ then compiles and links the svfe binary.
 The binary is placed in `sv/svparse/AMD64_LINUX/svfe` (or the appropriate
 platform directory).
 
+**LALR(1) mode** (optional, ~31× faster build):
+
+```
+$ setenv yaccLALR 1    # or: export yaccLALR=1
+$ cm3 -override
+```
+
+By default, kyacc builds a canonical LR(1) parser (~68,000 states,
+~5 min).  Setting `yaccLALR` activates DeRemer-Pennello LALR(1)
+construction, producing 1,162 states in ~11 seconds.  Both modes
+generate parsers that produce identical results on all test suites.
+
 **Prerequisites:**
 
 - CM3 compiler with parserlib installed
@@ -643,7 +655,7 @@ Also not yet supported:
 |------|-------------|
 | `sv/svparse/src/sv.t` | Token definitions |
 | `sv/svparse/src/sv.l` | Lexer specification (DFA) |
-| `sv/svparse/src/sv.y` | Grammar (LR(1), ~640 lines) |
+| `sv/svparse/src/sv.y` | Grammar (LR(1)/LALR(1), ~640 lines) |
 | `sv/svparse/src/svLexExt.e` | Lexer extension (token values) |
 | `sv/svparse/src/svParseExt.e` | Parser extension (S-expr output) |
 | `sv/svparse/src/Main.m3` | Command-line driver |
