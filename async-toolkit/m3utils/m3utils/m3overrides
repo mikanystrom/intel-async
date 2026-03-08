@@ -221,7 +221,6 @@ override("cspparse", TOP & "/csp")
 
 override("mpz", TOP & "/gmp")
 
-override("cspparse", TOP & "/csp")
 override("globelib", TOP & "/globe")
 override("geodata", TOP & "/globe")
 override("airports", TOP & "/globe")
