@@ -2770,7 +2770,7 @@
               (snm    (struct-type-name ty))
               (m3snm  (m3-struct snm))
               (sfx    (classify-expr-type pc rhs))
-              (scrtch (if (eq? 'dynamic sfx) " , frame.c " ""))
+              (scrtch (if (memq sfx '(dynamic wide)) " , frame.c " ""))
               (rhsstr
 
                (cond ((and (eq? sfx 'dynamic)
@@ -4085,6 +4085,7 @@
     (mw "  mt       : CARDINAL := 0;" dnl)
     (mw "  greedy   : BOOLEAN;" dnl)
     (mw "  nondet   : BOOLEAN;" dnl)
+    (mw "  eager    : BOOLEAN;" dnl)
     (mw "  worker   : BOOLEAN;" dnl)
     (mw "  workerId : CARDINAL;" dnl)
     (mw "  master   : BOOLEAN;" dnl)
@@ -4108,6 +4109,7 @@
     (mw "    END;" dnl)
     (mw "    greedy := pp.keywordPresent(\"-greedy\");" dnl)
     (mw "    nondet := pp.keywordPresent(\"-nondet\");" dnl)
+    (mw "    eager  := pp.keywordPresent(\"-eager\");" dnl)
     (mw "    IF pp.keywordPresent(\"-mt\") THEN" dnl
         "       mt := pp.getNextInt()" dnl
         "    END;" dnl)
@@ -4128,7 +4130,7 @@
     (mw "  IF    worker THEN" dnl)
     (mw "    theWorker := NEW(CspWorker.T).init(id := workerId, bld := BuildSimulation);" dnl)
     (mw "    theWorker.awaitInitialization();" dnl)
-    (mw "    Scheduler.SchedulingLoop(mt, greedy, nondet, theWorker)" dnl)
+    (mw "    Scheduler.SchedulingLoop(mt, greedy, nondet, eager, theWorker)" dnl)
     (mw "  ELSIF master THEN" dnl)
     (mw "    NEW(CspMaster.T).init(nworkers := nworkers," dnl
         "                          bld      := BuildSimulation," dnl
@@ -4147,7 +4149,7 @@
     (mw "        Scheme.E(err) => Debug.Error(\"Caught Scheme.E : \" & err)" dnl)
     (mw "      END" dnl)
     (mw "    ELSE" dnl)
-    (mw "      Scheduler.SchedulingLoop(mt, greedy, nondet, NIL)" dnl)
+    (mw "      Scheduler.SchedulingLoop(mt, greedy, nondet, eager, NIL)" dnl)
     (mw "    END" dnl)
     (mw "  END;" dnl)
     (mw "" dnl) 

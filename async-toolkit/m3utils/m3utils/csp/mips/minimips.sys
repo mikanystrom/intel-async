@@ -15,14 +15,8 @@ system MiniMIPS;
   var de_rt_val : channel(32);
   var de_imm    : channel(32);
 
-  // Pipeline channels: Execute -> MemStage
-  var em_result     : channel(32);
-  var em_store_data : channel(32);
-  var em_dest       : channel(5);
-  var em_rw         : channel(1);
-  var em_memop      : channel(4);
-  var em_taken      : channel(1);
-  var em_target     : channel(32);
+  // Pipeline channel: Execute -> MemStage (struct-packed)
+  var em_data : channel(107);
 
   // Pipeline channels: MemStage -> Writeback
   var mw_result : channel(32);
@@ -76,22 +70,10 @@ system MiniMIPS;
     port in  de_rs_val     : channel(32)
     port in  de_rt_val     : channel(32)
     port in  de_imm        : channel(32)
-    port out em_result     : channel(32)
-    port out em_store_data : channel(32)
-    port out em_dest       : channel(5)
-    port out em_rw         : channel(1)
-    port out em_memop      : channel(4)
-    port out em_taken      : channel(1)
-    port out em_target     : channel(32);
+    port out em_data       : channel(107);
 
   process MemStage = "memstage.csp"
-    port in  em_result     : channel(32)
-    port in  em_store_data : channel(32)
-    port in  em_dest       : channel(5)
-    port in  em_rw         : channel(1)
-    port in  em_memop      : channel(4)
-    port in  em_taken      : channel(1)
-    port in  em_target     : channel(32)
+    port in  em_data       : channel(107)
     port out mw_result     : channel(32)
     port out mw_dest       : channel(5)
     port out mw_rw         : channel(1)
@@ -141,14 +123,8 @@ begin
   var execute   : Execute  (de_pc => de_pc, de_instr => de_instr,
                             de_rs_val => de_rs_val, de_rt_val => de_rt_val,
                             de_imm => de_imm,
-                            em_result => em_result, em_store_data => em_store_data,
-                            em_dest => em_dest, em_rw => em_rw,
-                            em_memop => em_memop,
-                            em_taken => em_taken, em_target => em_target);
-  var memstage  : MemStage (em_result => em_result, em_store_data => em_store_data,
-                            em_dest => em_dest, em_rw => em_rw,
-                            em_memop => em_memop,
-                            em_taken => em_taken, em_target => em_target,
+                            em_data => em_data);
+  var memstage  : MemStage (em_data => em_data,
                             mw_result => mw_result, mw_dest => mw_dest,
                             mw_rw => mw_rw,
                             mw_taken => mw_taken, mw_target => mw_target,

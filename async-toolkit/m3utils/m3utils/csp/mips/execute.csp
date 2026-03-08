@@ -16,6 +16,9 @@
 //   em_taken(1)        — out: branch taken to MemStage
 //   em_target(32)      — out: branch target to MemStage
 
+structure EmData = (int(32) result; int(32) store_data; int(5) dest;
+                    int(1) rw; int(4) memop; int(1) taken; int(32) target);
+
 int(32) pc;
 int(32) instr;
 int(32) rs_val;
@@ -39,6 +42,7 @@ int(32) hi;
 int(32) lo;
 int(32) temp;
 int(64) prod;
+EmData em;
 bool running;
 
 hi = 0;
@@ -399,12 +403,13 @@ running+;
   [] else -> skip
   ] ;
 
-  // Send to MemStage
-  em_result!result ;
-  em_store_data!store_data ;
-  em_dest!dest ;
-  em_rw!reg_write ;
-  em_memop!memop ;
-  em_taken!taken ;
-  em_target!branch_target
+  // Pack and send to MemStage
+  em::result = result;
+  em::store_data = store_data;
+  em::dest = dest;
+  em::rw = reg_write;
+  em::memop = memop;
+  em::taken = taken;
+  em::target = branch_target;
+  em_data!em
 ]

@@ -170,6 +170,96 @@ PROCEDURE WrapArrayDims(dims, elemType : TEXT) : TEXT =
       RETURN WrapArrayDims(outer, "(array " & inner & " " & elemType & ")")
     END
   END WrapArrayDims;
+
+(* Rewrite struct field declarations from cspfe format to Java format.
+   Input:  (var1 (decl1 (id name) type dir))
+   Output: (decl (id name) type dir ())
+   With init:
+   Input:  (var1 (decl1 (id name) type dir)) (assign (id name) val)
+   Output: (decl (id name) type dir val) *)
+PROCEDURE RewriteFieldDecls(t : TEXT) : TEXT =
+  CONST pfx = "(var1 (decl1 ";
+  VAR r := "";
+      len := Text.Length(t);
+      i := 0;
+      plen := Text.Length(pfx);
+  BEGIN
+    WHILE i < len DO
+      IF i + plen <= len AND
+         Text.Equal(Text.Sub(t, i, plen), pfx) THEN
+        (* Replace (var1 (decl1  with (decl  *)
+        r := r & "(decl ";
+        INC(i, plen);
+        (* Copy body, tracking depth. depth=1 = inside decl *)
+        VAR depth := 1;
+        BEGIN
+          WHILE i < len AND depth > 0 DO
+            VAR c := Text.GetChar(t, i);
+            BEGIN
+              IF c = '(' THEN INC(depth); r := r & "("
+              ELSIF c = ')' THEN
+                DEC(depth);
+                IF depth > 0 THEN r := r & ")" END
+              ELSE
+                r := r & Text.FromChar(c)
+              END;
+              INC(i)
+            END
+          END
+        END;
+        (* i is past the decl1 close-paren. Skip the var1 close-paren. *)
+        IF i < len AND Text.GetChar(t, i) = ')' THEN INC(i) END;
+        (* Check for trailing (assign ... *)
+        VAR j := i;
+        BEGIN
+          WHILE j < len AND Text.GetChar(t, j) = ' ' DO INC(j) END;
+          IF j + 8 <= len AND
+             Text.Equal(Text.Sub(t, j, 8), "(assign ") THEN
+            (* Extract init value: skip (assign, skip (id name), get value *)
+            VAR k := j + 8; adepth : INTEGER;
+            BEGIN
+              (* Skip whitespace *)
+              WHILE k < len AND Text.GetChar(t, k) = ' ' DO INC(k) END;
+              (* Skip (id name) *)
+              IF k < len AND Text.GetChar(t, k) = '(' THEN
+                adepth := 1; INC(k);
+                WHILE k < len AND adepth > 0 DO
+                  IF Text.GetChar(t, k) = '(' THEN INC(adepth)
+                  ELSIF Text.GetChar(t, k) = ')' THEN DEC(adepth)
+                  END;
+                  INC(k)
+                END
+              END;
+              (* Skip whitespace *)
+              WHILE k < len AND Text.GetChar(t, k) = ' ' DO INC(k) END;
+              (* Extract init value up to matching ) *)
+              VAR initStart := k;
+              BEGIN
+                adepth := 0;
+                WHILE k < len DO
+                  IF Text.GetChar(t, k) = '(' THEN INC(adepth)
+                  ELSIF Text.GetChar(t, k) = ')' THEN
+                    IF adepth = 0 THEN EXIT END;
+                    DEC(adepth)
+                  END;
+                  INC(k)
+                END;
+                r := r & " " & Text.Sub(t, initStart, k - initStart) & ")";
+                IF k < len THEN INC(k) END; (* skip ) of assign *)
+                i := k
+              END
+            END
+          ELSE
+            r := r & " ())"
+          END
+        END
+      ELSE
+        r := r & Text.FromChar(Text.GetChar(t, i));
+        INC(i)
+      END
+    END;
+    RETURN r
+  END RewriteFieldDecls;
 }
 %interface {
 }
@@ -211,7 +301,7 @@ function_decl: { val : TEXT; cnt : INTEGER; }
 
 structure_decl: { val : TEXT; cnt : INTEGER; }
   x  {
-    structList := Seq(structList, "(structure-decl " & $1 & " (" & $2 & "))");
+    structList := Seq(structList, "(" & $1 & " (structure-decl " & $1 & " (" & RewriteFieldDecls($2) & ")))");
     $$.val := ""
   }
 
@@ -512,7 +602,7 @@ lvalue: { val : TEXT; cnt : INTEGER; }
     END }
   dot_id   { $$.val := "(member-access " & $1 & " " & $2 & ")" }
   dot_int  { $$.val := "(member-access " & $1 & " " & IntLit($2) & ")" }
-  member   { $$.val := "(structure-access " & $1 & " " & $2 & ")" }
+  member   { $$.val := "(member-access " & $1 & " " & $2 & ")" }
 
 expression_list: { val : TEXT; cnt : INTEGER; }
   single { $$.val := $1; $$.cnt := 1 }
@@ -578,6 +668,10 @@ type: { val : TEXT; cnt : INTEGER; }
   string  {
     curConst := $1;
     curType := "(string " & curConst & ")";
+    $$.val := curType
+  }
+  struct_ref {
+    curType := "(structure #f " & $1 & ")";
     $$.val := curType
   }
 

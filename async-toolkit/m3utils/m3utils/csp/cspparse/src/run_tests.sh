@@ -548,8 +548,56 @@ structure line =
 skip
 EOF
 
-# Note: struct_type variables can't be declared yet (Phase 1 limitation),
-# but :: access on bare identifiers works.
+# --- Struct-typed variables (struct_ref in type rule) ---
+
+cat > "$TDIR/struct_var.csp" << 'EOF'
+structure EmData =
+  (
+   int(32) alu_result;
+   int(5) rd;
+   bool we;
+   );
+
+EmData em;
+skip
+EOF
+
+cat > "$TDIR/struct_array_var.csp" << 'EOF'
+structure Point =
+  (
+   int(16) x;
+   int(16) y;
+   );
+
+Point pts[4];
+skip
+EOF
+
+cat > "$TDIR/struct_channel.csp" << 'EOF'
+structure EmData =
+  (
+   int(32) alu_result;
+   int(5) rd;
+   bool we;
+   );
+
+EmData em;
+CH!em;
+CH?em
+EOF
+
+cat > "$TDIR/struct_func_param.csp" << 'EOF'
+structure Msg =
+  (
+   int(8) tag;
+   int(32) data;
+   );
+
+function process(Msg -m) : int =
+  ( process = m::data );
+
+skip
+EOF
 
 cat > "$TDIR/struct_member.csp" << 'EOF'
 s::field = 42;
@@ -1287,6 +1335,10 @@ run_test "struct with init"  "$TDIR/struct_init.csp"   ok
 run_test "struct with array" "$TDIR/struct_array.csp"  ok
 run_test "multiple structs"  "$TDIR/multi_struct.csp"  ok
 run_test "pack/unpack"       "$TDIR/pack_unpack.csp"   ok
+run_test "struct variable"   "$TDIR/struct_var.csp"    ok
+run_test "array of structs"  "$TDIR/struct_array_var.csp" ok
+run_test "struct channel"    "$TDIR/struct_channel.csp" ok
+run_test "struct func param" "$TDIR/struct_func_param.csp" ok
 
 echo ""
 echo "--- Strings ---"

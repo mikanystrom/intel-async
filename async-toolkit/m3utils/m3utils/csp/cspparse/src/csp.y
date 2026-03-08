@@ -319,6 +319,7 @@ type:
   boolean                  opt_const T_BOOLEAN
   bool                     opt_const T_BOOL
   string                   opt_const T_STRING
+  struct_ref               T_IDENT
 
 opt_const:
   yes                      T_CONST

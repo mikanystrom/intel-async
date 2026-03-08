@@ -20,29 +20,24 @@
 //   dm_wdata(32)       — out: write data to DataMem
 //   dm_rdata(32)       — in:  read data from DataMem
 
-int(32) result;
-int(32) store_data;
-int(5) dest;
-int(1) rw;
-int(4) memop;
-int(1) tk;
-int(32) tgt;
+structure EmData = (int(32) result; int(32) store_data; int(5) dest;
+                    int(1) rw; int(4) memop; int(1) taken; int(32) target);
+
+EmData em;
 int(32) mem_result;
 
 *[
-  em_result?result ; em_store_data?store_data ;
-  em_dest?dest ; em_rw?rw ; em_memop?memop ;
-  em_taken?tk ; em_target?tgt ;
+  em_data?em ;
 
   // Send memory request to DataMem
-  dm_op!memop ; dm_addr!result ; dm_wdata!store_data ;
+  dm_op!em::memop ; dm_addr!em::result ; dm_wdata!em::store_data ;
   dm_rdata?mem_result ;
 
   // For loads, the result comes from memory; for others, keep ALU result
-  [ memop != 0 && memop <= 5 ->
+  [ em::memop != 0 && em::memop <= 5 ->
     mw_result!mem_result
   [] else ->
-    mw_result!result
+    mw_result!em::result
   ] ;
-  mw_dest!dest ; mw_rw!rw ; mw_taken!tk ; mw_target!tgt
+  mw_dest!em::dest ; mw_rw!em::rw ; mw_taken!em::taken ; mw_target!em::target
 ]

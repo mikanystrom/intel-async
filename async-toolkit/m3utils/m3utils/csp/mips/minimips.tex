@@ -258,10 +258,12 @@ We repeat this extraction for each pipeline stage:
 
 \item \textbf{Execute}: performs ALU computation, branch resolution, and
   system calls.  Communicates results (ALU output, store data, destination
-  register, control signals) to MemStage via seven channels.
+  register, control signals) to MemStage via a single struct-typed channel
+  (Section~\ref{sec:structchan}).
 
-\item \textbf{MemStage}: routes load/store operations to the DataMem server.
-  Passes results to Writeback via five channels.
+\item \textbf{MemStage}: receives the struct-typed execution result,
+  routes load/store operations to the DataMem server, and passes
+  results to Writeback via five channels.
 
 \item \textbf{Writeback}: writes results to the register file and sends
   branch feedback to Fetch.
@@ -334,10 +336,8 @@ The complete decomposition is:
   \draw[chan] ([yshift=-3pt]D.east) --
     node[below,lbl] {rs, rt, imm} ([yshift=-3pt]E.west);
 
-  \draw[chan] ([yshift=3pt]E.east) --
-    node[above,lbl] {result, store} ([yshift=3pt]M.west);
-  \draw[chan] ([yshift=-3pt]E.east) --
-    node[below,lbl] {dest, rw, memop} ([yshift=-3pt]M.west);
+  \draw[chan] (E.east) --
+    node[above,lbl] {em\_data (struct, 107b)} (M.west);
 
   \draw[chan] ([yshift=3pt]M.east) --
     node[above,lbl] {result, taken} ([yshift=3pt]W.west);
@@ -371,8 +371,8 @@ The complete decomposition is:
   % ==== Legend / channel summary ====
   \node[anchor=north west, font=\scriptsize, text width=5.5cm]
     at ([xshift=0.5cm, yshift=-0.3cm]DM.south east) {
-    35 channels, all slack\,=\,1\\
-    Pipeline: 2{+}5{+}7{+}5 fwd + 2 feedback\\
+    26 channels, all slack\,=\,1\\
+    Pipeline: 2{+}5{+}1{+}5 fwd + 2 feedback\\
     RegFile: 4 read + 3 write\\
     DataMem: 3 req + 1 resp
   };
@@ -380,7 +380,7 @@ The complete decomposition is:
   % ==== Bit-width table ====
   \node[anchor=north west, font=\scriptsize, text width=5cm]
     at ([yshift=-0.3cm]RF.south west) {
-    Channel widths: 32 (data/addr/result),\\
+    Channel widths: 107 (struct), 32 (data/addr),\\
     5 (reg num), 4 (memop), 1 (control)
   };
 
@@ -388,7 +388,8 @@ The complete decomposition is:
 \caption{MiniMIPS~II block diagram.  Five pipeline stages (blue) connected by
   point-to-point channels; two reactive processes (green) for register file and
   data memory.  Instruction memory (yellow) is internal to Fetch.
-  All 35~channels use slack\,=\,1 (one-place buffer
+  The Execute$\to$MemStage link uses a single struct-typed channel (107~bits).
+  All 26~channels use slack\,=\,1 (one-place buffer
   \cite{ManoharMartin1998}); slack\,=\,0 is strict rendezvous
   \cite{Martin1981}.  Dashed: branch feedback.}
 \label{fig:pipeline}
@@ -512,9 +513,10 @@ multiply/divide operations.  Selected instruction implementations:
       store_data = rt_val; memop = 8
   // ... (remaining I-type and J-type)
   ];
-  em_result!result; em_store_data!store_data;
-  em_dest!dest; em_rw!reg_write; em_memop!memop;
-  em_taken!taken; em_target!branch_target
+  em::result = result; em::store_data = store_data;
+  em::dest = dest; em::rw = reg_write; em::memop = memop;
+  em::taken = taken; em::target = branch_target;
+  em_data!em
 ]
 \end{lstlisting}
 
@@ -597,7 +599,9 @@ system MiniMIPS;
   var fd_pc    : channel(32);
   var fd_instr : channel(32);
   var de_pc    : channel(32);
-  // ... (30 channels total)
+  // ...
+  var em_data  : channel(107);  // struct channel
+  // ... (26 channels total)
 
   process Fetch    = "fetch.csp"    port out fd_pc ...;
   process Decode   = "decode.csp"   port in  fd_pc ...;
@@ -788,22 +792,27 @@ of the loop).  The inner loop compiles to 9~MIPS instructions per iteration
 \toprule
 Iterations & MIPS instrs & Sim events & Time (s) & Instrs/s \\
 \midrule
-10K &   90K  & 3.96M & 0.44 & ${\sim}$205K \\
-100K & 900K & 39.6M & 4.40 & ${\sim}$205K \\
+10K &   90K  & 3.42M & 0.41 & ${\sim}$220K \\
+100K & 900K & 34.2M & 4.15 & ${\sim}$217K \\
 \bottomrule
 \end{tabular}
 \caption{Simulator performance (Apple M3, single-threaded).  Each MIPS
-  instruction generates ${\sim}$44 simulation events (channel operations
-  across 7~processes).  Throughput: ${\sim}$9M events/s
-  $\approx$ 200K MIPS instructions/s.}
+  instruction generates ${\sim}$38 simulation events (channel operations
+  across 7~processes).  Throughput: ${\sim}$8.3M events/s
+  $\approx$ 220K MIPS instructions/s.  The struct channel between Execute
+  and MemStage (Section~\ref{sec:structchan}) reduces per-instruction
+  events from~44 to~38 compared to using 7~scalar channels.}
 \label{tab:perf}
 \end{table}
 
 The simulation overhead comes from the CSP communication model: each MIPS
-instruction requires approximately 44~channel send/receive operations as data
-flows through the five pipeline stages and reactive processes.  In this
-instance the simulator is single-threaded; throughput is bounded by the
-per-event overhead of the channel implementation.
+instruction requires approximately 38~channel send/receive operations as data
+flows through the five pipeline stages and reactive processes.  The Execute
+to MemStage link uses a single struct-typed channel (107~bits), bundling
+seven fields into one communication; without this optimization, the count
+would be~44 events per instruction.  The simulator is single-threaded;
+throughput is bounded by the per-event overhead of the channel
+implementation.
 
 %----------------------------------------------------------------------
 \section{Implementation Notes}
@@ -874,11 +883,17 @@ The complete pipeline is automated by \texttt{make}:
 
 \item \texttt{readHexInts(path, max, array)}: built-in intrinsic that loads
   hexadecimal integers from a file into an array.
+
+\item \texttt{structure Name = (\ldots)}: user-defined aggregate type.
+  Struct variables can be sent and received on channels; the compiler
+  generates pack/unpack routines automatically.
+
+\item \texttt{s::field}: struct member access (read or write).
 \end{itemize}
 
 \subsection{Compiler Extensions}
 
-Three extensions were made to the CSP compiler to support this project:
+Four extensions were made to the CSP compiler to support this project:
 
 \begin{enumerate}
 \item \textbf{\texttt{readHexInts} intrinsic}: Added to the simulation
@@ -895,7 +910,46 @@ Three extensions were made to the CSP compiler to support this project:
   dead-variable pass removed assignments whose values were never read,
   even when the right-hand side had side effects (e.g.,
   \texttt{readHexInts}).  Fixed to check for side effects first.
+
+\item \textbf{Struct type declarations in cspfe}
+  (Section~\ref{sec:structchan}): The CSP frontend parser was extended to
+  accept struct names as types in variable declarations (\texttt{EmData~em;}),
+  enabling struct-typed channels.
 \end{enumerate}
+
+\subsection{Struct-Typed Channels}
+\label{sec:structchan}
+
+The Execute$\to$MemStage link originally used seven scalar channels, one
+per field (result, store\_data, dest, rw, memop, taken, target).  By
+declaring a \texttt{structure} type and sending it as a single message,
+the seven channels collapse to one:
+
+\begin{lstlisting}[style=csp,caption={Struct-typed channel between Execute and MemStage}]
+structure EmData = (
+  int(32) result; int(32) store_data; int(5) dest;
+  int(1)  rw; int(4) memop; int(1) taken; int(32) target;
+);
+
+// In Execute:
+EmData em;
+em::result = result; em::store_data = store_data;
+em::dest = dest; em::rw = reg_write; em::memop = memop;
+em::taken = taken; em::target = branch_target;
+em_data!em
+
+// In MemStage:
+EmData em;
+em_data?em;
+dm_op!em::memop; dm_addr!em::result; ...
+\end{lstlisting}
+
+The compiler automatically generates pack and unpack routines that
+serialize the struct fields into a 107-bit integer for transmission over
+the channel.  This reduces the per-instruction channel operation count
+from~44 to~38 (a 14\% reduction in simulation events), yielding a
+7\%~wall-clock speedup on the count-to-10K benchmark (0.41\,s vs.\
+0.44\,s).
 
 %----------------------------------------------------------------------
 \section{Related Work}
