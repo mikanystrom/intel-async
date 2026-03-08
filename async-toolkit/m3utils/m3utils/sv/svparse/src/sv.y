@@ -103,12 +103,20 @@ param_port_decl:
   bare_typed_dims           data_type T_IDENT unpacked_dim_list '=' expression
   bare_range                opt_signing packed_dim_list T_IDENT '=' expression
   bare_bare                 T_IDENT param_ident_rest
-  param_type                T_PARAMETER T_TYPE T_IDENT '=' data_type_or_implicit
+  param_type                T_PARAMETER T_TYPE T_IDENT '=' data_type
+  param_type_user           T_PARAMETER T_TYPE T_IDENT '=' T_IDENT
+  param_type_bare           T_PARAMETER T_TYPE T_IDENT
+  localparam_type           T_LOCALPARAM T_TYPE T_IDENT '=' data_type
+  localparam_type_user      T_LOCALPARAM T_TYPE T_IDENT '=' T_IDENT
+  bare_type                 T_TYPE T_IDENT '=' data_type
+  bare_type_user            T_TYPE T_IDENT '=' T_IDENT
 
 param_ident_rest:
   scoped                    T_SCOPE T_IDENT T_IDENT '=' expression
   user_typed                T_IDENT '=' expression
+  user_typed_dims           T_IDENT unpacked_dim_list '=' expression
   plain                     '=' expression
+  plain_dims                unpacked_dim_list '=' expression
 
 opt_port_list:
   yes                       '(' port_list ')'
@@ -228,6 +236,21 @@ module_item:
   dpi_import                dpi_import_declaration ';'
   extern_item               extern_declaration ';'
   timeunit_item             timeunit_declaration
+  assert_mod                T_ASSERT T_PROPERTY '(' property_expr ')' opt_assert_else
+  assume_mod                T_ASSUME T_PROPERTY '(' property_expr ')' opt_assert_else
+  cover_mod                 T_COVER T_PROPERTY '(' property_expr ')' ';'
+  assert_imm_mod            T_ASSERT '#' T_NUMBER '(' expression ')' opt_assert_else
+  assert_final_mod          T_ASSERT T_FINAL '(' expression ')' opt_assert_else
+  assume_imm_mod            T_ASSUME '#' T_NUMBER '(' expression ')' opt_assert_else
+  assume_final_mod          T_ASSUME T_FINAL '(' expression ')' opt_assert_else
+  cover_imm_mod             T_COVER '#' T_NUMBER '(' expression ')' ';'
+  cover_final_mod           T_COVER T_FINAL '(' expression ')' ';'
+  labeled_assert            T_IDENT ':' T_ASSERT T_PROPERTY '(' property_expr ')' opt_assert_else
+  labeled_assume            T_IDENT ':' T_ASSUME T_PROPERTY '(' property_expr ')' opt_assert_else
+  labeled_cover             T_IDENT ':' T_COVER T_PROPERTY '(' property_expr ')' ';'
+  labeled_assert_imm        T_IDENT ':' T_ASSERT '#' T_NUMBER '(' expression ')' opt_assert_else
+  labeled_assume_imm        T_IDENT ':' T_ASSUME '#' T_NUMBER '(' expression ')' opt_assert_else
+  labeled_cover_imm         T_IDENT ':' T_COVER '#' T_NUMBER '(' expression ')' ';'
   if_gen                    T_IF '(' expression ')' generate_block opt_gen_else
   for_gen                   T_FOR '(' genvar_init ';' expression ';' genvar_step ')' generate_block
   case_item                 case_keyword '(' expression ')' case_item_list T_ENDCASE
@@ -332,6 +355,9 @@ struct_member:
   typed                     data_type_or_implicit ident_decl_list ';'
   user_type                 T_IDENT ident_decl_list ';'
   void_member               T_VOID T_IDENT ';'
+  struct_typed              struct_type ident_decl_list ';'
+  union_typed               union_type ident_decl_list ';'
+  enum_typed                enum_type ident_decl_list ';'
 
 typedef_declaration:
   data                      T_TYPEDEF data_type T_IDENT opt_unpacked_dims
@@ -356,11 +382,15 @@ parameter_declaration:
   typed                     T_PARAMETER data_type ident_decl_list
   range                     T_PARAMETER opt_signing packed_dim_list ident_decl_list
   ident_start               T_PARAMETER T_IDENT decl_ident_rest
+  type_decl                 T_PARAMETER T_TYPE T_IDENT '=' data_type
+  type_user                 T_PARAMETER T_TYPE T_IDENT '=' T_IDENT
 
 localparam_declaration:
   typed                     T_LOCALPARAM data_type ident_decl_list
   range                     T_LOCALPARAM opt_signing packed_dim_list ident_decl_list
   ident_start               T_LOCALPARAM T_IDENT decl_ident_rest
+  type_decl                 T_LOCALPARAM T_TYPE T_IDENT '=' data_type
+  type_user                 T_LOCALPARAM T_TYPE T_IDENT '=' T_IDENT
 
 decl_ident_rest:
   user_typed                T_IDENT opt_unpacked_dims '=' expression
@@ -433,6 +463,17 @@ statement:
   preinc_stmt               T_INC lvalue ';'
   predec_stmt               T_DEC lvalue ';'
   assert_stmt               T_ASSERT '(' expression ')' opt_assert_else
+  assert_deferred           T_ASSERT '#' T_NUMBER '(' expression ')' opt_assert_else
+  assert_final              T_ASSERT T_FINAL '(' expression ')' opt_assert_else
+  assert_property_stmt      T_ASSERT T_PROPERTY '(' property_expr ')' opt_assert_else
+  assume_stmt               T_ASSUME '(' expression ')' opt_assert_else
+  assume_deferred           T_ASSUME '#' T_NUMBER '(' expression ')' opt_assert_else
+  assume_final              T_ASSUME T_FINAL '(' expression ')' opt_assert_else
+  assume_property_stmt      T_ASSUME T_PROPERTY '(' property_expr ')' opt_assert_else
+  cover_stmt                T_COVER '(' expression ')' ';'
+  cover_deferred            T_COVER '#' T_NUMBER '(' expression ')' ';'
+  cover_final               T_COVER T_FINAL '(' expression ')' ';'
+  cover_property_stmt       T_COVER T_PROPERTY '(' property_expr ')' ';'
   delay_stmt                '#' expression statement
   event_ctrl_stmt           sensitivity statement
   foreach_stmt              T_FOREACH '(' hierarchical_id '[' foreach_var_list ']' ')' statement
@@ -457,6 +498,11 @@ opt_else:
 opt_assert_else:
   yes                       T_ELSE statement
   bare                      ';'
+
+property_expr:
+  expr                      expression
+  clocked                   sensitivity expression
+  clocked_disable           sensitivity T_IDENT T_IDENT '(' expression ')' expression
 
 case_keyword:
   case                      T_CASE
