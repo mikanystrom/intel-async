@@ -40,6 +40,9 @@ description: { val : TEXT; cnt : INTEGER; }
   interface  { $$.val := $1 }
   typedef    { $$.val := $1 }
   import     { $$.val := $1 }
+  dpi_export { $$.val := $1 }
+  dpi_import { $$.val := $1 }
+  timeunit   { $$.val := $1 }
   param      { $$.val := $1 }
   localparam { $$.val := $1 }
   null       { $$.val := "" }
@@ -58,6 +61,10 @@ package_item: { val : TEXT; cnt : INTEGER; }
   function   { $$.val := $1 }
   task       { $$.val := $1 }
   import     { $$.val := $1 }
+  dpi_export { $$.val := $1 }
+  dpi_import    { $$.val := $1 }
+  extern_item   { $$.val := $1 }
+  timeunit_item { $$.val := $1 }
 
 import_declaration: { val : TEXT; cnt : INTEGER; }
   x  { $$.val := "(import " & $1 & ")" }
@@ -75,6 +82,21 @@ dpi_export_declaration: { val : TEXT; cnt : INTEGER; }
   task          { $$.val := "(dpi-export " & $1 & " task " & $2 & ")" }
   function_cid  { $$.val := "(dpi-export " & $1 & " function " & $3 & " :c-name " & $2 & ")" }
   task_cid      { $$.val := "(dpi-export " & $1 & " task " & $3 & " :c-name " & $2 & ")" }
+
+dpi_import_declaration: { val : TEXT; cnt : INTEGER; }
+  function          { $$.val := "(dpi-import " & $1 & " " & $2 & " function " & $3 & " " & $4 & " " & $5 & ")" }
+  function_user     { $$.val := "(dpi-import " & $1 & " " & $2 & " function " & $3 & " " & $4 & " " & $5 & ")" }
+  function_bare     { $$.val := "(dpi-import " & $1 & " " & $2 & " function () " & $3 & " " & $4 & ")" }
+  task              { $$.val := "(dpi-import " & $1 & " " & $2 & " task " & $3 & " " & $4 & ")" }
+  function_cid      { $$.val := "(dpi-import " & $1 & " " & $2 & " function " & $4 & " " & $5 & " :c-name " & $3 & " " & $6 & ")" }
+  function_cid_user { $$.val := "(dpi-import " & $1 & " " & $2 & " function " & $4 & " " & $5 & " :c-name " & $3 & " " & $6 & ")" }
+  function_cid_bare { $$.val := "(dpi-import " & $1 & " " & $2 & " function () " & $4 & " :c-name " & $3 & " " & $5 & ")" }
+  task_cid          { $$.val := "(dpi-import " & $1 & " " & $2 & " task " & $4 & " :c-name " & $3 & " " & $5 & ")" }
+
+opt_dpi_property: { val : TEXT; cnt : INTEGER; }
+  pure     { $$.val := "pure" }
+  context  { $$.val := "context" }
+  empty    { $$.val := "" }
 
 module_declaration: { val : TEXT; cnt : INTEGER; }
   x  { $$.val := "(module " & $1 & " " & $2 & $3 & " " & $4 & " " & $5 & ")" }
@@ -161,9 +183,11 @@ dir_only_rest: { val : TEXT; cnt : INTEGER; }
   assign      { $$.val := " (id  " & $1 & ")" }
 
 port_direction: { val : TEXT; cnt : INTEGER; }
-  input   { $$.val := "input" }
-  output  { $$.val := "output" }
-  inout   { $$.val := "inout" }
+  input      { $$.val := "input" }
+  output     { $$.val := "output" }
+  inout      { $$.val := "inout" }
+  ref        { $$.val := "ref" }
+  const_ref  { $$.val := "const-ref" }
 
 port_ident: { val : TEXT; cnt : INTEGER; }
   simple  { $$.val := "(id " & $1 & " " & $2 & ")" }
@@ -225,6 +249,9 @@ module_item: { val : TEXT; cnt : INTEGER; }
   task_item       { $$.val := $1 }
   attribute       { $$.val := $2 }
   dpi_export      { $$.val := $1 }
+  dpi_import      { $$.val := $1 }
+  extern_item     { $$.val := $1 }
+  timeunit_item   { $$.val := $1 }
   if_gen          { $$.val := "(if-generate " & $1 & " " & $2 & " " & $3 & ")" }
   for_gen         { $$.val := "(for-generate " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
   case_item       { $$.val := "(" & $1 & " " & $2 & " " & $3 & ")" }
@@ -282,6 +309,7 @@ data_type: { val : TEXT; cnt : INTEGER; }
   void      { $$.val := "void" }
   enum      { $$.val := $1 }
   struct    { $$.val := $1 }
+  union     { $$.val := $1 }
   scoped    { $$.val := "(" & $1 & "::" & $2 & ")" }
 
 enum_type: { val : TEXT; cnt : INTEGER; }
@@ -313,18 +341,26 @@ struct_type: { val : TEXT; cnt : INTEGER; }
   packed    { $$.val := "(struct packed " & $1 & " " & $2 & ")" }
   unpacked  { $$.val := "(struct " & $1 & ")" }
 
+union_type: { val : TEXT; cnt : INTEGER; }
+  packed         { $$.val := "(union packed " & $1 & " " & $2 & ")" }
+  unpacked       { $$.val := "(union " & $1 & ")" }
+  tagged_packed  { $$.val := "(union tagged packed " & $1 & " " & $2 & ")" }
+  tagged         { $$.val := "(union tagged " & $1 & ")" }
+
 struct_member_list: { val : TEXT; cnt : INTEGER; }
   single  { $$.val := $1 }
   cons    { $$.val := $1 & " " & $2 }
 
 struct_member: { val : TEXT; cnt : INTEGER; }
-  typed      { $$.val := Wrap2("member", $1, $2) }
-  user_type  { $$.val := "(member " & $1 & " " & $2 & ")" }
+  typed       { $$.val := Wrap2("member", $1, $2) }
+  user_type   { $$.val := "(member " & $1 & " " & $2 & ")" }
+  void_member { $$.val := "(member void " & $1 & ")" }
 
 typedef_declaration: { val : TEXT; cnt : INTEGER; }
   data    { $$.val := "(typedef " & $1 & " " & $2 & " " & $3 & ")" }
   enum    { $$.val := "(typedef " & $1 & " " & $2 & ")" }
   struct  { $$.val := "(typedef " & $1 & " " & $2 & ")" }
+  union   { $$.val := "(typedef " & $1 & " " & $2 & ")" }
   alias   { $$.val := "(typedef " & $1 & " " & $2 & ")" }
 
 ident_decl_list: { val : TEXT; cnt : INTEGER; }
@@ -419,6 +455,10 @@ statement: { val : TEXT; cnt : INTEGER; }
   assert_stmt    { $$.val := "(assert " & $1 & " " & $2 & ")" }
   delay_stmt     { $$.val := "(delay " & $1 & " " & $2 & ")" }
   event_ctrl_stmt { $$.val := "(event-ctrl " & $1 & " " & $2 & ")" }
+  foreach_stmt    { $$.val := "(foreach " & $1 & " " & $2 & " " & $3 & ")" }
+  do_while_stmt   { $$.val := "(do-while " & $2 & " " & $1 & ")" }
+  release_stmt    { $$.val := "(release " & $1 & ")" }
+  force_stmt      { $$.val := "(force " & $1 & " " & $2 & ")" }
   void_cast      { $$.val := Wrap("void-cast", $1) }
   null_stmt      { $$.val := "(null)" }
 
@@ -479,12 +519,17 @@ for_step: { val : TEXT; cnt : INTEGER; }
   passign  { $$.val := "(+= " & $1 & " " & $2 & ")" }
   massign  { $$.val := "(-= " & $1 & " " & $2 & ")" }
 
+foreach_var_list: { val : TEXT; cnt : INTEGER; }
+  single  { $$.val := $1 }
+  cons    { $$.val := $1 & " " & $2 }
+
 statement_list: { val : TEXT; cnt : INTEGER; }
   empty      { $$.val := "" }
   cons       { $$.val := Seq($1, $2) }
   local_decl      { $$.val := Seq($1, $2) }
   auto_decl       { $$.val := Seq($1, $2) }
   static_decl     { $$.val := Seq($1, $2) }
+  const_decl      { $$.val := Seq($1, "(const " & $2 & ")") }
   local_param     { $$.val := Seq($1, $2) }
   local_parameter { $$.val := Seq($1, $2) }
 
@@ -535,6 +580,7 @@ function_body_item: { val : TEXT; cnt : INTEGER; }
   decl           { $$.val := $1 }
   net_decl       { $$.val := $1 }
   auto_decl      { $$.val := "(automatic " & $1 & ")" }
+  const_decl     { $$.val := "(const " & $1 & ")" }
   param_decl     { $$.val := $1 }
   localparam_decl { $$.val := $1 }
   stmt           { $$.val := $1 }
@@ -570,6 +616,8 @@ interface_item: { val : TEXT; cnt : INTEGER; }
   typedef_item   { $$.val := $1 }
   function_item  { $$.val := $1 }
   task_item      { $$.val := $1 }
+  extern_item    { $$.val := $1 }
+  timeunit_item  { $$.val := $1 }
 
 modport_declaration: { val : TEXT; cnt : INTEGER; }
   x  { $$.val := "(modport " & $1 & " " & $2 & ")" }
@@ -617,6 +665,20 @@ genvar_step: { val : TEXT; cnt : INTEGER; }
   preinc   { $$.val := "(++ (id " & $1 & "))" }
   predec   { $$.val := "(-- (id " & $1 & "))" }
   passign  { $$.val := "(+= (id " & $1 & ") " & $2 & ")" }
+
+extern_declaration: { val : TEXT; cnt : INTEGER; }
+  function       { $$.val := "(extern-function " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
+  function_user  { $$.val := "(extern-function " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
+  function_bare  { $$.val := "(extern-function " & $1 & " () " & $2 & " " & $3 & ")" }
+  task           { $$.val := "(extern-task " & $1 & " " & $2 & " " & $3 & ")" }
+
+timeunit_declaration: { val : TEXT; cnt : INTEGER; }
+  timeunit       { $$.val := "(timeunit " & $1 & ")" }
+  timeunit_prec  { $$.val := "(timeunit " & $1 & " " & $2 & ")" }
+  timeprecision  { $$.val := "(timeprecision " & $1 & ")" }
+
+time_literal: { val : TEXT; cnt : INTEGER; }
+  x  { $$.val := $1 & $2 }
 
 module_instantiation: { val : TEXT; cnt : INTEGER; }
   x  { $$.val := "(instance " & $1 & " " & $2 & " " & $3 & ")" }

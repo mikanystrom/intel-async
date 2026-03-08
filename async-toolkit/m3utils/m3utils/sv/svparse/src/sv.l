@@ -65,6 +65,8 @@ T_ENUM          "enum"
 T_STRUCT        "struct"
 T_PACKED        "packed"
 T_UNION         "union"
+T_PURE          "pure"
+T_CONTEXT       "context"
 T_INTERFACE     "interface"
 T_ENDINTERFACE  "endinterface"
 T_MODPORT       "modport"
@@ -79,6 +81,16 @@ T_CHANDLE       "chandle"
 T_TYPE          "type"
 T_INSIDE        "inside"
 T_ASSERT        "assert"
+T_RELEASE       "release"
+T_FORCE         "force"
+T_FOREACH       "foreach"
+T_DO            "do"
+T_CONST         "const"
+T_REF           "ref"
+T_EXTERN        "extern"
+T_TAGGED        "tagged"
+T_TIMEUNIT      "timeunit"
+T_TIMEPRECISION "timeprecision"
 
 T_CEQ           "==="
 T_CNE           "!=="
@@ -132,5 +144,5 @@ T_IDENT         {IDENT}|"\\"[^ \t\r\n]+
 T_ATTRIBUTE     "(*"([^*]|"*"[^)])*"*)"
 
 char            {%char}
-skip            ([ \t\r\n]|("/*"([^*]|"*"[^/])*"*/")|("//"[^\n]*"\n"))*
+skip            ([ \t\r\n]|("/*"([^*]|"*"+[^*/])*"*"+"/")|("//"[^\n]*"\n"))*
 ERROR           [^]

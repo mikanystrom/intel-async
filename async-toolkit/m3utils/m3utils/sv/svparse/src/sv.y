@@ -13,6 +13,9 @@ description:
   interface                 interface_declaration
   typedef                   typedef_declaration ';'
   import                    import_declaration ';'
+  dpi_export                dpi_export_declaration ';'
+  dpi_import                dpi_import_declaration ';'
+  timeunit                  timeunit_declaration
   param                     parameter_declaration ';'
   localparam                localparam_declaration ';'
   null                      ';'
@@ -32,6 +35,10 @@ package_item:
   function                  function_declaration
   task                      task_declaration
   import                    import_declaration ';'
+  dpi_export                dpi_export_declaration ';'
+  dpi_import                dpi_import_declaration ';'
+  extern_item               extern_declaration ';'
+  timeunit_item             timeunit_declaration
 
 
 import_declaration:
@@ -50,6 +57,21 @@ dpi_export_declaration:
   task                      T_EXPORT T_STRLIT T_TASK T_IDENT
   function_cid              T_EXPORT T_STRLIT T_IDENT '=' T_FUNCTION T_IDENT
   task_cid                  T_EXPORT T_STRLIT T_IDENT '=' T_TASK T_IDENT
+
+dpi_import_declaration:
+  function                  T_IMPORT T_STRLIT opt_dpi_property T_FUNCTION opt_data_type_or_void T_IDENT opt_port_list
+  function_user             T_IMPORT T_STRLIT opt_dpi_property T_FUNCTION T_IDENT T_IDENT opt_port_list
+  function_bare             T_IMPORT T_STRLIT opt_dpi_property T_FUNCTION T_IDENT opt_port_list
+  task                      T_IMPORT T_STRLIT opt_dpi_property T_TASK T_IDENT opt_port_list
+  function_cid              T_IMPORT T_STRLIT opt_dpi_property T_IDENT '=' T_FUNCTION opt_data_type_or_void T_IDENT opt_port_list
+  function_cid_user         T_IMPORT T_STRLIT opt_dpi_property T_IDENT '=' T_FUNCTION T_IDENT T_IDENT opt_port_list
+  function_cid_bare         T_IMPORT T_STRLIT opt_dpi_property T_IDENT '=' T_FUNCTION T_IDENT opt_port_list
+  task_cid                  T_IMPORT T_STRLIT opt_dpi_property T_IDENT '=' T_TASK T_IDENT opt_port_list
+
+opt_dpi_property:
+  pure                      T_PURE
+  context                   T_CONTEXT
+  empty
 
 
 module_declaration:
@@ -139,6 +161,8 @@ port_direction:
   input                     T_INPUT
   output                    T_OUTPUT
   inout                     T_INOUT
+  ref                       T_REF
+  const_ref                 T_CONST T_REF
 
 port_ident:
   simple                    T_IDENT opt_unpacked_dims
@@ -201,6 +225,9 @@ module_item:
   task_item                 task_declaration
   attribute                 T_ATTRIBUTE module_item
   dpi_export                dpi_export_declaration ';'
+  dpi_import                dpi_import_declaration ';'
+  extern_item               extern_declaration ';'
+  timeunit_item             timeunit_declaration
   if_gen                    T_IF '(' expression ')' generate_block opt_gen_else
   for_gen                   T_FOR '(' genvar_init ';' expression ';' genvar_step ')' generate_block
   case_item                 case_keyword '(' expression ')' case_item_list T_ENDCASE
@@ -259,6 +286,7 @@ data_type:
   void                      T_VOID
   enum                      enum_type
   struct                    struct_type
+  union                     union_type
   scoped                    T_IDENT T_SCOPE T_IDENT
 
 enum_type:
@@ -290,6 +318,12 @@ struct_type:
   packed                    T_STRUCT T_PACKED opt_signing '{' struct_member_list '}'
   unpacked                  T_STRUCT '{' struct_member_list '}'
 
+union_type:
+  packed                    T_UNION T_PACKED opt_signing '{' struct_member_list '}'
+  unpacked                  T_UNION '{' struct_member_list '}'
+  tagged_packed             T_UNION T_TAGGED T_PACKED opt_signing '{' struct_member_list '}'
+  tagged                    T_UNION T_TAGGED '{' struct_member_list '}'
+
 struct_member_list:
   single                    struct_member
   cons                      struct_member_list struct_member
@@ -297,11 +331,13 @@ struct_member_list:
 struct_member:
   typed                     data_type_or_implicit ident_decl_list ';'
   user_type                 T_IDENT ident_decl_list ';'
+  void_member               T_VOID T_IDENT ';'
 
 typedef_declaration:
   data                      T_TYPEDEF data_type T_IDENT opt_unpacked_dims
   enum                      T_TYPEDEF enum_type T_IDENT
   struct                    T_TYPEDEF struct_type T_IDENT
+  union                     T_TYPEDEF union_type T_IDENT
   alias                     T_TYPEDEF T_IDENT T_IDENT
 
 ident_decl_list:
@@ -399,6 +435,10 @@ statement:
   assert_stmt               T_ASSERT '(' expression ')' opt_assert_else
   delay_stmt                '#' expression statement
   event_ctrl_stmt           sensitivity statement
+  foreach_stmt              T_FOREACH '(' hierarchical_id '[' foreach_var_list ']' ')' statement
+  do_while_stmt             T_DO statement T_WHILE '(' expression ')' ';'
+  release_stmt              T_RELEASE lvalue ';'
+  force_stmt                T_FORCE lvalue '=' expression ';'
   void_cast                 T_VOID '\'' '(' expression ')' ';'
   null_stmt                 ';'
 
@@ -459,12 +499,17 @@ for_step:
   passign                   lvalue T_PASSIGN expression
   massign                   lvalue T_MASSIGN expression
 
+foreach_var_list:
+  single                    T_IDENT
+  cons                      foreach_var_list ',' T_IDENT
+
 statement_list:
   empty
   cons                      statement_list statement
   local_decl                statement_list net_declaration ';'
   auto_decl                 statement_list T_AUTOMATIC net_declaration ';'
   static_decl               statement_list T_STATIC net_declaration ';'
+  const_decl                statement_list T_CONST net_declaration ';'
   local_param               statement_list localparam_declaration ';'
   local_parameter            statement_list parameter_declaration ';'
 
@@ -516,6 +561,7 @@ function_body_item:
   decl                      port_direction_declaration ';'
   net_decl                  net_declaration ';'
   auto_decl                 T_AUTOMATIC net_declaration ';'
+  const_decl                T_CONST net_declaration ';'
   param_decl                parameter_declaration ';'
   localparam_decl           localparam_declaration ';'
   stmt                      statement
@@ -552,6 +598,8 @@ interface_item:
   typedef_item              typedef_declaration ';'
   function_item             function_declaration
   task_item                 task_declaration
+  extern_item               extern_declaration ';'
+  timeunit_item             timeunit_declaration
 
 modport_declaration:
   x                         T_MODPORT T_IDENT '(' modport_port_list ')'
@@ -600,6 +648,21 @@ genvar_step:
   preinc                    T_INC T_IDENT
   predec                    T_DEC T_IDENT
   passign                   T_IDENT T_PASSIGN expression
+
+
+extern_declaration:
+  function                  T_EXTERN T_FUNCTION opt_automatic opt_data_type_or_void T_IDENT opt_port_list
+  function_user             T_EXTERN T_FUNCTION opt_automatic T_IDENT T_IDENT opt_port_list
+  function_bare             T_EXTERN T_FUNCTION opt_automatic T_IDENT opt_port_list
+  task                      T_EXTERN T_TASK opt_automatic T_IDENT opt_port_list
+
+timeunit_declaration:
+  timeunit                  T_TIMEUNIT time_literal ';'
+  timeunit_prec             T_TIMEUNIT time_literal '/' time_literal ';'
+  timeprecision             T_TIMEPRECISION time_literal ';'
+
+time_literal:
+  x                         T_NUMBER T_IDENT
 
 
 module_instantiation:

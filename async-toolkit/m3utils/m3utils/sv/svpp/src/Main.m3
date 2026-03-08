@@ -102,6 +102,25 @@ PROCEDURE FindCloseParen(t: TEXT; pos: INTEGER): INTEGER =
     RETURN -1;
   END FindCloseParen;
 
+(* Strip a trailing // line comment, respecting string literals. *)
+PROCEDURE StripLineComment(t: TEXT): TEXT =
+  VAR
+    len := Text.Length(t);
+    inStr := FALSE;
+    c: CHAR;
+  BEGIN
+    FOR i := 0 TO len - 1 DO
+      c := Text.GetChar(t, i);
+      IF c = '"' AND (i = 0 OR Text.GetChar(t, i - 1) # '\\') THEN
+        inStr := NOT inStr;
+      ELSIF NOT inStr AND c = '/' AND i + 1 < len
+            AND Text.GetChar(t, i + 1) = '/' THEN
+        RETURN TrimRight(Text.Sub(t, 0, i));
+      END
+    END;
+    RETURN t;
+  END StripLineComment;
+
 PROCEDURE StartsWith(t, prefix: TEXT): BOOLEAN =
   BEGIN
     RETURN Text.Length(t) >= Text.Length(prefix)
@@ -273,7 +292,7 @@ PROCEDURE ParseDefine(rest: TEXT) =
       paramStr := Text.Sub(rest, afterName + 1, close - afterName - 1);
       rawParams := SplitArgs(paramStr);
       IF close + 1 < Text.Length(rest) THEN
-        body := TrimLeft(Text.Sub(rest, close + 1))
+        body := StripLineComment(TrimLeft(Text.Sub(rest, close + 1)))
       ELSE
         body := ""
       END;
@@ -299,7 +318,7 @@ PROCEDURE ParseDefine(rest: TEXT) =
     ELSE
       (* Simple macro *)
       IF afterName < Text.Length(rest) THEN
-        body := TrimLeft(Text.Sub(rest, afterName))
+        body := StripLineComment(TrimLeft(Text.Sub(rest, afterName)))
       ELSE
         body := ""
       END;
