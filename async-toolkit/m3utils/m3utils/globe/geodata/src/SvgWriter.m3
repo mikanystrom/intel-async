@@ -64,7 +64,7 @@ PROCEDURE ProjectCoordArray(coords : GeoFeature.CoordArray;
     result : ProjPointArray;
     xy : GeoCoord.XY;
     mid : GeoCoord.LatLon;
-    dlon : LONGREAL;
+    dlon, frac : LONGREAL;
     prevValid : INTEGER;
   BEGIN
     IF coords = NIL THEN RETURN NIL END;
@@ -87,9 +87,9 @@ PROCEDURE ProjectCoordArray(coords : GeoFeature.CoordArray;
 
     (* Second pass: detect segments that cross invisible territory
        or the antimeridian.  For each pair of consecutive valid points,
-       check whether the geographic midpoint projects as valid and whether
-       the segment crosses the antimeridian.  If not, mark the second
-       point for a pen lift. *)
+       sample several intermediate geographic points and check whether
+       they all project as valid.  If any sample is invisible, the
+       segment crosses behind the globe — mark for a pen lift. *)
     prevValid := -1;
     FOR i := 0 TO n - 1 DO
       IF result[i].valid THEN
@@ -99,13 +99,19 @@ PROCEDURE ProjectCoordArray(coords : GeoFeature.CoordArray;
           IF dlon > Pi OR dlon < -Pi THEN
             result[i].penLift := TRUE;
           ELSE
-            (* Check 2: midpoint visibility -- if the geographic midpoint
-               of the segment does not project as valid, the segment
-               crosses invisible territory (e.g. behind the globe). *)
-            mid.lat := (coords[prevValid].lat + coords[i].lat) * 0.5d0;
-            mid.lon := (coords[prevValid].lon + coords[i].lon) * 0.5d0;
-            IF NOT proj.forward(mid, xy) THEN
-              result[i].penLift := TRUE;
+            (* Check 2: multi-sample visibility -- test several points
+               along the segment (at 1/8, 2/8, ... 7/8) to catch arcs
+               that dip behind the globe even when endpoints are visible. *)
+            FOR k := 1 TO 7 DO
+              frac := FLOAT(k, LONGREAL) / 8.0d0;
+              mid.lat := coords[prevValid].lat +
+                         (coords[i].lat - coords[prevValid].lat) * frac;
+              mid.lon := coords[prevValid].lon +
+                         (coords[i].lon - coords[prevValid].lon) * frac;
+              IF NOT proj.forward(mid, xy) THEN
+                result[i].penLift := TRUE;
+                EXIT;
+              END;
             END;
           END;
         END;
@@ -314,15 +320,19 @@ PROCEDURE EmitLineStringPath(wr : Wr.T;
 PROCEDURE EmitPolygonRingPath(wr : Wr.T;
                               coords : ProjPointArray;
                               READONLY t : Transform) =
-  (* Emits M/L/Z for a polygon ring, skipping invalid points.
-     Lifts pen when penLift is set (midpoint visibility or antimeridian). *)
+  (* Emits M/L for a polygon ring, skipping invalid points.
+     Lifts pen when penLift is set (midpoint visibility or antimeridian).
+     Only emits Z (close path) if the ring was NOT split by pen lifts;
+     a split ring cannot be closed without creating spurious diagonals. *)
   VAR needMove := TRUE;
       hasPoints := FALSE;
+      wasSplit := FALSE;
   BEGIN
     IF coords = NIL THEN RETURN END;
     FOR i := 0 TO LAST(coords^) DO
       IF coords[i].valid THEN
         IF needMove OR coords[i].penLift THEN
+          IF hasPoints THEN wasSplit := TRUE END;
           Wr.PutText(wr, "M" & F(TX(coords[i].x, t)) &
                          "," & F(TY(coords[i].y, t)));
           needMove := FALSE;
@@ -332,10 +342,11 @@ PROCEDURE EmitPolygonRingPath(wr : Wr.T;
                           "," & F(TY(coords[i].y, t)));
         END;
       ELSE
+        IF hasPoints THEN wasSplit := TRUE END;
         needMove := TRUE;
       END;
     END;
-    IF hasPoints THEN Wr.PutText(wr, " Z") END;
+    IF hasPoints AND NOT wasSplit THEN Wr.PutText(wr, " Z") END;
   END EmitPolygonRingPath;
 
 PROCEDURE EmitLineString(wr : Wr.T;
