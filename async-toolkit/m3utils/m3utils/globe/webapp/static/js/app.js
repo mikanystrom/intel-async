@@ -4,6 +4,7 @@
 
 let currentSvg = null;
 let debounceTimer = null;
+let renderInProgress = false;
 
 /* ── Dataset loading ── */
 
@@ -89,12 +90,24 @@ function getSelectedDatasets() {
   return Array.from(checkboxes).map(cb => cb.value);
 }
 
+/* ── Projection helpers ── */
+
+function currentProjectionNeedsCenter() {
+  const proj = document.getElementById("projection").value;
+  const meta = PROJECTION_META[proj];
+  return meta ? meta.needsCenter : false;
+}
+
 /* ── Rendering ── */
 
 async function renderMap() {
+  if (renderInProgress) return;
+  renderInProgress = true;
+
   const params = collectParams();
   if (params.datasets.length === 0) {
     setStatus("Select at least one dataset.", true);
+    renderInProgress = false;
     return;
   }
 
@@ -147,6 +160,7 @@ async function renderMap() {
   } finally {
     overlay.style.display = "none";
     renderBtn.disabled = false;
+    renderInProgress = false;
   }
 }
 
@@ -163,8 +177,10 @@ function initSvgInteraction() {
   if (parts.length !== 4) return;
 
   let [vx, vy, vw, vh] = parts;
+  const origW = vw, origH = vh;
   let dragging = false;
-  let startX, startY, startVx, startVy;
+  let rotateMode = false;
+  let startX, startY, startVx, startVy, startLat, startLon;
 
   svgEl.addEventListener("wheel", function(e) {
     e.preventDefault();
@@ -190,8 +206,14 @@ function initSvgInteraction() {
     dragging = true;
     startX = e.clientX;
     startY = e.clientY;
-    startVx = vx;
-    startVy = vy;
+    rotateMode = currentProjectionNeedsCenter();
+    if (rotateMode) {
+      startLat = parseFloat(document.getElementById("centerLat").value) || 0;
+      startLon = parseFloat(document.getElementById("centerLon").value) || 0;
+    } else {
+      startVx = vx;
+      startVy = vy;
+    }
     svgEl.style.cursor = "grabbing";
     e.preventDefault();
   });
@@ -199,17 +221,93 @@ function initSvgInteraction() {
   window.addEventListener("mousemove", function(e) {
     if (!dragging) return;
     const rect = svgEl.getBoundingClientRect();
-    const dx = (e.clientX - startX) / rect.width * vw;
-    const dy = (e.clientY - startY) / rect.height * vh;
-    vx = startVx - dx;
-    vy = startVy - dy;
-    svgEl.setAttribute("viewBox", vx + " " + vy + " " + vw + " " + vh);
+    if (rotateMode) {
+      // Convert pixel displacement to degrees
+      // Full SVG width = 360° longitude, full height = 180° latitude
+      const dLon = (e.clientX - startX) / rect.width * 360;
+      const dLat = (e.clientY - startY) / rect.height * 180;
+      // Drag right = globe rotates left = lon decreases (grab-and-drag)
+      let newLon = startLon - dLon;
+      let newLat = startLat + dLat;
+      // Clamp latitude, wrap longitude
+      newLat = Math.max(-90, Math.min(90, newLat));
+      newLon = ((newLon + 180) % 360 + 360) % 360 - 180;
+      document.getElementById("centerLat").value = Math.round(newLat);
+      document.getElementById("centerLon").value = Math.round(newLon);
+    } else {
+      const dx = (e.clientX - startX) / rect.width * vw;
+      const dy = (e.clientY - startY) / rect.height * vh;
+      vx = startVx - dx;
+      vy = startVy - dy;
+      svgEl.setAttribute("viewBox", vx + " " + vy + " " + vw + " " + vh);
+    }
   });
 
   window.addEventListener("mouseup", function() {
-    if (dragging) {
-      dragging = false;
-      svgEl.style.cursor = "";
+    if (!dragging) return;
+    dragging = false;
+    svgEl.style.cursor = "";
+    if (rotateMode) {
+      renderMap();
+    }
+  });
+}
+
+/* ── Arrow key rotation/pan ── */
+
+function initArrowKeys() {
+  let arrowDebounce = null;
+
+  document.addEventListener("keydown", function(e) {
+    // Skip when focus is in an input/select/textarea
+    const tag = document.activeElement && document.activeElement.tagName;
+    if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
+
+    const key = e.key;
+    if (!["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(key)) return;
+    e.preventDefault();
+
+    const checkbox = document.getElementById("arrowRotate");
+    const wantRotate = checkbox && checkbox.checked && currentProjectionNeedsCenter();
+
+    if (wantRotate) {
+      // Rotate center by 5° steps
+      const latEl = document.getElementById("centerLat");
+      const lonEl = document.getElementById("centerLon");
+      let lat = parseFloat(latEl.value) || 0;
+      let lon = parseFloat(lonEl.value) || 0;
+
+      if (key === "ArrowUp")    lat = Math.min(90, lat + 5);
+      if (key === "ArrowDown")  lat = Math.max(-90, lat - 5);
+      if (key === "ArrowLeft")  lon = ((lon + 5 + 180) % 360 + 360) % 360 - 180;
+      if (key === "ArrowRight") lon = ((lon - 5 + 180) % 360 + 360) % 360 - 180;
+
+      latEl.value = Math.round(lat);
+      lonEl.value = Math.round(lon);
+
+      // Debounce render for rapid key presses
+      clearTimeout(arrowDebounce);
+      arrowDebounce = setTimeout(function() {
+        renderMap();
+      }, 300);
+    } else {
+      // Pan viewBox by 10%
+      const svgEl = document.querySelector(".svg-container svg");
+      if (!svgEl) return;
+      const vb = svgEl.getAttribute("viewBox");
+      if (!vb) return;
+      const p = vb.split(/[\s,]+/).map(Number);
+      if (p.length !== 4) return;
+
+      const stepX = p[2] * 0.1;
+      const stepY = p[3] * 0.1;
+
+      if (key === "ArrowUp")    p[1] -= stepY;
+      if (key === "ArrowDown")  p[1] += stepY;
+      if (key === "ArrowLeft")  p[0] -= stepX;
+      if (key === "ArrowRight") p[0] += stepX;
+
+      svgEl.setAttribute("viewBox", p[0] + " " + p[1] + " " + p[2] + " " + p[3]);
     }
   });
 }
@@ -239,6 +337,7 @@ function setStatus(msg, isError) {
 
 document.addEventListener("DOMContentLoaded", function() {
   loadDatasets();
+  initArrowKeys();
 
   document.getElementById("renderBtn").addEventListener("click", renderMap);
   document.getElementById("downloadBtn").addEventListener("click", downloadSvg);
