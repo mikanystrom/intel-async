@@ -83,24 +83,18 @@
                      *bv-func-table*))))))
   body-1)
 
+;; Pre-create BDD variables for all input ports so they survive
+;; bv-env-restore! calls during case/if compilation.
+(define ps-1 (collect-port-signals ports-1))
+(define in-1 (sv-filter (lambda (p) (eq? 'input (car p))) ps-1))
+(for-each (lambda (p) (bv-lookup (cadr p))) in-1)
+
 ;; Enable carry cuts
 (set! *bv-cut-threshold* 200)
 
-;; Save input variable bindings (port inputs)
-(define ps-1 (collect-port-signals ports-1))
-(define in-1 (sv-filter (lambda (p) (eq? 'input (car p))) ps-1))
-
 (define all-assigns-1 '())
 
-;; Synthesize always_comb blocks
-(for-each
-  (lambda (item)
-    (if (and (pair? item) (eq? 'always_comb (car item)))
-        (let ((assigns (stmt->bv-assigns (cadr item))))
-          (set! all-assigns-1 (append all-assigns-1 assigns)))))
-  body-1)
-
-;; Continuous assigns
+;; Continuous assigns first (wire-level decoders)
 (for-each
   (lambda (item)
     (if (and (pair? item) (eq? 'assign (car item)))
@@ -115,6 +109,14 @@
             sigs))))
   body-1)
 
+;; Synthesize always_comb blocks
+(for-each
+  (lambda (item)
+    (if (and (pair? item) (eq? 'always_comb (car item)))
+        (let ((assigns (stmt->bv-assigns (cadr item))))
+          (set! all-assigns-1 (append all-assigns-1 assigns)))))
+  body-1)
+
 (displayln "Behavioral outputs: " (number->string (length all-assigns-1)))
 (for-each
   (lambda (a)
@@ -126,6 +128,11 @@
 (load "sv/src/svemit.scm")
 (define var-names (collect-bdd-vars all-assigns-1))
 (displayln "BDD input variables: " (number->string (length var-names)))
+
+;; Inject cut variable BDDs into the env so they survive the restore.
+;; (Cut vars are stored separately because bv-env-restore! during
+;; if/case/function evaluation discards them from the regular env.)
+(bv-cuts-inject-env!)
 
 ;; Save ALL env bindings that the gate module might need
 ;; This includes all BDD variables (register outputs, module inputs)
@@ -147,7 +154,15 @@
 (extract-port-widths (module-ports mod-2))
 (extract-decl-widths (module-body-items mod-2))
 
+;; Enable eviction: pre-scan RHS refs so intermediate wire BDDs are freed
+;; after their last consumer.  Reduces peak live wires from ~59K to ~1.3K.
+;; Also set the keep-set: only retain output signals (from behavioral model)
+;; in the result list -- internal wires are evicted after their last use.
+(bv-env-enable-eviction! (module-body-items mod-2))
+(bv-synth-set-keep! (map car all-assigns-1))
 (define assigns-2 (bv-synth-combinational (module-body-items mod-2)))
+(bv-synth-clear-keep!)
+(bv-env-disable-eviction!)
 
 (displayln "Gate-level outputs: " (number->string (length assigns-2)))
 

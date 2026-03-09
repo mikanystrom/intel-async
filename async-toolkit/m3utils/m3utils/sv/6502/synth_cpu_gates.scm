@@ -85,12 +85,40 @@
          (displayln "Registered function: " (symbol->string fname))))))
   body)
 
+;; Pre-create BDD variables for all input ports so they survive
+;; bv-env-restore! calls during case/if compilation.
+(define ps (collect-port-signals ports))
+(for-each (lambda (p) (if (eq? 'input (car p)) (bv-lookup (cadr p)))) ps)
+
 ;; Enable carry cuts for complex arithmetic
 (set! *bv-cut-threshold* 200)
 
 (define cone-num 0)
 (define total-nodes 0)
 (define all-assigns '())
+
+;; Continuous assigns first (wire-level decoders like aaa=opcode[7:5])
+;; so that always_comb blocks see computed values, not fresh variables.
+(displayln "")
+(displayln "--- Continuous assigns ---")
+(for-each
+  (lambda (item)
+    (if (and (pair? item) (eq? 'assign (car item)))
+        (let* ((asgn (cadr item))
+               (sigs (lvalue-signals (cadr asgn)))
+               (bv (expr->bv (caddr asgn))))
+          (for-each
+            (lambda (s)
+              (let* ((rbv (bv-resize bv (width-get s)))
+                     (nodes (fold-left + 0 (map bdd-size rbv))))
+                (set! total-nodes (+ total-nodes nodes))
+                (set! all-assigns (cons (cons s rbv) all-assigns))
+                (bv-env-put! s rbv)
+                (displayln "  " (symbol->string s) " ["
+                           (number->string (length rbv)) " bits]: "
+                           (number->string nodes) " BDD nodes")))
+            sigs))))
+  body)
 
 ;; Synthesize always_comb blocks
 (for-each
@@ -115,28 +143,6 @@
               assigns)))))
   body)
 
-;; Continuous assigns
-(displayln "")
-(displayln "--- Continuous assigns ---")
-(for-each
-  (lambda (item)
-    (if (and (pair? item) (eq? 'assign (car item)))
-        (let* ((asgn (cadr item))
-               (sigs (lvalue-signals (cadr asgn)))
-               (bv (expr->bv (caddr asgn))))
-          (for-each
-            (lambda (s)
-              (let* ((rbv (bv-resize bv (width-get s)))
-                     (nodes (fold-left + 0 (map bdd-size rbv))))
-                (set! total-nodes (+ total-nodes nodes))
-                (set! all-assigns (cons (cons s rbv) all-assigns))
-                (bv-env-put! s rbv)
-                (displayln "  " (symbol->string s) " ["
-                           (number->string (length rbv)) " bits]: "
-                           (number->string nodes) " BDD nodes")))
-            sigs))))
-  body)
-
 (displayln "")
 (displayln "=== Total BDD nodes: " (number->string total-nodes) " ===")
 (displayln "=== Synthesized outputs: " (number->string (length all-assigns)) " ===")
@@ -153,24 +159,26 @@
                                          (- (string-length vn) 1))))
         (cons vn #f))))
 
-;; Collect actual BDD input variables from all cones
-;; These are the signals the combinational logic depends on
-;; (register outputs, module inputs) — NOT the module port list.
+;; Emit cut variables as module inputs (not expanded into gates).
+;; This keeps the gate-level module bounded in size and allows
+;; round-trip verification to reuse the same cut variable BDDs.
+(define saved-cuts *bv-cuts*)
+(set! *bv-cuts* '())
+
+;; Collect actual BDD input variables from all cones.
+;; With *bv-cuts* cleared, this only finds variables referenced
+;; by output BDDs — cut variables appear as leaf inputs.
 (define all-var-names (collect-bdd-vars all-assigns))
 
-;; Filter out cut variables and output signals — those are internal wires
+;; Filter out output signals — those are driven, not inputs.
 (define output-names (map car all-assigns))
-(define (is-cut-var? name)
-  (and (> (string-length name) 5)
-       (string=? (substring name 0 5) "_cut_")))
 (define (is-output-var? name)
   (let* ((parsed (parse-var-name name))
          (base (string->symbol (car parsed))))
     (memq base output-names)))
 
 (define var-names
-  (sv-filter (lambda (v) (and (not (is-cut-var? v))
-                               (not (is-output-var? v))))
+  (sv-filter (lambda (v) (not (is-output-var? v)))
              all-var-names))
 (displayln "")
 (displayln "BDD input variables: " (number->string (length var-names)))

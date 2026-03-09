@@ -84,6 +84,11 @@
          (displayln "Registered function: " (symbol->string fname))))))
   body)
 
+;; Pre-create BDD variables for all input ports so they survive
+;; bv-env-restore! calls during case/if compilation.
+(define ps (collect-port-signals ports))
+(for-each (lambda (p) (if (eq? 'input (car p)) (bv-lookup (cadr p)))) ps)
+
 ;; Synthesize each always_comb block individually
 ;; Enable carry cuts and case decomposition for complex blocks
 (set! *bv-cut-threshold* 200)
@@ -91,6 +96,29 @@
 (define cone-num 0)
 (define total-nodes 0)
 (define all-assigns '())
+
+;; Continuous assigns first (wire-level decoders like aaa=opcode[7:5])
+;; so that always_comb blocks see computed values, not fresh variables.
+(displayln "")
+(displayln "--- Continuous assigns ---")
+(for-each
+  (lambda (item)
+    (if (and (pair? item) (eq? 'assign (car item)))
+        (let* ((asgn (cadr item))
+               (sigs (lvalue-signals (cadr asgn)))
+               (bv (expr->bv (caddr asgn))))
+          (for-each
+            (lambda (s)
+              (let* ((rbv (bv-resize bv (width-get s)))
+                     (nodes (fold-left + 0 (map bdd-size rbv))))
+                (set! total-nodes (+ total-nodes nodes))
+                (set! all-assigns (cons (cons s rbv) all-assigns))
+                (bv-env-put! s rbv)
+                (displayln "  " (symbol->string s) " ["
+                           (number->string (length rbv)) " bits]: "
+                           (number->string nodes) " BDD nodes")))
+            sigs))))
+  body)
 
 (for-each
   (lambda (item)
@@ -112,28 +140,6 @@
                              (number->string w) " bits]: "
                              (number->string nodes) " BDD nodes")))
               assigns)))))
-  body)
-
-;; Continuous assigns
-(displayln "")
-(displayln "--- Continuous assigns ---")
-(for-each
-  (lambda (item)
-    (if (and (pair? item) (eq? 'assign (car item)))
-        (let* ((asgn (cadr item))
-               (sigs (lvalue-signals (cadr asgn)))
-               (bv (expr->bv (caddr asgn))))
-          (for-each
-            (lambda (s)
-              (let* ((rbv (bv-resize bv (width-get s)))
-                     (nodes (fold-left + 0 (map bdd-size rbv))))
-                (set! total-nodes (+ total-nodes nodes))
-                (set! all-assigns (cons (cons s rbv) all-assigns))
-                (bv-env-put! s rbv)
-                (displayln "  " (symbol->string s) " ["
-                           (number->string (length rbv)) " bits]: "
-                           (number->string nodes) " BDD nodes")))
-            sigs))))
   body)
 
 (displayln "")
