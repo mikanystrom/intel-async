@@ -102,11 +102,11 @@ EOF
 "$SVSYNTH" "$TMPDIR/cpu_gate_driver.scm" < /dev/null
 
 # --- CPU Round-Trip Verification ---
-# NOTE: Skipped — 59K+ gate-level assigns exceed Scheme BDD synthesizer
-# capacity (alist-based env lookup is O(n^2)).  The ALU round-trip
-# verifies the emit/parse/compare pipeline is correct.
+# NOTE: Skipped — 59K gate-level assigns require ~14GB RAM for BDD
+# reconstruction (all intermediate wire BDDs held simultaneously).
+# The ALU round-trip verifies the emit/parse/compare pipeline is correct.
 echo ""
-echo "=== CPU Round-Trip: SKIPPED (59K gates too large for Scheme re-synthesis) ==="
+echo "=== CPU Round-Trip: SKIPPED (59K gates require ~14GB for BDD reconstruction) ==="
 
 echo ""
 echo "============================================="

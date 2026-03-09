@@ -45,7 +45,7 @@
 (define ast-2 (read-sv-file "/tmp/flop-demo/alu_pipe_gates.ast.scm"))
 (define mod-2 (car ast-2))
 
-(set! *bv-env* saved-input-env)
+(bv-env-restore! saved-input-env)
 (width-reset!)
 
 (extract-port-widths (module-ports mod-2))

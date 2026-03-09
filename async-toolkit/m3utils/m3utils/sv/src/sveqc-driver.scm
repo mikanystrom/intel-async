@@ -141,7 +141,7 @@
   (define ast-2 (read-sv-file ref-file))
   (define mod-2 (car ast-2))
 
-  (set! *bv-env* saved-env)
+  (bv-env-restore! saved-env)
   (width-reset!)
 
   (define name-2 (module-name mod-2))
