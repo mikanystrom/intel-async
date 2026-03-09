@@ -177,10 +177,8 @@ function initSvgInteraction() {
   if (parts.length !== 4) return;
 
   let [vx, vy, vw, vh] = parts;
-  const origW = vw, origH = vh;
   let dragging = false;
-  let rotateMode = false;
-  let startX, startY, startVx, startVy, startLat, startLon;
+  let startX, startY, startLat, startLon;
 
   svgEl.addEventListener("wheel", function(e) {
     e.preventDefault();
@@ -206,14 +204,8 @@ function initSvgInteraction() {
     dragging = true;
     startX = e.clientX;
     startY = e.clientY;
-    rotateMode = currentProjectionNeedsCenter();
-    if (rotateMode) {
-      startLat = parseFloat(document.getElementById("centerLat").value) || 0;
-      startLon = parseFloat(document.getElementById("centerLon").value) || 0;
-    } else {
-      startVx = vx;
-      startVy = vy;
-    }
+    startLat = parseFloat(document.getElementById("centerLat").value) || 0;
+    startLon = parseFloat(document.getElementById("centerLon").value) || 0;
     svgEl.style.cursor = "grabbing";
     e.preventDefault();
   });
@@ -221,35 +213,25 @@ function initSvgInteraction() {
   window.addEventListener("mousemove", function(e) {
     if (!dragging) return;
     const rect = svgEl.getBoundingClientRect();
-    if (rotateMode) {
-      // Convert pixel displacement to degrees
-      // Full SVG width = 360° longitude, full height = 180° latitude
-      const dLon = (e.clientX - startX) / rect.width * 360;
-      const dLat = (e.clientY - startY) / rect.height * 180;
-      // Drag right = globe rotates left = lon decreases (grab-and-drag)
-      let newLon = startLon - dLon;
-      let newLat = startLat + dLat;
-      // Clamp latitude, wrap longitude
-      newLat = Math.max(-90, Math.min(90, newLat));
-      newLon = ((newLon + 180) % 360 + 360) % 360 - 180;
-      document.getElementById("centerLat").value = Math.round(newLat);
-      document.getElementById("centerLon").value = Math.round(newLon);
-    } else {
-      const dx = (e.clientX - startX) / rect.width * vw;
-      const dy = (e.clientY - startY) / rect.height * vh;
-      vx = startVx - dx;
-      vy = startVy - dy;
-      svgEl.setAttribute("viewBox", vx + " " + vy + " " + vw + " " + vh);
-    }
+    // Convert pixel displacement to degrees
+    // Full SVG width = 360° longitude, full height = 180° latitude
+    const dLon = (e.clientX - startX) / rect.width * 360;
+    const dLat = (e.clientY - startY) / rect.height * 180;
+    // Drag right = globe rotates left = lon decreases (grab-and-drag)
+    let newLon = startLon - dLon;
+    let newLat = startLat + dLat;
+    // Clamp latitude, wrap longitude
+    newLat = Math.max(-90, Math.min(90, newLat));
+    newLon = ((newLon + 180) % 360 + 360) % 360 - 180;
+    document.getElementById("centerLat").value = Math.round(newLat);
+    document.getElementById("centerLon").value = Math.round(newLon);
   });
 
   window.addEventListener("mouseup", function() {
     if (!dragging) return;
     dragging = false;
     svgEl.style.cursor = "";
-    if (rotateMode) {
-      renderMap();
-    }
+    renderMap();
   });
 }
 
@@ -268,7 +250,7 @@ function initArrowKeys() {
     e.preventDefault();
 
     const checkbox = document.getElementById("arrowRotate");
-    const wantRotate = checkbox && checkbox.checked && currentProjectionNeedsCenter();
+    const wantRotate = checkbox && checkbox.checked;
 
     if (wantRotate) {
       // Rotate center by 5° steps

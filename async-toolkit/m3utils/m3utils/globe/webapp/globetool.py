@@ -75,16 +75,23 @@ def merge_geojson_files(paths):
         return paths[0], False  # no temp file created
 
     all_features = []
-    for path in paths:
+    for idx, path in enumerate(paths):
         with open(path, "r") as f:
             data = json.load(f)
         if data.get("type") == "FeatureCollection":
-            all_features.extend(data.get("features", []))
+            features = data.get("features", [])
         elif data.get("type") == "Feature":
-            all_features.append(data)
+            features = [data]
         else:
             # Bare geometry — wrap it
-            all_features.append({"type": "Feature", "geometry": data, "properties": {}})
+            features = [{"type": "Feature", "geometry": data, "properties": {}}]
+        # Tag non-first datasets as secondary for lighter SVG styling
+        if idx > 0:
+            for feat in features:
+                props = feat.get("properties") or {}
+                props["_class"] = "secondary"
+                feat["properties"] = props
+        all_features.extend(features)
 
     merged = {"type": "FeatureCollection", "features": all_features}
 

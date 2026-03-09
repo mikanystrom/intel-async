@@ -284,6 +284,7 @@ PROCEDURE GenerateEquator() : GeoFeature.Feature =
     f.geometry.coords := coords;
     f.geometry.rings := NIL;
     f.name := "Earth Equator";
+    f.cssClass := "earth-equator";
     f.properties := NIL;
     RETURN f
   END GenerateEquator;
@@ -304,6 +305,7 @@ PROCEDURE GenerateProjEquator(READONLY rot : GreatCircle.Rotation) : GeoFeature.
     f.geometry.coords := coords;
     f.geometry.rings := NIL;
     f.name := "Projection Equator";
+    f.cssClass := "proj-equator";
     f.properties := NIL;
     RETURN f
   END GenerateProjEquator;

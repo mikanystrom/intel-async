@@ -29,8 +29,9 @@ TYPE
   END;
 
   ProjFeature = RECORD
-    geom : ProjGeometry;
-    name : TEXT;
+    geom     : ProjGeometry;
+    name     : TEXT;
+    cssClass : TEXT;
   END;
 
   ProjFeatureArray = REF ARRAY OF ProjFeature;
@@ -151,6 +152,7 @@ PROCEDURE ProjectAll(READONLY fc : GeoFeature.FeatureCollection;
     result := NEW(ProjFeatureArray, n);
     FOR i := 0 TO n - 1 DO
       result[i].name := fc.features[i].name;
+      result[i].cssClass := fc.features[i].cssClass;
       result[i].geom.kind := fc.features[i].geometry.kind;
       CASE fc.features[i].geometry.kind OF
       | GeoFeature.GeometryKind.Point,
@@ -251,16 +253,23 @@ PROCEDURE TextEmpty(t : TEXT) : BOOLEAN =
     RETURN t = NIL OR Text.Length(t) = 0
   END TextEmpty;
 
+PROCEDURE FeatureClass(cssClass : TEXT) : TEXT =
+  (* Return the CSS class attribute value: "feature" or "feature <extra>" *)
+  BEGIN
+    IF TextEmpty(cssClass) THEN RETURN "feature" END;
+    RETURN "feature " & cssClass
+  END FeatureClass;
+
 (* ---- SVG element emitters ---- *)
 
 PROCEDURE EmitPoint(wr : Wr.T;
                     READONLY p : ProjPoint;
                     READONLY t : Transform;
                     READONLY cfg : Config;
-                    name : TEXT) =
+                    name, cssClass : TEXT) =
   BEGIN
     IF NOT p.valid THEN RETURN END;
-    Wr.PutText(wr, "<circle class=\"feature\"");
+    Wr.PutText(wr, "<circle class=\"" & FeatureClass(cssClass) & "\"");
     IF name # NIL AND NOT TextEmpty(name) THEN
       Wr.PutText(wr, " data-name=\"" & EscapeXML(name) & "\"");
     END;
@@ -273,10 +282,10 @@ PROCEDURE EmitMultiPoint(wr : Wr.T;
                          coords : ProjPointArray;
                          READONLY t : Transform;
                          READONLY cfg : Config;
-                         name : TEXT) =
+                         name, cssClass : TEXT) =
   BEGIN
     IF coords = NIL THEN RETURN END;
-    Wr.PutText(wr, "<g class=\"feature\"");
+    Wr.PutText(wr, "<g class=\"" & FeatureClass(cssClass) & "\"");
     IF name # NIL AND NOT TextEmpty(name) THEN
       Wr.PutText(wr, " data-name=\"" & EscapeXML(name) & "\"");
     END;
@@ -352,9 +361,9 @@ PROCEDURE EmitPolygonRingPath(wr : Wr.T;
 PROCEDURE EmitLineString(wr : Wr.T;
                          coords : ProjPointArray;
                          READONLY t : Transform;
-                         name : TEXT) =
+                         name, cssClass : TEXT) =
   BEGIN
-    Wr.PutText(wr, "<path class=\"feature\"");
+    Wr.PutText(wr, "<path class=\"" & FeatureClass(cssClass) & "\"");
     IF name # NIL AND NOT TextEmpty(name) THEN
       Wr.PutText(wr, " data-name=\"" & EscapeXML(name) & "\"");
     END;
@@ -366,10 +375,10 @@ PROCEDURE EmitLineString(wr : Wr.T;
 PROCEDURE EmitPolygon(wr : Wr.T;
                       rings : ProjRingArray;
                       READONLY t : Transform;
-                      name : TEXT) =
+                      name, cssClass : TEXT) =
   BEGIN
     IF rings = NIL THEN RETURN END;
-    Wr.PutText(wr, "<path class=\"feature\" fill-rule=\"evenodd\"");
+    Wr.PutText(wr, "<path class=\"" & FeatureClass(cssClass) & "\" fill-rule=\"evenodd\"");
     IF name # NIL AND NOT TextEmpty(name) THEN
       Wr.PutText(wr, " data-name=\"" & EscapeXML(name) & "\"");
     END;
@@ -383,10 +392,10 @@ PROCEDURE EmitPolygon(wr : Wr.T;
 PROCEDURE EmitMultiLineString(wr : Wr.T;
                               rings : ProjRingArray;
                               READONLY t : Transform;
-                              name : TEXT) =
+                              name, cssClass : TEXT) =
   BEGIN
     IF rings = NIL THEN RETURN END;
-    Wr.PutText(wr, "<path class=\"feature\"");
+    Wr.PutText(wr, "<path class=\"" & FeatureClass(cssClass) & "\"");
     IF name # NIL AND NOT TextEmpty(name) THEN
       Wr.PutText(wr, " data-name=\"" & EscapeXML(name) & "\"");
     END;
@@ -400,10 +409,10 @@ PROCEDURE EmitMultiLineString(wr : Wr.T;
 PROCEDURE EmitMultiPolygon(wr : Wr.T;
                            rings : ProjRingArray;
                            READONLY t : Transform;
-                           name : TEXT) =
+                           name, cssClass : TEXT) =
   BEGIN
     IF rings = NIL THEN RETURN END;
-    Wr.PutText(wr, "<path class=\"feature\" fill-rule=\"evenodd\"");
+    Wr.PutText(wr, "<path class=\"" & FeatureClass(cssClass) & "\" fill-rule=\"evenodd\"");
     IF name # NIL AND NOT TextEmpty(name) THEN
       Wr.PutText(wr, " data-name=\"" & EscapeXML(name) & "\"");
     END;
@@ -527,6 +536,11 @@ PROCEDURE WriteWr(wr : Wr.T;
     Wr.PutText(wr, ".feature { stroke: " & cfg.stroke &
                     "; fill: " & cfg.fill &
                     "; stroke-width: " & F(cfg.strokeWidth) & "; }\n");
+    Wr.PutText(wr, ".secondary { stroke: #888888; }\n");
+    Wr.PutText(wr, ".earth-equator { stroke: #ff4444; fill: none; stroke-width: " &
+                    F(cfg.strokeWidth * 1.5d0) & "; }\n");
+    Wr.PutText(wr, ".proj-equator { stroke: #4488ff; fill: none; stroke-width: " &
+                    F(cfg.strokeWidth * 1.5d0) & "; }\n");
     Wr.PutText(wr, "</style>\n");
 
     (* Features *)
@@ -537,23 +551,23 @@ PROCEDURE WriteWr(wr : Wr.T;
           IF features[i].geom.coords # NIL AND
              NUMBER(features[i].geom.coords^) > 0 THEN
             EmitPoint(wr, features[i].geom.coords[0], t, cfg,
-                      features[i].name);
+                      features[i].name, features[i].cssClass);
           END;
         | GeoFeature.GeometryKind.MultiPoint =>
           EmitMultiPoint(wr, features[i].geom.coords, t, cfg,
-                         features[i].name);
+                         features[i].name, features[i].cssClass);
         | GeoFeature.GeometryKind.LineString =>
           EmitLineString(wr, features[i].geom.coords, t,
-                         features[i].name);
+                         features[i].name, features[i].cssClass);
         | GeoFeature.GeometryKind.Polygon =>
           EmitPolygon(wr, features[i].geom.rings, t,
-                      features[i].name);
+                      features[i].name, features[i].cssClass);
         | GeoFeature.GeometryKind.MultiLineString =>
           EmitMultiLineString(wr, features[i].geom.rings, t,
-                              features[i].name);
+                              features[i].name, features[i].cssClass);
         | GeoFeature.GeometryKind.MultiPolygon =>
           EmitMultiPolygon(wr, features[i].geom.rings, t,
-                           features[i].name);
+                           features[i].name, features[i].cssClass);
         END;
       END;
     END;
