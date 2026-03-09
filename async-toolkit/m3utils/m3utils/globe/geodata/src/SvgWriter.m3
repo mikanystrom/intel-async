@@ -7,12 +7,16 @@ IMPORT Projection, GeoCoord, GeoFeature, Wr, Fmt, Text, Thread, FileWr, OSError;
 
 <*FATAL Thread.Alerted, Wr.Failure*>
 
+CONST
+  Pi = 3.141592653589793d0;
+
 (* ---- Projected point storage for two-pass architecture ---- *)
 
 TYPE
   ProjPoint = RECORD
     x, y : LONGREAL;
     valid : BOOLEAN;
+    penLift : BOOLEAN;  (* force pen lift before drawing to this point *)
   END;
 
   ProjPointArray = REF ARRAY OF ProjPoint;
@@ -59,11 +63,17 @@ PROCEDURE ProjectCoordArray(coords : GeoFeature.CoordArray;
     n : INTEGER;
     result : ProjPointArray;
     xy : GeoCoord.XY;
+    mid : GeoCoord.LatLon;
+    dlon : LONGREAL;
+    prevValid : INTEGER;
   BEGIN
     IF coords = NIL THEN RETURN NIL END;
     n := NUMBER(coords^);
     result := NEW(ProjPointArray, n);
+
+    (* First pass: project all points *)
     FOR i := 0 TO n - 1 DO
+      result[i].penLift := FALSE;
       IF proj.forward(coords[i], xy) THEN
         (* Negate Y: geographic Y up, SVG Y down *)
         result[i].x := xy.x;
@@ -74,6 +84,35 @@ PROCEDURE ProjectCoordArray(coords : GeoFeature.CoordArray;
         result[i].valid := FALSE;
       END;
     END;
+
+    (* Second pass: detect segments that cross invisible territory
+       or the antimeridian.  For each pair of consecutive valid points,
+       check whether the geographic midpoint projects as valid and whether
+       the segment crosses the antimeridian.  If not, mark the second
+       point for a pen lift. *)
+    prevValid := -1;
+    FOR i := 0 TO n - 1 DO
+      IF result[i].valid THEN
+        IF prevValid >= 0 THEN
+          (* Check 1: antimeridian crossing (|delta-lon| > pi) *)
+          dlon := coords[i].lon - coords[prevValid].lon;
+          IF dlon > Pi OR dlon < -Pi THEN
+            result[i].penLift := TRUE;
+          ELSE
+            (* Check 2: midpoint visibility -- if the geographic midpoint
+               of the segment does not project as valid, the segment
+               crosses invisible territory (e.g. behind the globe). *)
+            mid.lat := (coords[prevValid].lat + coords[i].lat) * 0.5d0;
+            mid.lon := (coords[prevValid].lon + coords[i].lon) * 0.5d0;
+            IF NOT proj.forward(mid, xy) THEN
+              result[i].penLift := TRUE;
+            END;
+          END;
+        END;
+        prevValid := i;
+      END;
+    END;
+
     RETURN result
   END ProjectCoordArray;
 
@@ -250,13 +289,15 @@ PROCEDURE EmitLineStringPath(wr : Wr.T;
                              coords : ProjPointArray;
                              READONLY t : Transform) =
   (* Emits M/L path commands for a single linestring.
-     Skips invalid points; starts a new M after gaps. *)
+     Lifts pen (M instead of L) when:
+     - previous point was invalid (needMove)
+     - midpoint visibility or antimeridian check failed (penLift) *)
   VAR needMove := TRUE;
   BEGIN
     IF coords = NIL THEN RETURN END;
     FOR i := 0 TO LAST(coords^) DO
       IF coords[i].valid THEN
-        IF needMove THEN
+        IF needMove OR coords[i].penLift THEN
           Wr.PutText(wr, "M" & F(TX(coords[i].x, t)) &
                          "," & F(TY(coords[i].y, t)));
           needMove := FALSE;
@@ -273,14 +314,15 @@ PROCEDURE EmitLineStringPath(wr : Wr.T;
 PROCEDURE EmitPolygonRingPath(wr : Wr.T;
                               coords : ProjPointArray;
                               READONLY t : Transform) =
-  (* Emits M/L/Z for a polygon ring, skipping invalid points. *)
+  (* Emits M/L/Z for a polygon ring, skipping invalid points.
+     Lifts pen when penLift is set (midpoint visibility or antimeridian). *)
   VAR needMove := TRUE;
       hasPoints := FALSE;
   BEGIN
     IF coords = NIL THEN RETURN END;
     FOR i := 0 TO LAST(coords^) DO
       IF coords[i].valid THEN
-        IF needMove THEN
+        IF needMove OR coords[i].penLift THEN
           Wr.PutText(wr, "M" & F(TX(coords[i].x, t)) &
                          "," & F(TY(coords[i].y, t)));
           needMove := FALSE;
@@ -378,6 +420,57 @@ PROCEDURE WriteFile(path : TEXT;
     Wr.Close(wr);
   END WriteFile;
 
+PROCEDURE MarkWrapAround(coords : ProjPointArray;
+                         maxDist2 : LONGREAL) =
+  (* Mark pen lifts for segments that wrap around the projection boundary.
+     This catches antimeridian crossings in oblique projections where the
+     geographic antimeridian check (|dlon| > pi) doesn't apply.
+     A segment is considered a wrap-around if its projected-space distance
+     exceeds maxDist2 (= (maxDim/3)^2, i.e., more than 1/3 of the map). *)
+  VAR
+    prevX, prevY, dx, dy : LONGREAL;
+    prevValid := -1;
+  BEGIN
+    IF coords = NIL THEN RETURN END;
+    FOR i := 0 TO LAST(coords^) DO
+      IF coords[i].valid THEN
+        IF prevValid >= 0 AND NOT coords[i].penLift THEN
+          dx := coords[i].x - prevX;
+          dy := coords[i].y - prevY;
+          IF dx * dx + dy * dy > maxDist2 THEN
+            coords[i].penLift := TRUE;
+          END;
+        END;
+        prevValid := i;
+        prevX := coords[i].x;
+        prevY := coords[i].y;
+      END;
+    END;
+  END MarkWrapAround;
+
+PROCEDURE MarkWrapAroundAll(features : ProjFeatureArray;
+                            maxDist2 : LONGREAL) =
+  BEGIN
+    IF features = NIL THEN RETURN END;
+    FOR i := 0 TO LAST(features^) DO
+      CASE features[i].geom.kind OF
+      | GeoFeature.GeometryKind.Point,
+        GeoFeature.GeometryKind.MultiPoint =>
+        (* no paths to check *)
+      | GeoFeature.GeometryKind.LineString =>
+        MarkWrapAround(features[i].geom.coords, maxDist2);
+      | GeoFeature.GeometryKind.Polygon,
+        GeoFeature.GeometryKind.MultiLineString,
+        GeoFeature.GeometryKind.MultiPolygon =>
+        IF features[i].geom.rings # NIL THEN
+          FOR j := 0 TO LAST(features[i].geom.rings^) DO
+            MarkWrapAround(features[i].geom.rings[j], maxDist2);
+          END;
+        END;
+      END;
+    END;
+  END MarkWrapAroundAll;
+
 PROCEDURE WriteWr(wr : Wr.T;
                   READONLY fc : GeoFeature.FeatureCollection;
                   proj : Projection.T;
@@ -386,9 +479,22 @@ PROCEDURE WriteWr(wr : Wr.T;
     bb : BBox;
     features : ProjFeatureArray;
     t : Transform;
+    maxDim, maxDist2 : LONGREAL;
   BEGIN
-    (* Pass 1: project all coordinates and compute bounding box *)
+    (* Pass 1: project all coordinates, compute bounding box,
+       and mark segments that cross invisible territory *)
     features := ProjectAll(fc, proj, bb);
+
+    (* Pass 1b: mark segments that wrap around the projection boundary.
+       Uses the bounding box (now known) to set a distance threshold at
+       maxDim/3 in projected space.  This catches antimeridian crossings
+       in oblique projections where the geographic check doesn't apply. *)
+    IF NOT bb.empty THEN
+      maxDim := bb.maxX - bb.minX;
+      IF bb.maxY - bb.minY > maxDim THEN maxDim := bb.maxY - bb.minY END;
+      maxDist2 := maxDim * maxDim / 9.0d0;  (* (maxDim/3)^2 *)
+      MarkWrapAroundAll(features, maxDist2);
+    END;
 
     (* Compute transform to fit bounding box into viewport *)
     t := ComputeTransform(bb, cfg);
