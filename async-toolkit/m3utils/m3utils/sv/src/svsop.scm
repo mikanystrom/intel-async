@@ -68,7 +68,7 @@
               (let* ((bv (expr->bv val-expr))
                      (w (length bv)))
                 (width-set! n w)
-                (set! *bv-env* (cons (cons n bv) *bv-env*)))))))
+                (bv-env-put! n bv))))))
   body)
 
 ;; Process functions
@@ -117,7 +117,7 @@
             (lambda (s)
               (let ((rbv (bv-resize bv (width-get s))))
                 (set! all-assigns (cons (cons s rbv) all-assigns))
-                (set! *bv-env* (cons (cons s rbv) *bv-env*))))
+                (bv-env-put! s rbv)))
             sigs))))
   body)
 

@@ -50,7 +50,7 @@
 (define mod-2 (car ast-2))
 
 ;; Reset synthesis state but restore input variable bindings
-(set! *bv-env* saved-input-env)
+(bv-env-restore! saved-input-env)
 (width-reset!)
 
 (extract-port-widths (module-ports mod-2))

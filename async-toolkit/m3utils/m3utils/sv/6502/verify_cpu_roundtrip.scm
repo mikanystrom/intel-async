@@ -60,7 +60,7 @@
              (let* ((bv (expr->bv val-expr))
                     (w (length bv)))
                (width-set! n w)
-               (set! *bv-env* (cons (cons n bv) *bv-env*))))))
+               (bv-env-put! n bv)))))
       ((and (pair? item) (eq? 'function (car item)))
        (let* ((rest (cdr item))
               (rest (if (and (pair? rest) (string? (car rest))
@@ -111,7 +111,7 @@
             (lambda (s)
               (let* ((rbv (bv-resize bv (width-get s))))
                 (set! all-assigns-1 (cons (cons s rbv) all-assigns-1))
-                (set! *bv-env* (cons (cons s rbv) *bv-env*))))
+                (bv-env-put! s rbv)))
             sigs))))
   body-1)
 
@@ -139,7 +139,7 @@
 (define mod-2 (car ast-2))
 
 ;; Reset but keep ALL env bindings (so gate module reuses same BDD variables)
-(set! *bv-env* saved-env)
+(bv-env-restore! saved-env)
 (set! *bv-cuts* '())
 (set! *bv-cut-threshold* #f)
 (width-reset!)

@@ -60,7 +60,7 @@
              (let* ((bv (expr->bv val-expr))
                     (w (length bv)))
                (width-set! n w)
-               (set! *bv-env* (cons (cons n bv) *bv-env*))))))
+               (bv-env-put! n bv)))))
       ((and (pair? item) (eq? 'function (car item)))
        (let* ((rest (cdr item))
               (rest (if (and (pair? rest) (string? (car rest))
@@ -129,7 +129,7 @@
                      (nodes (fold-left + 0 (map bdd-size rbv))))
                 (set! total-nodes (+ total-nodes nodes))
                 (set! all-assigns (cons (cons s rbv) all-assigns))
-                (set! *bv-env* (cons (cons s rbv) *bv-env*))
+                (bv-env-put! s rbv)
                 (displayln "  " (symbol->string s) " ["
                            (number->string (length rbv)) " bits]: "
                            (number->string nodes) " BDD nodes")))

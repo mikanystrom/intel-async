@@ -119,12 +119,12 @@
   (cond
     ((number? expr) expr)
     ((symbol? expr)
-     (let ((entry (assq expr *bv-env*)))
-       (if entry (bv-to-const (cdr entry)) #f)))
+     (let ((bv (bv-lookup-cached expr)))
+       (if bv (bv-to-const bv) #f)))
     ((not (pair? expr)) #f)
     ((eq? 'id (car expr))
-     (let ((entry (assq (cadr expr) *bv-env*)))
-       (if entry (bv-to-const (cdr entry)) #f)))
+     (let ((bv (bv-lookup-cached (cadr expr))))
+       (if bv (bv-to-const bv) #f)))
     ((eq? '- (car expr))
      (if (null? (cddr expr))
          ;; Unary minus
@@ -617,7 +617,7 @@
                     (let* ((bv (expr->bv val-expr))
                            (w (length bv)))
                       (width-set! name w)
-                      (set! *bv-env* (cons (cons name bv) *bv-env*)))))))
+                      (bv-env-put! name bv))))))
         (cdr params-form))))
 
 
@@ -625,8 +625,35 @@
 ;; 8. BDD VARIABLE ENVIRONMENT (BIT-VECTOR VERSION)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; Maps signal names to bit-vectors of BDDs
+;; Maps signal names to bit-vectors of BDDs.
+;; The alist *bv-env* is the authoritative store; *bv-env-hash* is an
+;; O(1) cache keyed on symbol name (cleared on scope restore).
+(require-modules "hashtable")
+
 (define *bv-env* '())
+(define *bv-env-hash* #f)
+
+(define (symbol-hash sym)
+  (let* ((s (symbol->string sym))
+         (n (string-length s)))
+    (let loop ((i 0) (h 0))
+      (if (= i n) h
+          (loop (+ i 1) (+ (* h 31) (char->integer (string-ref s i))))))))
+
+(define (bv-env-hash-init!)
+  (set! *bv-env-hash* (make-hash-table 8191 symbol-hash)))
+
+;; Add a binding to both alist and hash cache.
+(define (bv-env-put! name bv)
+  (set! *bv-env* (cons (cons name bv) *bv-env*))
+  (if *bv-env-hash*
+      (*bv-env-hash* 'update-entry! name bv)))
+
+;; Restore env to a saved snapshot (clears hash cache).
+(define (bv-env-restore! saved)
+  (set! *bv-env* saved)
+  (if *bv-env-hash*
+      (*bv-env-hash* 'clear!)))
 
 ;; Function table: maps function name (symbol) to (params body-stmts return-width)
 ;; params is list of (name width) pairs
@@ -634,28 +661,57 @@
 
 (define (bv-env-reset!)
   (set! *bv-env* '())
+  (bv-env-hash-init!)
   (set! *bv-func-table* '())
   (bv-cuts-reset!))
+
+;; (bv-lookup-cached name) -- find binding for NAME in env, or #f if not found.
+;; Does NOT create fresh BDD variables (unlike bv-lookup).
+(define (bv-lookup-cached name)
+  (let ((cached (if *bv-env-hash*
+                    (let ((v (*bv-env-hash* 'retrieve name)))
+                      (if (eq? v '*hash-table-search-failed*) #f v))
+                    #f)))
+    (if cached cached
+        (let ((entry (assq name *bv-env*)))
+          (if entry
+              (begin
+                (if *bv-env-hash*
+                    (*bv-env-hash* 'update-entry! name (cdr entry)))
+                (cdr entry))
+              #f)))))
 
 ;; (bv-lookup name) -- find or create BDD variables for signal NAME.
 ;; Returns a bit-vector (list of BDDs).
 (define (bv-lookup name)
-  (let ((entry (assq name *bv-env*)))
-    (if entry
-        (cdr entry)
-        (let* ((w (width-get name))
-               (bv (if (= w 1)
-                       (list (bdd-var (symbol->string name)))
-                       (let loop ((i 0) (acc '()))
-                         (if (= i w) acc
-                             (loop (+ i 1)
-                                   (append acc
-                                     (list (bdd-var
-                                             (string-append
-                                               (symbol->string name)
-                                               "[" (number->string i) "]"))))))))))
-          (set! *bv-env* (cons (cons name bv) *bv-env*))
-          bv))))
+  ;; Try hash cache first
+  (let ((cached (if *bv-env-hash*
+                    (let ((v (*bv-env-hash* 'retrieve name)))
+                      (if (eq? v '*hash-table-search-failed*) #f v))
+                    #f)))
+    (if cached cached
+        ;; Fall back to alist
+        (let ((entry (assq name *bv-env*)))
+          (if entry
+              (begin
+                ;; Populate cache
+                (if *bv-env-hash*
+                    (*bv-env-hash* 'update-entry! name (cdr entry)))
+                (cdr entry))
+              ;; Not found: create fresh BDD variables
+              (let* ((w (width-get name))
+                     (bv (if (= w 1)
+                             (list (bdd-var (symbol->string name)))
+                             (let loop ((i 0) (acc '()))
+                               (if (= i w) acc
+                                   (loop (+ i 1)
+                                         (append acc
+                                           (list (bdd-var
+                                                   (string-append
+                                                     (symbol->string name)
+                                                     "[" (number->string i) "]"))))))))))
+                (bv-env-put! name bv)
+                bv))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -976,25 +1032,24 @@
                  (let ((pname (car param))
                        (pw (cadr param)))
                    (width-set! pname pw)
-                   (set! *bv-env* (cons (cons pname (bv-resize arg-bv pw))
-                                        *bv-env*))))
+                   (bv-env-put! pname (bv-resize arg-bv pw))))
                params arg-bvs)
              ;; Initialize return value (function name = return variable)
              (width-set! fname ret-w)
-             (set! *bv-env* (cons (cons fname (bv-zero ret-w)) *bv-env*))
+             (bv-env-put! fname (bv-zero ret-w))
              ;; Execute body statements
              (for-each
                (lambda (stmt)
                  (let ((new-assigns (stmt->bv-assigns stmt)))
                    (for-each
                      (lambda (a)
-                       (set! *bv-env* (cons a *bv-env*)))
+                       (bv-env-put! (car a) (cdr a)))
                      new-assigns)))
                body-stmts)
              ;; Get return value (the function name in env)
              (let ((ret-bv (bv-lookup fname)))
                ;; Restore env
-               (set! *bv-env* saved-env)
+               (bv-env-restore! saved-env)
                ret-bv)))))
 
     ;; Cast: (cast type expr) -- evaluate expr, resize to type width
@@ -1080,7 +1135,7 @@
              ;; Push new assignments into *bv-env* for later expr->bv
              (for-each
                (lambda (a)
-                 (set! *bv-env* (cons a *bv-env*)))
+                 (bv-env-put! (car a) (cdr a)))
                new-assigns)
              ;; Later assignments override earlier ones
              (loop (cdr stmts)
@@ -1095,11 +1150,11 @@
            (let* ((cond-bv (expr->bv (cadr stmt)))
                   (saved-env *bv-env*)
                   (then-assigns (stmt->bv-assigns (caddr stmt)))
-                  (dummy (set! *bv-env* saved-env))
+                  (dummy (bv-env-restore! saved-env))
                   (else-assigns (if (> (length stmt) 3)
                                     (stmt->bv-assigns (cadddr stmt))
                                     '()))
-                  (dummy2 (set! *bv-env* saved-env)))
+                  (dummy2 (bv-env-restore! saved-env)))
              (merge-conditional-bv-assigns cond-bv then-assigns else-assigns))
            ;; Long chain: flatten and use decoder+MUX
            (compile-if-chain-decomp stmt))))
@@ -1177,7 +1232,7 @@
          (default-assigns (if default-item
                               (stmt->bv-assigns (cadr default-item))
                               '()))
-         (dummy (set! *bv-env* saved-env)))
+         (dummy (bv-env-restore! saved-env)))
     (fold-right
       (lambda (ci acc)
         (if (and (pair? ci) (> (length ci) 1))
@@ -1186,7 +1241,7 @@
                    (eq-bv (case-match-or sel-bv labels))
                    (saved-env *bv-env*)
                    (item-assigns (stmt->bv-assigns body))
-                   (dummy (set! *bv-env* saved-env)))
+                   (dummy (bv-env-restore! saved-env)))
               (merge-conditional-bv-assigns eq-bv item-assigns acc))
             acc))
       default-assigns
@@ -1207,19 +1262,19 @@
                         (let* ((labels (case-item-labels ci))
                                (body (sv-last ci))
                                (match-bdd (car (case-match-or sel-bv labels)))
-                               (dummy (set! *bv-env* saved-env))
+                               (dummy (bv-env-restore! saved-env))
                                (body-assigns (stmt->bv-assigns body))
-                               (dummy2 (set! *bv-env* saved-env)))
+                               (dummy2 (bv-env-restore! saved-env)))
                           (cons match-bdd body-assigns))
                         #f))
                   regular-items))
            (arms (sv-filter (lambda (x) x) arms))
            ;; Build default body
-           (dummy (set! *bv-env* saved-env))
+           (dummy (bv-env-restore! saved-env))
            (default-assigns (if default-item
                                 (stmt->bv-assigns (cadr default-item))
                                 '()))
-           (dummy2 (set! *bv-env* saved-env)))
+           (dummy2 (bv-env-restore! saved-env)))
 
       ;; Phase 2: Combine with one-hot OR
       ;; Collect all output signals mentioned across all arms + default
@@ -1315,17 +1370,17 @@
                     (let* ((cond-expr (car pair))
                            (body-stmt (cdr pair))
                            (cond-bdd (car (bv-reduce-or (expr->bv cond-expr))))
-                           (dummy (set! *bv-env* saved-env))
+                           (dummy (bv-env-restore! saved-env))
                            (body-assigns (stmt->bv-assigns body-stmt))
-                           (dummy2 (set! *bv-env* saved-env)))
+                           (dummy2 (bv-env-restore! saved-env)))
                       (cons cond-bdd body-assigns)))
                   pairs))
            ;; Build else body
-           (dummy (set! *bv-env* saved-env))
+           (dummy (bv-env-restore! saved-env))
            (else-assigns (if else-body
                              (stmt->bv-assigns else-body)
                              '()))
-           (dummy2 (set! *bv-env* saved-env)))
+           (dummy2 (bv-env-restore! saved-env)))
 
       ;; Phase 2: Combine with priority encoding
       ;; For each output bit:
@@ -1458,7 +1513,7 @@
                 (let* ((bv (expr->bv val-expr))
                        (w (length bv)))
                   (width-set! name w)
-                  (set! *bv-env* (cons (cons name bv) *bv-env*)))))))
+                  (bv-env-put! name bv))))))
     body)
   ;; Re-evaluate decl widths now that localparams are known
   (extract-decl-widths body)
@@ -1510,7 +1565,7 @@
                (let* ((bv (expr->bv val-expr))
                       (w (length bv)))
                  (width-set! name w)
-                 (set! *bv-env* (cons (cons name bv) *bv-env*))))))
+                 (bv-env-put! name bv)))))
 
         ;; Continuous assign: (assign (= lvalue expr))
         ((and (pair? item) (eq? 'assign (car item)))
@@ -1521,7 +1576,7 @@
                        (let ((rbv (bv-resize bv (width-get s))))
                          (set! result (cons (cons s rbv) result))
                          ;; Store into env so later assigns can reference this wire
-                         (set! *bv-env* (cons (cons s rbv) *bv-env*))))
+                         (bv-env-put! s rbv)))
                      sigs)))
 
         ;; function: (function auto? return-type name (ports ...) body-stmts...)
