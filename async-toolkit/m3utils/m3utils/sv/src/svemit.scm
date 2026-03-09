@@ -115,31 +115,36 @@
 ;; Map a BDD to a wire name, emitting gate assigns as needed.
 (define (bdd->wire bdd)
   (cond
-    ((bdd-true? bdd) "1")
-    ((bdd-false? bdd) "0")
+    ((bdd-true? bdd) "1'b1")
+    ((bdd-false? bdd) "1'b0")
     (else
       (let ((cached (emit-lookup bdd)))
         (if cached cached
             (let* ((var (bdd-node-var bdd))
                    (var-name (bdd-name var))
                    (hi (bdd-high bdd))
-                   (lo (bdd-low bdd))
-                   (hi-wire (bdd->wire hi))
-                   (lo-wire (bdd->wire lo))
-                   (name (string-append "_n"
-                           (number->string *emit-counter*))))
-              (set! *emit-counter* (+ *emit-counter* 1))
-              (emit-trie-set! (bdd-hash bdd) name)
-              (set! *emit-decls*
-                    (cons (string-append "  wire " name ";")
-                          *emit-decls*))
-              (set! *emit-assigns*
-                    (cons (string-append
-                            "  assign " name " = ("
-                            var-name " & " hi-wire
-                            ") | (~" var-name " & " lo-wire ");")
-                          *emit-assigns*))
-              name))))))
+                   (lo (bdd-low bdd)))
+              ;; Bare variable (hi=TRUE, lo=FALSE): no gate needed
+              (if (and (bdd-true? hi) (bdd-false? lo))
+                  (begin
+                    (emit-trie-set! (bdd-hash bdd) var-name)
+                    var-name)
+                  (let* ((hi-wire (bdd->wire hi))
+                         (lo-wire (bdd->wire lo))
+                         (name (string-append "_n"
+                                 (number->string *emit-counter*))))
+                    (set! *emit-counter* (+ *emit-counter* 1))
+                    (emit-trie-set! (bdd-hash bdd) name)
+                    (set! *emit-decls*
+                          (cons (string-append "  wire " name ";")
+                                *emit-decls*))
+                    (set! *emit-assigns*
+                          (cons (string-append
+                                  "  assign " name " = ("
+                                  var-name " & " hi-wire
+                                  ") | (~" var-name " & " lo-wire ");")
+                                *emit-assigns*))
+                    name))))))))
 
 ;; Group output wires by signal name for concatenation.
 (define (group-output-wires ows)
@@ -228,8 +233,8 @@
       (let* ((name (cadr inp))
              (w (width-get name)))
         (if (= w 1)
-            (wr (string-append "  input " (symbol->string name) ","))
-            (wr (string-append "  input ["
+            (wr (string-append "  input logic " (symbol->string name) ","))
+            (wr (string-append "  input logic ["
                                (number->string (- w 1))
                                ":0] " (symbol->string name) ",")))))
     inputs)
@@ -243,8 +248,8 @@
              (w (width-get name))
              (comma (if (eq? name last-port-name) "" ",")))
         (if (= w 1)
-            (wr (string-append "  output " (symbol->string name) comma))
-            (wr (string-append "  output ["
+            (wr (string-append "  output logic " (symbol->string name) comma))
+            (wr (string-append "  output logic ["
                                (number->string (- w 1))
                                ":0] " (symbol->string name) comma)))))
     outputs)

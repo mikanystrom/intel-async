@@ -102,11 +102,19 @@ EOF
 "$SVSYNTH" "$TMPDIR/cpu_gate_driver.scm" < /dev/null
 
 # --- CPU Round-Trip Verification ---
-# NOTE: Skipped — 59K gate-level assigns require ~14GB RAM for BDD
-# reconstruction (all intermediate wire BDDs held simultaneously).
-# The ALU round-trip verifies the emit/parse/compare pipeline is correct.
 echo ""
-echo "=== CPU Round-Trip: SKIPPED (59K gates require ~14GB for BDD reconstruction) ==="
+echo "=== CPU Round-Trip: Parsing gate-level SV ==="
+"$SVFE" --scm "$TMPDIR/cpu_gates.sv" > "$TMPDIR/cpu_gates.ast.scm"
+echo "  OK"
+
+echo ""
+echo "=== CPU Round-Trip: Comparing BDDs ==="
+cat > "$TMPDIR/cpu_verify_driver.scm" <<EOF
+(define *cpu-ast-file* "$TMPDIR/cpu.ast.scm")
+(define *cpu-gate-ast* "$TMPDIR/cpu_gates.ast.scm")
+(load "sv/6502/verify_cpu_roundtrip.scm")
+EOF
+"$SVSYNTH" "$TMPDIR/cpu_verify_driver.scm" < /dev/null
 
 echo ""
 echo "============================================="

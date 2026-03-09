@@ -33,9 +33,14 @@
 (define *bv-cut-threshold* #f)
 (define *bv-cuts* '())
 (define *bv-cut-counter* 0)
+;; Separate map from cut name (symbol) -> BDD variable (list of 1 BDD).
+;; Unlike *bv-env*, this is NOT affected by bv-env-restore! calls
+;; during if/case/function evaluation.
+(define *bv-cut-vars* '())
 
 (define (bv-cuts-reset!)
   (set! *bv-cuts* '())
+  (set! *bv-cut-vars* '())
   (set! *bv-cut-counter* 0))
 
 ;; If bdd exceeds the cut threshold, replace with a fresh variable.
@@ -49,10 +54,22 @@
       bdd
       (let* ((name (string-append "_cut_" hint "_"
                       (number->string *bv-cut-counter*)))
-             (fresh (bdd-var name)))
+             (fresh (bdd-var name))
+             (sym (string->symbol name)))
         (set! *bv-cut-counter* (+ *bv-cut-counter* 1))
         (set! *bv-cuts* (cons (cons name bdd) *bv-cuts*))
+        (set! *bv-cut-vars* (cons (cons sym (list fresh)) *bv-cut-vars*))
+        (width-set! sym 1)
         fresh)))
+
+;; Inject all cut variable BDDs into the current env.
+;; Call after synthesis completes to ensure cut variables
+;; are available for round-trip verification.
+(define (bv-cuts-inject-env!)
+  (for-each
+    (lambda (cv)
+      (bv-env-put! (car cv) (cdr cv)))
+    *bv-cut-vars*))
 
 ;; Constant bit-vectors
 (define (bv-const val width)
@@ -628,10 +645,24 @@
 ;; Maps signal names to bit-vectors of BDDs.
 ;; The alist *bv-env* is the authoritative store; *bv-env-hash* is an
 ;; O(1) cache keyed on symbol name (cleared on scope restore).
+;;
+;; Eviction mode: for gate-level netlists with many intermediate wires,
+;; *bv-env-evict* holds a refcount hash table.  When a wire's refcount
+;; drops to zero after its last consumer, it is evicted from the env,
+;; allowing the GC to reclaim its BDD nodes.  This reduces peak live
+;; wires from O(total assigns) to O(max DAG width).
+;; Eviction mode is only safe for flat netlists (no bv-env-restore!).
 (require-modules "hashtable")
 
 (define *bv-env* '())
 (define *bv-env-hash* #f)
+(define *bv-env-evict* #f)  ;; refcount hash table, or #f when disabled
+
+;; Variable registry: maps signal name → BDD variable vector.
+;; Unlike *bv-env*, this is NEVER affected by bv-env-restore!.
+;; This ensures that bdd-var is never called twice for the same name,
+;; which would create duplicate BDD variable nodes and break canonicity.
+(define *bv-var-registry* '())
 
 (define (symbol-hash sym)
   (let* ((s (symbol->string sym))
@@ -644,12 +675,15 @@
   (set! *bv-env-hash* (make-hash-table 8191 symbol-hash)))
 
 ;; Add a binding to both alist and hash cache.
+;; In eviction mode, skip the alist (hash-only) so evicted BDDs can be GC'd.
 (define (bv-env-put! name bv)
-  (set! *bv-env* (cons (cons name bv) *bv-env*))
+  (if (not *bv-env-evict*)
+      (set! *bv-env* (cons (cons name bv) *bv-env*)))
   (if *bv-env-hash*
       (*bv-env-hash* 'update-entry! name bv)))
 
 ;; Restore env to a saved snapshot (clears hash cache).
+;; NOT compatible with eviction mode.
 (define (bv-env-restore! saved)
   (set! *bv-env* saved)
   (if *bv-env-hash*
@@ -662,11 +696,138 @@
 (define (bv-env-reset!)
   (set! *bv-env* '())
   (bv-env-hash-init!)
+  (set! *bv-env-evict* #f)
+  (set! *bv-var-registry* '())
   (set! *bv-func-table* '())
   (bv-cuts-reset!))
 
+;; --- Eviction mode: reference-counted wire lifetime ---
+
+;; Walk an expression AST and increment refcounts for each (id name) reference.
+(define (bv-env-count-expr-refs expr ht)
+  (cond
+    ((symbol? expr)
+     (let ((cur (ht 'retrieve expr)))
+       (if (eq? cur '*hash-table-search-failed*)
+           (ht 'update-entry! expr 1)
+           (ht 'update-entry! expr (+ cur 1)))))
+    ((not (pair? expr)) #f)
+    ((eq? 'id (car expr))
+     (let* ((name (cadr expr))
+            (cur (ht 'retrieve name)))
+       (if (eq? cur '*hash-table-search-failed*)
+           (ht 'update-entry! name 1)
+           (ht 'update-entry! name (+ cur 1)))))
+    (else
+     (for-each (lambda (sub) (bv-env-count-expr-refs sub ht))
+               (cdr expr)))))
+
+;; Pre-scan a module body to count RHS references to each signal.
+;; Returns a hash table mapping symbol -> use-count.
+(define (bv-env-scan-body-refs body)
+  (define ht (make-hash-table 65521 symbol-hash))
+  (for-each
+    (lambda (item)
+      (cond
+        ;; Continuous assign: count refs in RHS
+        ((and (pair? item) (eq? 'assign (car item)))
+         (let* ((asgn (cadr item))
+                (rhs (caddr asgn)))
+           (bv-env-count-expr-refs rhs ht)))
+        ;; always_comb: count refs in body statement
+        ((and (pair? item) (eq? 'always_comb (car item)))
+         (bv-env-count-stmt-refs (cadr item) ht))
+        ;; localparam/parameter: count refs in value expression
+        ((and (pair? item) (memq (car item) '(localparam parameter)))
+         (let* ((second (cadr item))
+                (val-expr (cond
+                            ((symbol? second)
+                             (if (not (null? (cdddr item)))
+                                 (cadddr item) #f))
+                            ((pair? second)
+                             (let ((last (sv-last item)))
+                               (cond
+                                 ((and (pair? last) (eq? 'id (car last))
+                                       (not (null? (cddr last))))
+                                  (caddr last))
+                                 ((not (null? (cdddr item)))
+                                  (cadddr item))
+                                 (else #f))))
+                            (else #f))))
+           (if val-expr (bv-env-count-expr-refs val-expr ht))))))
+    body)
+  ht)
+
+;; Count refs in a statement (for always_comb blocks).
+(define (bv-env-count-stmt-refs stmt ht)
+  (cond
+    ((not (pair? stmt)) #f)
+    ;; Assignment: (= lv expr) or (<= lv expr)
+    ((memq (car stmt) '(= <=))
+     (bv-env-count-expr-refs (caddr stmt) ht))
+    ;; Block: (begin [name] stmts...)
+    ((eq? 'begin (car stmt))
+     (for-each (lambda (s) (bv-env-count-stmt-refs s ht))
+               (begin-stmts stmt)))
+    ;; If: (if cond then [else])
+    ((eq? 'if (car stmt))
+     (bv-env-count-expr-refs (cadr stmt) ht)
+     (bv-env-count-stmt-refs (caddr stmt) ht)
+     (if (> (length stmt) 3)
+         (bv-env-count-stmt-refs (cadddr stmt) ht)))
+    ;; Case: (case expr (match stmt) ...)
+    ((memq (car stmt) '(case casez casex))
+     (bv-env-count-expr-refs (cadr stmt) ht)
+     (for-each
+       (lambda (ci)
+         (if (pair? ci)
+             (bv-env-count-stmt-refs (sv-last ci) ht)))
+       (cddr stmt)))))
+
+;; Enable eviction mode: pre-scan body and set up refcounts.
+(define (bv-env-enable-eviction! body)
+  (set! *bv-env-evict* (bv-env-scan-body-refs body)))
+
+;; Disable eviction mode.
+(define (bv-env-disable-eviction!)
+  (set! *bv-env-evict* #f))
+
+;; Output filter: when set, bv-synth-combinational only accumulates
+;; signals in this set into its result list.  Internal wires are still
+;; stored in the env for later assigns but not retained in the result.
+;; Set to #f for default keep-all behavior.
+(define *bv-synth-keep-set* #f)
+
+;; Set the output filter from a list of signal names (symbols).
+(define (bv-synth-set-keep! names)
+  (let ((ht (make-hash-table 1021 symbol-hash)))
+    (for-each (lambda (n) (ht 'update-entry! n #t)) names)
+    (set! *bv-synth-keep-set* ht)))
+
+(define (bv-synth-clear-keep!)
+  (set! *bv-synth-keep-set* #f))
+
+(define (bv-synth-keep? sig)
+  (or (not *bv-synth-keep-set*)
+      (not (eq? (*bv-synth-keep-set* 'retrieve sig)
+                '*hash-table-search-failed*))))
+
+;; Decrement refcount for name; evict from hash when it hits zero.
+(define (bv-env-maybe-evict! name)
+  (if *bv-env-evict*
+      (let ((rc (*bv-env-evict* 'retrieve name)))
+        (if (not (eq? rc '*hash-table-search-failed*))
+            (let ((new-rc (- rc 1)))
+              (if (<= new-rc 0)
+                  (begin
+                    (*bv-env-evict* 'delete-entry! name)
+                    (if *bv-env-hash*
+                        (*bv-env-hash* 'delete-entry! name)))
+                  (*bv-env-evict* 'update-entry! name new-rc)))))))
+
 ;; (bv-lookup-cached name) -- find binding for NAME in env, or #f if not found.
 ;; Does NOT create fresh BDD variables (unlike bv-lookup).
+;; Does NOT decrement refcounts (safe for speculative/const-eval lookups).
 (define (bv-lookup-cached name)
   (let ((cached (if *bv-env-hash*
                     (let ((v (*bv-env-hash* 'retrieve name)))
@@ -683,13 +844,17 @@
 
 ;; (bv-lookup name) -- find or create BDD variables for signal NAME.
 ;; Returns a bit-vector (list of BDDs).
+;; In eviction mode, decrements the refcount for name after lookup.
 (define (bv-lookup name)
   ;; Try hash cache first
   (let ((cached (if *bv-env-hash*
                     (let ((v (*bv-env-hash* 'retrieve name)))
                       (if (eq? v '*hash-table-search-failed*) #f v))
                     #f)))
-    (if cached cached
+    (if cached
+        (begin
+          (bv-env-maybe-evict! name)
+          cached)
         ;; Fall back to alist
         (let ((entry (assq name *bv-env*)))
           (if entry
@@ -697,21 +862,31 @@
                 ;; Populate cache
                 (if *bv-env-hash*
                     (*bv-env-hash* 'update-entry! name (cdr entry)))
+                (bv-env-maybe-evict! name)
                 (cdr entry))
-              ;; Not found: create fresh BDD variables
-              (let* ((w (width-get name))
-                     (bv (if (= w 1)
-                             (list (bdd-var (symbol->string name)))
-                             (let loop ((i 0) (acc '()))
-                               (if (= i w) acc
-                                   (loop (+ i 1)
-                                         (append acc
-                                           (list (bdd-var
-                                                   (string-append
-                                                     (symbol->string name)
-                                                     "[" (number->string i) "]"))))))))))
-                (bv-env-put! name bv)
-                bv))))))
+              ;; Not found in env: check variable registry first
+              (let ((reg (assq name *bv-var-registry*)))
+                (if reg
+                    ;; Reuse previously created BDD variables
+                    (begin
+                      (bv-env-put! name (cdr reg))
+                      (cdr reg))
+                    ;; Create fresh BDD variables and register them
+                    (let* ((w (width-get name))
+                           (bv (if (= w 1)
+                                   (list (bdd-var (symbol->string name)))
+                                   (let loop ((i 0) (acc '()))
+                                     (if (= i w) acc
+                                         (loop (+ i 1)
+                                               (append acc
+                                                 (list (bdd-var
+                                                         (string-append
+                                                           (symbol->string name)
+                                                           "[" (number->string i) "]"))))))))))
+                      (set! *bv-var-registry*
+                            (cons (cons name bv) *bv-var-registry*))
+                      (bv-env-put! name bv)
+                      bv))))))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -1574,7 +1749,9 @@
                 (bv (expr->bv (caddr asgn))))
            (for-each (lambda (s)
                        (let ((rbv (bv-resize bv (width-get s))))
-                         (set! result (cons (cons s rbv) result))
+                         ;; Only accumulate in result if output filter allows
+                         (if (bv-synth-keep? s)
+                             (set! result (cons (cons s rbv) result)))
                          ;; Store into env so later assigns can reference this wire
                          (bv-env-put! s rbv)))
                      sigs)))
