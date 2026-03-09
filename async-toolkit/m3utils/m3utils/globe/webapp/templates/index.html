@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Globe Map Projections</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar" id="sidebar">
+      <h1 class="sidebar-title">Globe Map</h1>
+
+      <div class="control-group">
+        <label for="projection">Projection</label>
+        <select id="projection">
+          <option value="orthographic">Orthographic</option>
+          <option value="stereographic">Stereographic</option>
+          <option value="azimuthalequidistant">Azimuthal Equidistant</option>
+          <option value="mercator">Mercator</option>
+          <option value="transversemercator">Transverse Mercator</option>
+          <option value="equirectangular">Equirectangular</option>
+          <option value="lambertconformalconic">Lambert Conformal Conic</option>
+          <option value="albersequalarea">Albers Equal-Area</option>
+          <option value="robinson">Robinson</option>
+        </select>
+      </div>
+
+      <div class="control-group" id="center-group">
+        <label>Center</label>
+        <div class="input-row">
+          <div class="input-field">
+            <label for="centerLat">Lat</label>
+            <input type="number" id="centerLat" value="0" min="-90" max="90" step="1">
+          </div>
+          <div class="input-field">
+            <label for="centerLon">Lon</label>
+            <input type="number" id="centerLon" value="0" min="-180" max="180" step="1">
+          </div>
+        </div>
+      </div>
+
+      <div class="control-group" id="parallels-group" style="display:none">
+        <label>Standard Parallels</label>
+        <div class="input-row">
+          <div class="input-field">
+            <label for="parallel1">Lat 1</label>
+            <input type="number" id="parallel1" value="29.5" min="-90" max="90" step="0.5">
+          </div>
+          <div class="input-field">
+            <label for="parallel2">Lat 2</label>
+            <input type="number" id="parallel2" value="45.5" min="-90" max="90" step="0.5">
+          </div>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <label for="obliqueMode">Oblique</label>
+        <select id="obliqueMode">
+          <option value="none">None</option>
+          <option value="coordinates">By Coordinates</option>
+          <option value="airports">By Airport Codes</option>
+        </select>
+      </div>
+
+      <div class="control-group" id="oblique-coords-group" style="display:none">
+        <label>Oblique Points (degrees)</label>
+        <div class="input-row">
+          <div class="input-field">
+            <label for="obliqueLat1">Lat 1</label>
+            <input type="number" id="obliqueLat1" value="0" min="-90" max="90" step="1">
+          </div>
+          <div class="input-field">
+            <label for="obliqueLon1">Lon 1</label>
+            <input type="number" id="obliqueLon1" value="0" min="-180" max="180" step="1">
+          </div>
+        </div>
+        <div class="input-row">
+          <div class="input-field">
+            <label for="obliqueLat2">Lat 2</label>
+            <input type="number" id="obliqueLat2" value="0" min="-90" max="90" step="1">
+          </div>
+          <div class="input-field">
+            <label for="obliqueLon2">Lon 2</label>
+            <input type="number" id="obliqueLon2" value="0" min="-180" max="180" step="1">
+          </div>
+        </div>
+      </div>
+
+      <div class="control-group" id="oblique-airports-group" style="display:none">
+        <label>Airport Codes</label>
+        <div class="input-row">
+          <div class="input-field">
+            <label for="airport1">From</label>
+            <input type="text" id="airport1" value="LHR" maxlength="4" placeholder="ICAO/IATA">
+          </div>
+          <div class="input-field">
+            <label for="airport2">To</label>
+            <input type="text" id="airport2" value="NRT" maxlength="4" placeholder="ICAO/IATA">
+          </div>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <label class="group-label">Overlays</label>
+        <label><input type="checkbox" id="overlayEarthEquator"> Earth's equator</label>
+        <label><input type="checkbox" id="overlayProjEquator"> Projection's equator</label>
+      </div>
+
+      <div class="control-group">
+        <label>Datasets</label>
+        <div id="datasets" class="dataset-list">
+          <div class="loading-text">Loading datasets...</div>
+        </div>
+      </div>
+
+      <details class="control-group styling-details">
+        <summary>Styling</summary>
+        <div class="styling-controls">
+          <div class="input-row">
+            <div class="input-field">
+              <label for="width">Width</label>
+              <input type="number" id="width" value="1024" min="64" max="4096" step="64">
+            </div>
+            <div class="input-field">
+              <label for="height">Height</label>
+              <input type="number" id="height" value="512" min="64" max="4096" step="64">
+            </div>
+          </div>
+          <div class="input-row">
+            <div class="input-field">
+              <label for="stroke">Stroke</label>
+              <input type="color" id="stroke" value="#333333">
+            </div>
+            <div class="input-field">
+              <label for="fill">Fill</label>
+              <div class="color-with-none">
+                <input type="color" id="fill" value="#cccccc" disabled>
+                <label class="none-toggle">
+                  <input type="checkbox" id="fillNone" checked> none
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="input-row">
+            <div class="input-field">
+              <label for="background">Background</label>
+              <input type="color" id="background" value="#ffffff">
+            </div>
+          </div>
+          <div class="input-field">
+            <label for="strokeWidth">Stroke Width: <span id="strokeWidthVal">0.5</span></label>
+            <input type="range" id="strokeWidth" value="0.5" min="0" max="5" step="0.1">
+          </div>
+          <div class="input-field">
+            <label for="pointRadius">Point Radius: <span id="pointRadiusVal">2.0</span></label>
+            <input type="range" id="pointRadius" value="2.0" min="0" max="20" step="0.5">
+          </div>
+        </div>
+      </details>
+
+      <div class="control-group button-group">
+        <button id="renderBtn" class="btn-primary">Render</button>
+        <button id="downloadBtn" class="btn-secondary" disabled>Download SVG</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="svg-container" id="svgContainer">
+        <div class="placeholder" id="placeholder">
+          <p>Select a dataset and click <strong>Render</strong> to generate a map.</p>
+        </div>
+      </div>
+      <div class="status-bar" id="statusBar"></div>
+      <div class="loading-overlay" id="loadingOverlay" style="display:none">
+        <div class="spinner"></div>
+      </div>
+    </main>
+  </div>
+
+  <script src="/static/js/controls.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

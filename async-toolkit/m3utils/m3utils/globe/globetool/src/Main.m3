@@ -8,7 +8,7 @@ IMPORT GeoCoord, Projection, GeoJSON, GeoJSONWriter, SvgWriter, GeoFeature;
 IMPORT Equirectangular, Mercator, TransverseMercator;
 IMPORT Stereographic, LambertConformalConic, AlbersEqualArea;
 IMPORT AzimuthalEquidistant, Orthographic, Robinson;
-IMPORT Oblique, Airport, Thread;
+IMPORT Oblique, Airport, GreatCircle, Thread;
 
 <*FATAL Thread.Alerted, Wr.Failure*>
 
@@ -23,6 +23,8 @@ VAR
   obliqueA    : GeoCoord.LatLon;
   obliqueB    : GeoCoord.LatLon;
   useOblique  : BOOLEAN := FALSE;
+  overlayEarthEq : BOOLEAN := FALSE;
+  overlayProjEq  : BOOLEAN := FALSE;
   format      : TEXT := "geojson";
   svgConfig   : SvgWriter.Config;
 
@@ -38,6 +40,8 @@ PROCEDURE Usage() =
       "  -parallels <lat1> <lat2>  Standard parallels in degrees (for conic)\n" &
       "  -oblique <lat1> <lon1> <lat2> <lon2>  Two points defining custom equator\n" &
       "  -greatcircle <code1> <code2>  Airport codes (ICAO/IATA) for oblique equator\n" &
+      "  -overlay-earth-equator       Add Earth's equator (lat=0) as a LineString\n" &
+      "  -overlay-proj-equator        Add projection equator as a LineString\n" &
       "\n" &
       "SVG options (only with -format svg):\n" &
       "  -width <N>            SVG width in pixels (default: 1024)\n" &
@@ -133,6 +137,12 @@ PROCEDURE ParseArgs() =
 
         ELSIF Text.Equal(arg, "-point-radius") AND i + 1 < Params.Count THEN
           INC(i); svgConfig.pointRadius := ScanLongReal(Params.Get(i));
+
+        ELSIF Text.Equal(arg, "-overlay-earth-equator") THEN
+          overlayEarthEq := TRUE;
+
+        ELSIF Text.Equal(arg, "-overlay-proj-equator") THEN
+          overlayProjEq := TRUE;
 
         ELSIF Text.Equal(arg, "-help") OR Text.Equal(arg, "-h") THEN
           Usage();
@@ -258,6 +268,46 @@ PROCEDURE ScanCardinal(t : TEXT) : CARDINAL =
     RETURN result
   END ScanCardinal;
 
+CONST NumEquatorPts = 361;
+
+PROCEDURE GenerateEquator() : GeoFeature.Feature =
+  VAR
+    f : GeoFeature.Feature;
+    coords := NEW(GeoFeature.CoordArray, NumEquatorPts);
+  BEGIN
+    FOR i := 0 TO NumEquatorPts - 1 DO
+      VAR lonDeg := -180.0d0 + FLOAT(i, LONGREAL); BEGIN
+      coords[i] := GeoCoord.LatLonDeg(0.0d0, lonDeg);
+      END;
+    END;
+    f.geometry.kind := GeoFeature.GeometryKind.LineString;
+    f.geometry.coords := coords;
+    f.geometry.rings := NIL;
+    f.name := "Earth Equator";
+    f.properties := NIL;
+    RETURN f
+  END GenerateEquator;
+
+PROCEDURE GenerateProjEquator(READONLY rot : GreatCircle.Rotation) : GeoFeature.Feature =
+  VAR
+    f : GeoFeature.Feature;
+    coords := NEW(GeoFeature.CoordArray, NumEquatorPts);
+  BEGIN
+    FOR i := 0 TO NumEquatorPts - 1 DO
+      VAR lonDeg := -180.0d0 + FLOAT(i, LONGREAL);
+          rotated := GeoCoord.LatLonDeg(0.0d0, lonDeg);
+      BEGIN
+      coords[i] := GreatCircle.RotateInverse(rot, rotated);
+      END;
+    END;
+    f.geometry.kind := GeoFeature.GeometryKind.LineString;
+    f.geometry.coords := coords;
+    f.geometry.rings := NIL;
+    f.name := "Projection Equator";
+    f.properties := NIL;
+    RETURN f
+  END GenerateProjEquator;
+
 BEGIN
   ParseArgs();
 
@@ -282,6 +332,37 @@ BEGIN
       GeoJSON.Error(msg) =>
         Wr.PutText(Stdio.stderr, "GeoJSON error: " & msg & "\n");
         Process.Exit(1);
+    END;
+
+    (* Add overlay features if requested *)
+    VAR extra := 0; BEGIN
+      IF overlayEarthEq THEN INC(extra) END;
+      IF overlayProjEq THEN INC(extra) END;
+      IF extra > 0 THEN
+        VAR
+          n := NUMBER(fc.features^);
+          newArr := NEW(GeoFeature.FeatureArray, n + extra);
+          idx := n;
+        BEGIN
+          SUBARRAY(newArr^, 0, n) := fc.features^;
+          IF overlayEarthEq THEN
+            newArr[idx] := GenerateEquator();
+            INC(idx);
+          END;
+          IF overlayProjEq THEN
+            IF useOblique THEN
+              VAR rot := GreatCircle.ComputeRotation(obliqueA, obliqueB); BEGIN
+              newArr[idx] := GenerateProjEquator(rot);
+              END;
+            ELSE
+              newArr[idx] := GenerateEquator();
+              newArr[idx].name := "Projection Equator";
+            END;
+            INC(idx);
+          END;
+          fc.features := newArr;
+        END;
+      END;
     END;
 
     Wr.PutText(Stdio.stdout,
