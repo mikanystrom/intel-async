@@ -17,12 +17,9 @@
 (define inputs (sv-filter (lambda (p) (eq? 'input (car p))) port-sigs))
 (define outputs (sv-filter (lambda (p) (eq? 'output (car p))) port-sigs))
 
-(define gate-sv
-  (emit-gate-module (symbol->string (module-name mod))
-                    inputs outputs assigns))
-
 (let ((port (open-output-file "/tmp/6502_ALU_gates.sv")))
-  (display gate-sv port)
+  (emit-gate-module-to-port (symbol->string (module-name mod))
+                            inputs outputs assigns port)
   (close-output-port port))
 
 (displayln "")
