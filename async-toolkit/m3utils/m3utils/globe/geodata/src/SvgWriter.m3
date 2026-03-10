@@ -3,7 +3,7 @@
 
 MODULE SvgWriter;
 
-IMPORT Projection, GeoCoord, GeoFeature, Wr, Fmt, Text, Thread, FileWr, OSError;
+IMPORT Projection, GeoCoord, GeoFeature, Wr, Fmt, Text, Thread, FileWr, OSError, Math;
 
 <*FATAL Thread.Alerted, Wr.Failure*>
 
@@ -59,7 +59,9 @@ PROCEDURE ExtendBBox(VAR bb : BBox; x, y : LONGREAL) =
 
 PROCEDURE ProjectCoordArray(coords : GeoFeature.CoordArray;
                             proj : Projection.T;
-                            VAR bb : BBox) : ProjPointArray =
+                            VAR bb : BBox;
+                            isRing : BOOLEAN := FALSE;
+                            discRadius : LONGREAL := 0.0d0) : ProjPointArray =
   VAR
     n : INTEGER;
     result : ProjPointArray;
@@ -75,14 +77,32 @@ PROCEDURE ProjectCoordArray(coords : GeoFeature.CoordArray;
     (* First pass: project all points *)
     FOR i := 0 TO n - 1 DO
       result[i].penLift := FALSE;
-      IF proj.forward(coords[i], xy) THEN
-        (* Negate Y: geographic Y up, SVG Y down *)
-        result[i].x := xy.x;
-        result[i].y := -xy.y;
-        result[i].valid := TRUE;
+      result[i].valid := proj.forward(coords[i], xy);
+      (* Always store projected coords.  Projections like Orthographic
+         and Mercator compute meaningful xy even for invalid points
+         (back-hemisphere or clamped polar coordinates). *)
+      result[i].x := xy.x;
+      result[i].y := -xy.y;
+      IF result[i].valid THEN
         ExtendBBox(bb, result[i].x, result[i].y);
-      ELSE
-        result[i].valid := FALSE;
+      END;
+    END;
+
+    (* Recovery pass (non-disc polygon rings only): make invalid points
+       valid if their projected coordinates are meaningful.  This keeps
+       rings intact for correct SVG fill.  For example, Mercator clamps
+       extreme latitudes and computes xy even when returning FALSE —
+       these clamped points extend off-screen below the viewport.
+       Recovered points are NOT included in the bounding box.
+       Skip for disc mode — Orthographic back-hemisphere points have
+       "folded" xy that would create artifacts; disc boundary arcs
+       handle those gaps correctly. *)
+    IF isRing AND discRadius <= 0.0d0 THEN
+      FOR i := 0 TO n - 1 DO
+        IF NOT result[i].valid AND
+           ABS(result[i].x) < 50.0d0 AND ABS(result[i].y) < 50.0d0 THEN
+          result[i].valid := TRUE;
+        END;
       END;
     END;
 
@@ -95,9 +115,11 @@ PROCEDURE ProjectCoordArray(coords : GeoFeature.CoordArray;
     FOR i := 0 TO n - 1 DO
       IF result[i].valid THEN
         IF prevValid >= 0 THEN
-          (* Check 1: antimeridian crossing (|delta-lon| > pi) *)
+          (* Check 1: antimeridian crossing (|delta-lon| > pi).
+             Skip for polygon rings — the fill handles cross-map
+             segments correctly, and pen lifts would break the ring. *)
           dlon := coords[i].lon - coords[prevValid].lon;
-          IF dlon > Pi OR dlon < -Pi THEN
+          IF NOT isRing AND (dlon > Pi OR dlon < -Pi) THEN
             result[i].penLift := TRUE;
           ELSE
             (* Check 2: multi-sample visibility -- test several points
@@ -123,9 +145,295 @@ PROCEDURE ProjectCoordArray(coords : GeoFeature.CoordArray;
     RETURN result
   END ProjectCoordArray;
 
+(* ---- Antimeridian splitting for polygon rings ---- *)
+(*
+   After projection, polygon rings that cross the antimeridian have
+   consecutive valid points with |dx| > π.  Without splitting, SVG
+   draws a line across the entire map.
+
+   The algorithm detects these crossings in projected x-space and
+   splits each ring into sub-rings, one per side of the antimeridian.
+   Each sub-ring is closed: it includes interpolated crossing points
+   at x = ±π (the map edge), so the Z closure runs along the edge
+   and is invisible.
+
+   Special case: a globe-spanning ring (e.g., Antarctica encircling
+   the south pole) crosses the antimeridian exactly once.  It cannot
+   be split into two sides.  Instead the ring is rearranged so the
+   crossing is at the start/end, and bottom-edge closure points are
+   added so the Z closure runs along the map edge off-screen.
+*)
+
+CONST
+  MaxCrossings = 50;
+  BottomEdgeY = -100.0d0;  (* far off-screen in projected coords *)
+  TopEdgeY    =  100.0d0;
+
+PROCEDURE SplitOneRing(ring : ProjPointArray) : ProjRingArray =
+  VAR
+    n : INTEGER;
+    prevValidI, firstValidI : INTEGER;
+    crossCount : INTEGER;
+    cI1 : ARRAY [0..MaxCrossings-1] OF INTEGER;
+    cI2 : ARRAY [0..MaxCrossings-1] OF INTEGER;
+    cY  : ARRAY [0..MaxCrossings-1] OF LONGREAL;
+    cFromRight : ARRAY [0..MaxCrossings-1] OF BOOLEAN;
+  BEGIN
+    IF ring = NIL OR NUMBER(ring^) < 3 THEN
+      VAR r := NEW(ProjRingArray, 1); BEGIN
+        r[0] := ring; RETURN r
+      END;
+    END;
+    n := NUMBER(ring^);
+    crossCount := 0;
+
+    (* Find antimeridian crossings between consecutive valid points *)
+    prevValidI := -1;
+    firstValidI := -1;
+    FOR i := 0 TO n - 1 DO
+      IF ring[i].valid THEN
+        IF firstValidI < 0 THEN firstValidI := i END;
+        IF prevValidI >= 0 AND
+           ABS(ring[i].x - ring[prevValidI].x) > Pi THEN
+          IF crossCount < MaxCrossings THEN
+            cI1[crossCount] := prevValidI;
+            cI2[crossCount] := i;
+            cFromRight[crossCount] := ring[prevValidI].x > 0.0d0;
+            VAR x1 := ring[prevValidI].x;
+                y1 := ring[prevValidI].y;
+                x2 := ring[i].x;
+                y2 := ring[i].y;
+                t : LONGREAL;
+            BEGIN
+              IF x1 > 0.0d0 THEN
+                t := (Pi - x1) / ((x2 + 2.0d0 * Pi) - x1);
+              ELSE
+                t := (-Pi - x1) / ((x2 - 2.0d0 * Pi) - x1);
+              END;
+              IF t < 0.0d0 THEN t := 0.0d0
+              ELSIF t > 1.0d0 THEN t := 1.0d0 END;
+              cY[crossCount] := y1 + t * (y2 - y1);
+            END;
+            INC(crossCount);
+          END;
+        END;
+        prevValidI := i;
+      END;
+    END;
+
+    (* Check wrap-around: last valid point → first valid point *)
+    IF firstValidI >= 0 AND prevValidI >= 0 AND
+       firstValidI # prevValidI AND
+       ABS(ring[firstValidI].x - ring[prevValidI].x) > Pi THEN
+      IF crossCount < MaxCrossings THEN
+        cI1[crossCount] := prevValidI;
+        cI2[crossCount] := firstValidI;
+        cFromRight[crossCount] := ring[prevValidI].x > 0.0d0;
+        VAR x1 := ring[prevValidI].x;
+            y1 := ring[prevValidI].y;
+            x2 := ring[firstValidI].x;
+            y2 := ring[firstValidI].y;
+            t : LONGREAL;
+        BEGIN
+          IF x1 > 0.0d0 THEN
+            t := (Pi - x1) / ((x2 + 2.0d0 * Pi) - x1);
+          ELSE
+            t := (-Pi - x1) / ((x2 - 2.0d0 * Pi) - x1);
+          END;
+          IF t < 0.0d0 THEN t := 0.0d0
+          ELSIF t > 1.0d0 THEN t := 1.0d0 END;
+          cY[crossCount] := y1 + t * (y2 - y1);
+        END;
+        INC(crossCount);
+      END;
+    END;
+
+    IF crossCount = 0 THEN
+      VAR r := NEW(ProjRingArray, 1); BEGIN
+        r[0] := ring; RETURN r
+      END;
+    END;
+
+    IF crossCount = 1 THEN
+      RETURN RearrangeGlobeSpanning(ring, n,
+                                    cI1[0], cI2[0], cY[0],
+                                    cFromRight[0]);
+    END;
+
+    IF crossCount MOD 2 # 0 THEN
+      (* Odd > 1: rare, return original as fallback *)
+      VAR r := NEW(ProjRingArray, 1); BEGIN
+        r[0] := ring; RETURN r
+      END;
+    END;
+
+    (* Even crossings: split into sub-rings between crossing pairs *)
+    RETURN SplitAtCrossings(ring, n, crossCount,
+                            cI1, cI2, cY, cFromRight);
+  END SplitOneRing;
+
+PROCEDURE RearrangeGlobeSpanning(ring : ProjPointArray;
+                                  n : INTEGER;
+                                  i1, i2 : INTEGER;
+                                  cy : LONGREAL;
+                                  fromRight : BOOLEAN) : ProjRingArray =
+  (* Globe-spanning ring with 1 antimeridian crossing.
+     Rearrange so the crossing is at the start/end, and add
+     bottom-edge closure points so the Z closure is off-screen.
+
+     The rearranged ring:
+       crossPt_start, ring[i2]..ring[i1], crossPt_end,
+       edge_corner_end, edge_corner_start
+     Z closure connects edge_corner_start back to crossPt_start,
+     a vertical line at the map edge — invisible. *)
+  VAR
+    numOrig, numPts : INTEGER;
+    newRing : ProjPointArray;
+    idx : INTEGER;
+    startX, endX, edgeY : LONGREAL;
+  BEGIN
+    (* Count original points from i2 to i1 (wrapping around) *)
+    IF i2 <= i1 THEN
+      numOrig := i1 - i2 + 1;
+    ELSE
+      numOrig := (n - i2) + i1 + 1;
+    END;
+    numPts := numOrig + 4;  (* + 2 crossing pts + 2 edge corners *)
+    newRing := NEW(ProjPointArray, numPts);
+    idx := 0;
+
+    (* Determine sides: if crossing from right→left, segment after
+       is on the left side, so start at x=-π *)
+    IF fromRight THEN
+      startX := -Pi;  endX := Pi;
+    ELSE
+      startX := Pi;   endX := -Pi;
+    END;
+
+    (* Edge Y: go south for south-hemisphere crossings, north otherwise *)
+    IF cy < 0.0d0 THEN edgeY := BottomEdgeY
+    ELSE edgeY := TopEdgeY END;
+
+    (* Crossing start point *)
+    newRing[idx] := ProjPoint{startX, cy, TRUE, FALSE};
+    INC(idx);
+
+    (* Original points from i2 to i1 *)
+    VAR i := i2; BEGIN
+      LOOP
+        newRing[idx] := ring[i];
+        INC(idx);
+        IF i = i1 THEN EXIT END;
+        i := (i + 1) MOD n;
+      END;
+    END;
+
+    (* Crossing end point *)
+    newRing[idx] := ProjPoint{endX, cy, TRUE, FALSE};
+    INC(idx);
+
+    (* Bottom/top edge corners for off-screen Z closure *)
+    newRing[idx] := ProjPoint{endX, edgeY, TRUE, FALSE};
+    INC(idx);
+    newRing[idx] := ProjPoint{startX, edgeY, TRUE, FALSE};
+    INC(idx);
+
+    VAR r := NEW(ProjRingArray, 1); BEGIN
+      r[0] := newRing;
+      RETURN r
+    END;
+  END RearrangeGlobeSpanning;
+
+PROCEDURE SplitAtCrossings(ring : ProjPointArray;
+                            n, crossCount : INTEGER;
+                            READONLY cI1 : ARRAY OF INTEGER;
+                            READONLY cI2 : ARRAY OF INTEGER;
+                            READONLY cY  : ARRAY OF LONGREAL;
+                            READONLY cFromRight : ARRAY OF BOOLEAN)
+    : ProjRingArray =
+  VAR
+    result : ProjRingArray;
+  BEGIN
+    result := NEW(ProjRingArray, crossCount);
+    FOR seg := 0 TO crossCount - 1 DO
+      VAR nextSeg := (seg + 1) MOD crossCount;
+          startI := cI2[seg];
+          endI := cI1[nextSeg];
+          edgeX : LONGREAL;
+          numOrig, numPts : INTEGER;
+          subRing : ProjPointArray;
+          idx : INTEGER;
+      BEGIN
+        (* Determine side: crossing seg goes from right→left means
+           segment after is on the LEFT, so edge is at -π *)
+        IF cFromRight[seg] THEN edgeX := -Pi ELSE edgeX := Pi END;
+
+        (* Count original points from startI to endI (wrapping) *)
+        IF startI <= endI THEN
+          numOrig := endI - startI + 1;
+        ELSE
+          numOrig := (n - startI) + endI + 1;
+        END;
+        numPts := numOrig + 2;  (* + 2 crossing points *)
+        subRing := NEW(ProjPointArray, numPts);
+        idx := 0;
+
+        (* Crossing start point *)
+        subRing[idx] := ProjPoint{edgeX, cY[seg], TRUE, FALSE};
+        INC(idx);
+
+        (* Original points *)
+        VAR i := startI; BEGIN
+          LOOP
+            subRing[idx] := ring[i];
+            INC(idx);
+            IF i = endI THEN EXIT END;
+            i := (i + 1) MOD n;
+          END;
+        END;
+
+        (* Crossing end point *)
+        subRing[idx] := ProjPoint{edgeX, cY[nextSeg], TRUE, FALSE};
+
+        result[seg] := subRing;
+      END;
+    END;
+    RETURN result
+  END SplitAtCrossings;
+
+PROCEDURE SplitRingsAtAntimeridian(rings : ProjRingArray) : ProjRingArray =
+  VAR
+    n, totalOut : INTEGER;
+    perRing : REF ARRAY OF ProjRingArray;
+  BEGIN
+    IF rings = NIL THEN RETURN NIL END;
+    n := NUMBER(rings^);
+    perRing := NEW(REF ARRAY OF ProjRingArray, n);
+    totalOut := 0;
+    FOR i := 0 TO n - 1 DO
+      perRing[i] := SplitOneRing(rings[i]);
+      INC(totalOut, NUMBER(perRing[i]^));
+    END;
+    (* Cannot short-circuit when totalOut = n because a globe-spanning
+       ring (1 crossing) returns 1 rearranged ring — same count but
+       different content.  Always build the result array. *)
+    VAR result := NEW(ProjRingArray, totalOut);
+        idx := 0;
+    BEGIN
+      FOR i := 0 TO n - 1 DO
+        FOR j := 0 TO LAST(perRing[i]^) DO
+          result[idx] := perRing[i][j];
+          INC(idx);
+        END;
+      END;
+      RETURN result
+    END;
+  END SplitRingsAtAntimeridian;
+
 PROCEDURE ProjectRings(rings : REF ARRAY OF GeoFeature.CoordArray;
                        proj : Projection.T;
-                       VAR bb : BBox) : ProjRingArray =
+                       VAR bb : BBox;
+                       discRadius : LONGREAL := 0.0d0) : ProjRingArray =
   VAR
     n : INTEGER;
     result : ProjRingArray;
@@ -134,14 +442,22 @@ PROCEDURE ProjectRings(rings : REF ARRAY OF GeoFeature.CoordArray;
     n := NUMBER(rings^);
     result := NEW(ProjRingArray, n);
     FOR i := 0 TO n - 1 DO
-      result[i] := ProjectCoordArray(rings[i], proj, bb);
+      result[i] := ProjectCoordArray(rings[i], proj, bb,
+                                     isRing := TRUE,
+                                     discRadius := discRadius);
+    END;
+    (* For non-disc projections, split rings at the antimeridian.
+       Disc projections (orthographic) handle clipping via boundary arcs. *)
+    IF discRadius <= 0.0d0 THEN
+      result := SplitRingsAtAntimeridian(result);
     END;
     RETURN result
   END ProjectRings;
 
 PROCEDURE ProjectAll(READONLY fc : GeoFeature.FeatureCollection;
                      proj : Projection.T;
-                     VAR bb : BBox) : ProjFeatureArray =
+                     VAR bb : BBox;
+                     discRadius : LONGREAL := 0.0d0) : ProjFeatureArray =
   VAR
     n : INTEGER;
     result : ProjFeatureArray;
@@ -166,7 +482,8 @@ PROCEDURE ProjectAll(READONLY fc : GeoFeature.FeatureCollection;
         GeoFeature.GeometryKind.MultiPolygon =>
         result[i].geom.coords := NIL;
         result[i].geom.rings := ProjectRings(
-            fc.features[i].geometry.rings, proj, bb);
+            fc.features[i].geometry.rings, proj, bb,
+            discRadius := discRadius);
       END;
     END;
     RETURN result
@@ -326,36 +643,114 @@ PROCEDURE EmitLineStringPath(wr : Wr.T;
     END;
   END EmitLineStringPath;
 
+PROCEDURE EmitBoundaryArc(wr : Wr.T;
+                          x1, y1, x2, y2 : LONGREAL;
+                          r : LONGREAL;
+                          READONLY t : Transform) =
+  (* Bridge a visibility gap in a polygon ring by following the disc
+     boundary via the SHORTER arc.  Projects the exit point (x1,y1) and
+     re-entry point (x2,y2) onto the boundary circle of radius r. *)
+  VAR
+    len1, len2 : LONGREAL;
+    bx1, by1, bx2, by2 : LONGREAL;
+    theta1, theta2, dtheta, theta : LONGREAL;
+    nSteps : INTEGER;
+  BEGIN
+    len1 := Math.sqrt(x1 * x1 + y1 * y1);
+    IF len1 > 1.0d-10 THEN
+      bx1 := x1 * r / len1; by1 := y1 * r / len1;
+    ELSE
+      bx1 := r; by1 := 0.0d0;
+    END;
+    len2 := Math.sqrt(x2 * x2 + y2 * y2);
+    IF len2 > 1.0d-10 THEN
+      bx2 := x2 * r / len2; by2 := y2 * r / len2;
+    ELSE
+      bx2 := r; by2 := 0.0d0;
+    END;
+    (* Line to boundary *)
+    Wr.PutText(wr, " L" & F(TX(bx1, t)) & "," & F(TY(by1, t)));
+    (* Always take the shorter arc *)
+    theta1 := Math.atan2(by1, bx1);
+    theta2 := Math.atan2(by2, bx2);
+    dtheta := theta2 - theta1;
+    IF dtheta > Pi THEN dtheta := dtheta - 2.0d0 * Pi
+    ELSIF dtheta < -Pi THEN dtheta := dtheta + 2.0d0 * Pi
+    END;
+    nSteps := TRUNC(ABS(dtheta) * 36.0d0 / Pi) + 1;
+    FOR k := 1 TO nSteps DO
+      theta := theta1 + dtheta * FLOAT(k, LONGREAL) / FLOAT(nSteps, LONGREAL);
+      Wr.PutText(wr, " L" & F(TX(r * Math.cos(theta), t)) &
+                      "," & F(TY(r * Math.sin(theta), t)));
+    END;
+    (* Line from boundary to re-entry point *)
+    Wr.PutText(wr, " L" & F(TX(x2, t)) & "," & F(TY(y2, t)));
+  END EmitBoundaryArc;
+
 PROCEDURE EmitPolygonRingPath(wr : Wr.T;
                               coords : ProjPointArray;
-                              READONLY t : Transform) =
+                              READONLY t : Transform;
+                              discRadius : LONGREAL) =
   (* Emits M/L for a polygon ring, skipping invalid points.
-     Lifts pen when penLift is set (midpoint visibility or antimeridian).
-     Only emits Z (close path) if the ring was NOT split by pen lifts;
-     a split ring cannot be closed without creating spurious diagonals. *)
+     In disc mode (discRadius > 0): bridges visibility gaps by following
+     the disc boundary (shorter arc), keeping the path as a single closed
+     subpath so SVG fill works correctly.  Also bridges the wrap-around
+     gap between last visible point and first M point before Z closure.
+     In standard mode: bridges gaps with straight L lines (no pen lifts)
+     so the ring stays as a single closed subpath for correct SVG fill.
+     The bridge lines typically extend off-screen (e.g., near poles in
+     Mercator) and are clipped by the SVG viewport. *)
   VAR needMove := TRUE;
       hasPoints := FALSE;
-      wasSplit := FALSE;
+      hasGap := FALSE;
+      firstX, firstY : LONGREAL;
+      lastX, lastY : LONGREAL;
   BEGIN
     IF coords = NIL THEN RETURN END;
     FOR i := 0 TO LAST(coords^) DO
       IF coords[i].valid THEN
         IF needMove OR coords[i].penLift THEN
-          IF hasPoints THEN wasSplit := TRUE END;
-          Wr.PutText(wr, "M" & F(TX(coords[i].x, t)) &
-                         "," & F(TY(coords[i].y, t)));
+          IF NOT hasPoints THEN
+            (* First visible point *)
+            Wr.PutText(wr, "M" & F(TX(coords[i].x, t)) &
+                           "," & F(TY(coords[i].y, t)));
+            hasPoints := TRUE;
+            firstX := coords[i].x;
+            firstY := coords[i].y;
+            IF i > 0 THEN hasGap := TRUE END;
+          ELSIF discRadius > 0.0d0 THEN
+            (* Disc mode: bridge gap with shorter boundary arc *)
+            EmitBoundaryArc(wr, lastX, lastY,
+                           coords[i].x, coords[i].y,
+                           discRadius, t);
+          ELSE
+            (* Standard mode: bridge gap with straight line.
+               Keeps the ring as a single closed subpath so SVG
+               fill works correctly.  The bridge line extends
+               off-screen for polar gaps and is viewport-clipped. *)
+            Wr.PutText(wr, " L" & F(TX(coords[i].x, t)) &
+                            "," & F(TY(coords[i].y, t)));
+          END;
           needMove := FALSE;
-          hasPoints := TRUE;
         ELSE
           Wr.PutText(wr, " L" & F(TX(coords[i].x, t)) &
                           "," & F(TY(coords[i].y, t)));
         END;
+        lastX := coords[i].x;
+        lastY := coords[i].y;
       ELSE
-        IF hasPoints THEN wasSplit := TRUE END;
         needMove := TRUE;
+        hasGap := TRUE;
       END;
     END;
-    IF hasPoints AND NOT wasSplit THEN Wr.PutText(wr, " Z") END;
+    IF hasPoints THEN
+      IF discRadius > 0.0d0 AND hasGap THEN
+        (* Bridge the wrap-around gap (last visible → first M point) *)
+        EmitBoundaryArc(wr, lastX, lastY, firstX, firstY,
+                       discRadius, t);
+      END;
+      Wr.PutText(wr, " Z");
+    END;
   END EmitPolygonRingPath;
 
 PROCEDURE EmitLineString(wr : Wr.T;
@@ -375,7 +770,8 @@ PROCEDURE EmitLineString(wr : Wr.T;
 PROCEDURE EmitPolygon(wr : Wr.T;
                       rings : ProjRingArray;
                       READONLY t : Transform;
-                      name, cssClass : TEXT) =
+                      name, cssClass : TEXT;
+                      discRadius : LONGREAL) =
   BEGIN
     IF rings = NIL THEN RETURN END;
     Wr.PutText(wr, "<path class=\"" & FeatureClass(cssClass) & "\" fill-rule=\"evenodd\"");
@@ -384,7 +780,7 @@ PROCEDURE EmitPolygon(wr : Wr.T;
     END;
     Wr.PutText(wr, " d=\"");
     FOR i := 0 TO LAST(rings^) DO
-      EmitPolygonRingPath(wr, rings[i], t);
+      EmitPolygonRingPath(wr, rings[i], t, discRadius);
     END;
     Wr.PutText(wr, "\"/>\n");
   END EmitPolygon;
@@ -409,7 +805,8 @@ PROCEDURE EmitMultiLineString(wr : Wr.T;
 PROCEDURE EmitMultiPolygon(wr : Wr.T;
                            rings : ProjRingArray;
                            READONLY t : Transform;
-                           name, cssClass : TEXT) =
+                           name, cssClass : TEXT;
+                           discRadius : LONGREAL) =
   BEGIN
     IF rings = NIL THEN RETURN END;
     Wr.PutText(wr, "<path class=\"" & FeatureClass(cssClass) & "\" fill-rule=\"evenodd\"");
@@ -418,7 +815,7 @@ PROCEDURE EmitMultiPolygon(wr : Wr.T;
     END;
     Wr.PutText(wr, " d=\"");
     FOR i := 0 TO LAST(rings^) DO
-      EmitPolygonRingPath(wr, rings[i], t);
+      EmitPolygonRingPath(wr, rings[i], t, discRadius);
     END;
     Wr.PutText(wr, "\"/>\n");
   END EmitMultiPolygon;
@@ -479,14 +876,17 @@ PROCEDURE MarkWrapAroundAll(features : ProjFeatureArray;
         (* no paths to check *)
       | GeoFeature.GeometryKind.LineString =>
         MarkWrapAround(features[i].geom.coords, maxDist2);
-      | GeoFeature.GeometryKind.Polygon,
-        GeoFeature.GeometryKind.MultiLineString,
-        GeoFeature.GeometryKind.MultiPolygon =>
+      | GeoFeature.GeometryKind.MultiLineString =>
         IF features[i].geom.rings # NIL THEN
           FOR j := 0 TO LAST(features[i].geom.rings^) DO
             MarkWrapAround(features[i].geom.rings[j], maxDist2);
           END;
         END;
+      | GeoFeature.GeometryKind.Polygon,
+        GeoFeature.GeometryKind.MultiPolygon =>
+        (* Skip wrap-around marking for polygon rings — cross-map
+           segments are needed for correct fill.  The disc boundary
+           arc handles clipping for bounded projections. *)
       END;
     END;
   END MarkWrapAroundAll;
@@ -503,7 +903,13 @@ PROCEDURE WriteWr(wr : Wr.T;
   BEGIN
     (* Pass 1: project all coordinates, compute bounding box,
        and mark segments that cross invisible territory *)
-    features := ProjectAll(fc, proj, bb);
+    features := ProjectAll(fc, proj, bb, cfg.discRadius);
+
+    (* Extend bbox to include disc boundary for bounded projections *)
+    IF cfg.discRadius > 0.0d0 THEN
+      ExtendBBox(bb, -cfg.discRadius, -cfg.discRadius);
+      ExtendBBox(bb, cfg.discRadius, cfg.discRadius);
+    END;
 
     (* Pass 1b: mark segments that wrap around the projection boundary.
        Uses the bounding box (now known) to set a distance threshold at
@@ -525,25 +931,51 @@ PROCEDURE WriteWr(wr : Wr.T;
                     " width=\"" & Fmt.Int(cfg.width) &
                     "\" height=\"" & Fmt.Int(cfg.height) &
                     "\" viewBox=\"0 0 " & Fmt.Int(cfg.width) &
-                    " " & Fmt.Int(cfg.height) & "\">\n");
+                    " " & Fmt.Int(cfg.height) & "\"");
+    (* Set background on the SVG element itself so it fills the entire
+       element even when CSS resizes it beyond the viewBox *)
+    IF cfg.discRadius > 0.0d0 THEN
+      Wr.PutText(wr, " style=\"background:#0a0a1a\"");
+    ELSE
+      Wr.PutText(wr, " style=\"background:" & EscapeXML(cfg.background) & "\"");
+    END;
+    Wr.PutText(wr, ">\n");
 
-    (* Background *)
-    Wr.PutText(wr, "<rect width=\"100%\" height=\"100%\" fill=\"" &
-                    EscapeXML(cfg.background) & "\"/>\n");
+    (* Optional globe disc *)
+    IF cfg.discRadius > 0.0d0 THEN
+      VAR cx := F(TX(0.0d0, t));
+          cy := F(TY(0.0d0, t));
+          r  := F(cfg.discRadius * t.scale);
+      BEGIN
+        (* Clip path for the globe disc *)
+        Wr.PutText(wr, "<defs><clipPath id=\"globe-clip\">" &
+                        "<circle cx=\"" & cx & "\" cy=\"" & cy &
+                        "\" r=\"" & r & "\"/>" &
+                        "</clipPath></defs>\n");
+        (* Ocean disc *)
+        Wr.PutText(wr, "<circle cx=\"" & cx & "\" cy=\"" & cy &
+                        "\" r=\"" & r &
+                        "\" fill=\"" & EscapeXML(cfg.background) & "\"/>\n");
+      END;
+    END;
 
     (* Style block *)
     Wr.PutText(wr, "<style>\n");
     Wr.PutText(wr, ".feature { stroke: " & cfg.stroke &
                     "; fill: " & cfg.fill &
                     "; stroke-width: " & F(cfg.strokeWidth) & "; }\n");
-    Wr.PutText(wr, ".secondary { stroke: #888888; }\n");
+    Wr.PutText(wr, ".secondary { stroke: #88aa88; }\n");
     Wr.PutText(wr, ".earth-equator { stroke: #ff4444; fill: none; stroke-width: " &
                     F(cfg.strokeWidth * 1.5d0) & "; }\n");
     Wr.PutText(wr, ".proj-equator { stroke: #4488ff; fill: none; stroke-width: " &
                     F(cfg.strokeWidth * 1.5d0) & "; }\n");
     Wr.PutText(wr, "</style>\n");
 
-    (* Features *)
+    (* Features — clipped to globe disc when applicable *)
+    IF cfg.discRadius > 0.0d0 THEN
+      Wr.PutText(wr, "<g clip-path=\"url(#globe-clip)\">\n");
+    END;
+
     IF features # NIL THEN
       FOR i := 0 TO LAST(features^) DO
         CASE features[i].geom.kind OF
@@ -561,15 +993,21 @@ PROCEDURE WriteWr(wr : Wr.T;
                          features[i].name, features[i].cssClass);
         | GeoFeature.GeometryKind.Polygon =>
           EmitPolygon(wr, features[i].geom.rings, t,
-                      features[i].name, features[i].cssClass);
+                      features[i].name, features[i].cssClass,
+                      cfg.discRadius);
         | GeoFeature.GeometryKind.MultiLineString =>
           EmitMultiLineString(wr, features[i].geom.rings, t,
                               features[i].name, features[i].cssClass);
         | GeoFeature.GeometryKind.MultiPolygon =>
           EmitMultiPolygon(wr, features[i].geom.rings, t,
-                           features[i].name, features[i].cssClass);
+                           features[i].name, features[i].cssClass,
+                           cfg.discRadius);
         END;
       END;
+    END;
+
+    IF cfg.discRadius > 0.0d0 THEN
+      Wr.PutText(wr, "</g>\n");
     END;
 
     Wr.PutText(wr, "</svg>\n");
