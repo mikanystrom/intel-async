@@ -1,0 +1,26 @@
+% Copyright (c) 2026 Intel Corporation.  All rights reserved.
+% SPDX-License-Identifier: Apache-2.0
+
+import ("libm3")
+
+Module ("GeoCoord")
+Module ("Ellipsoid")
+
+Interface ("Projection")
+Interface ("ProjectionRep")
+Module    ("ProjectionRep")
+
+Module ("Equirectangular")
+Module ("Mercator")
+Module ("TransverseMercator")
+Module ("Stereographic")
+Module ("LambertConformalConic")
+Module ("AlbersEqualArea")
+Module ("AzimuthalEquidistant")
+Module ("Orthographic")
+Module ("Robinson")
+
+Module ("GreatCircle")
+Module ("Oblique")
+
+library ("globelib")

@@ -1,0 +1,12 @@
+% Copyright (c) 2026 Intel Corporation.  All rights reserved.
+% SPDX-License-Identifier: Apache-2.0
+
+import ("libm3")
+import ("json")
+import ("globelib")
+import ("geodata")
+import ("airports")
+
+implementation ("Main")
+
+program ("globetool")

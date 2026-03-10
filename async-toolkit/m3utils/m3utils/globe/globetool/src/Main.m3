@@ -23,6 +23,9 @@ VAR
   obliqueA    : GeoCoord.LatLon;
   obliqueB    : GeoCoord.LatLon;
   useOblique  : BOOLEAN := FALSE;
+  usePole     : BOOLEAN := FALSE;
+  poleLL      : GeoCoord.LatLon;
+  eqPointLL   : GeoCoord.LatLon;
   overlayEarthEq : BOOLEAN := FALSE;
   overlayProjEq  : BOOLEAN := FALSE;
   format      : TEXT := "geojson";
@@ -39,6 +42,7 @@ PROCEDURE Usage() =
       "  -center <lat> <lon>   Center point in degrees (for azimuthal projections)\n" &
       "  -parallels <lat1> <lat2>  Standard parallels in degrees (for conic)\n" &
       "  -oblique <lat1> <lon1> <lat2> <lon2>  Two points defining custom equator\n" &
+      "  -oblique-pole <poleLat> <poleLon> <eqLat> <eqLon>  Pole + equator point\n" &
       "  -greatcircle <code1> <code2>  Airport codes (ICAO/IATA) for oblique equator\n" &
       "  -overlay-earth-equator       Add Earth's equator (lat=0) as a LineString\n" &
       "  -overlay-proj-equator        Add projection equator as a LineString\n" &
@@ -106,6 +110,17 @@ PROCEDURE ParseArgs() =
           useOblique := TRUE;
           END END END END;
 
+        ELSIF Text.Equal(arg, "-oblique-pole") AND i + 4 < Params.Count THEN
+          INC(i);
+          VAR pLat := ScanLongReal(Params.Get(i)); BEGIN INC(i);
+          VAR pLon := ScanLongReal(Params.Get(i)); BEGIN INC(i);
+          VAR eLat := ScanLongReal(Params.Get(i)); BEGIN INC(i);
+          VAR eLon := ScanLongReal(Params.Get(i)); BEGIN
+          poleLL := GeoCoord.LatLonDeg(pLat, pLon);
+          eqPointLL := GeoCoord.LatLonDeg(eLat, eLon);
+          usePole := TRUE;
+          END END END END;
+
         ELSIF Text.Equal(arg, "-greatcircle") AND i + 2 < Params.Count THEN
           INC(i);
           Wr.PutText(Stdio.stderr, "Resolving great circle airports:\n");
@@ -164,9 +179,9 @@ PROCEDURE MakeProjection() : Projection.T =
     p : Projection.T;
   BEGIN
     IF Text.Equal(projName, "equirectangular") THEN
-      p := Equirectangular.New();
+      p := Equirectangular.New(center.lon);
     ELSIF Text.Equal(projName, "mercator") THEN
-      p := Mercator.New();
+      p := Mercator.New(center.lon);
     ELSIF Text.Equal(projName, "transversemercator") THEN
       p := TransverseMercator.New(centerLon * GeoCoord.DegToRad);
     ELSIF Text.Equal(projName, "stereographic") THEN
@@ -186,14 +201,16 @@ PROCEDURE MakeProjection() : Projection.T =
     ELSIF Text.Equal(projName, "orthographic") THEN
       p := Orthographic.New(center);
     ELSIF Text.Equal(projName, "robinson") THEN
-      p := Robinson.New();
+      p := Robinson.New(center.lon);
     ELSE
       Wr.PutText(Stdio.stderr, "Unknown projection: " & projName & "\n");
       Process.Exit(1);
       p := Equirectangular.New();  (* unreachable *)
     END;
 
-    IF useOblique THEN
+    IF usePole THEN
+      p := Oblique.FromPoleAndEquator(p, poleLL, eqPointLL);
+    ELSIF useOblique THEN
       p := Oblique.FromTwoPoints(p, obliqueA, obliqueB);
     END;
 
@@ -365,6 +382,11 @@ BEGIN
           fc.features := newArr;
         END;
       END;
+    END;
+
+    (* Set disc for bounded projections *)
+    IF Text.Equal(projName, "orthographic") THEN
+      svgConfig.discRadius := 1.0d0;
     END;
 
     Wr.PutText(Stdio.stdout,

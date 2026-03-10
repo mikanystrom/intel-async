@@ -5,6 +5,7 @@
 let currentSvg = null;
 let debounceTimer = null;
 let renderInProgress = false;
+let savedViewBox = null;
 
 /* ── Dataset loading ── */
 
@@ -71,6 +72,10 @@ function collectParams() {
     obliqueLon2: parseFloat(document.getElementById("obliqueLon2").value) || 0,
     airport1:   document.getElementById("airport1").value.trim(),
     airport2:   document.getElementById("airport2").value.trim(),
+    poleLat:    parseFloat(document.getElementById("poleLat").value) || 90,
+    poleLon:    parseFloat(document.getElementById("poleLon").value) || 0,
+    eqLat:      parseFloat(document.getElementById("eqLat").value) || 0,
+    eqLon:      parseFloat(document.getElementById("eqLon").value) || 0,
     width:      parseInt(document.getElementById("width").value) || 1024,
     height:     parseInt(document.getElementById("height").value) || 512,
     stroke:     document.getElementById("stroke").value,
@@ -116,6 +121,12 @@ async function renderMap() {
   const placeholder = document.getElementById("placeholder");
   const renderBtn = document.getElementById("renderBtn");
 
+  // Save zoom state before re-rendering
+  const oldSvg = container.querySelector("svg");
+  if (oldSvg) {
+    savedViewBox = oldSvg.getAttribute("viewBox");
+  }
+
   overlay.style.display = "";
   renderBtn.disabled = true;
   setStatus("Rendering...");
@@ -150,6 +161,22 @@ async function renderMap() {
     // Insert SVG into container
     container.innerHTML = svg;
     document.getElementById("downloadBtn").disabled = false;
+    fitSvgToContainer();
+
+    // Restore zoom state if the base viewBox dimensions match
+    if (savedViewBox) {
+      const newSvg = container.querySelector("svg");
+      if (newSvg) {
+        const newVb = newSvg.getAttribute("viewBox");
+        const op = savedViewBox.split(/[\s,]+/).map(Number);
+        const np = newVb.split(/[\s,]+/).map(Number);
+        if (op.length === 4 && np.length === 4 &&
+            Math.abs(op[2] - np[2]) < 1 && Math.abs(op[3] - np[3]) < 1) {
+          newSvg.setAttribute("viewBox", savedViewBox);
+        }
+      }
+      savedViewBox = null;
+    }
 
     const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
     setStatus("Rendered in " + elapsed + "s");
@@ -162,6 +189,36 @@ async function renderMap() {
     renderBtn.disabled = false;
     renderInProgress = false;
   }
+}
+
+/* ── SVG sizing ── */
+
+function fitSvgToContainer() {
+  const container = document.getElementById("svgContainer");
+  const svgEl = container.querySelector("svg");
+  if (!svgEl) return;
+  const vb = svgEl.getAttribute("viewBox");
+  if (!vb) return;
+  const parts = vb.split(/[\s,]+/).map(Number);
+  if (parts.length !== 4) return;
+  const vbAR = parts[2] / parts[3];
+  const style = getComputedStyle(container);
+  const padH = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+  const padV = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+  const availW = container.clientWidth - padH;
+  const availH = container.clientHeight - padV;
+  if (availW <= 0 || availH <= 0) return;
+  const containerAR = availW / availH;
+  let w, h;
+  if (containerAR > vbAR) {
+    h = availH;
+    w = h * vbAR;
+  } else {
+    w = availW;
+    h = w / vbAR;
+  }
+  svgEl.setAttribute("width", Math.round(w));
+  svgEl.setAttribute("height", Math.round(h));
 }
 
 /* ── SVG zoom/pan interaction ── */
@@ -320,6 +377,7 @@ function setStatus(msg, isError) {
 document.addEventListener("DOMContentLoaded", function() {
   loadDatasets();
   initArrowKeys();
+  window.addEventListener("resize", fitSvgToContainer);
 
   document.getElementById("renderBtn").addEventListener("click", renderMap);
   document.getElementById("downloadBtn").addEventListener("click", downloadSvg);

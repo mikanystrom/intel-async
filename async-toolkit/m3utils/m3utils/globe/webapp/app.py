@@ -92,7 +92,7 @@ def create_app():
 
         # Validate oblique
         oblique_mode = data.get("obliqueMode")
-        if oblique_mode not in (None, "none", "coordinates", "airports"):
+        if oblique_mode not in (None, "none", "coordinates", "airports", "pole"):
             return jsonify({"error": f"Invalid oblique mode: {oblique_mode}"}), 400
         if oblique_mode == "none":
             oblique_mode = None
@@ -111,6 +111,11 @@ def create_app():
                 return jsonify({"error": f"Invalid airport code: {airport1}"}), 400
             if not config.AIRPORT_CODE_PATTERN.match(airport2):
                 return jsonify({"error": f"Invalid airport code: {airport2}"}), 400
+
+        pole_lat = _clamp_float(data.get("poleLat"), -90.0, 90.0)
+        pole_lon = _clamp_float(data.get("poleLon"), -180.0, 180.0)
+        eq_lat = _clamp_float(data.get("eqLat"), -90.0, 90.0)
+        eq_lon = _clamp_float(data.get("eqLon"), -180.0, 180.0)
 
         # Overlay options
         overlay_earth_eq = bool(data.get("overlayEarthEquator", False))
@@ -135,6 +140,10 @@ def create_app():
                 oblique_lon2=oblique_lon2,
                 airport1=airport1,
                 airport2=airport2,
+                pole_lat=pole_lat,
+                pole_lon=pole_lon,
+                eq_lat=eq_lat,
+                eq_lon=eq_lon,
                 width=width,
                 height=height,
                 stroke=stroke,

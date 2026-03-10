@@ -33,6 +33,8 @@ function updateObliqueControls() {
     mode === "coordinates" ? "" : "none";
   document.getElementById("oblique-airports-group").style.display =
     mode === "airports" ? "" : "none";
+  document.getElementById("oblique-pole-group").style.display =
+    mode === "pole" ? "" : "none";
 }
 
 function initControls() {

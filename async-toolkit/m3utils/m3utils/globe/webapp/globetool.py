@@ -113,6 +113,8 @@ def render_svg(input_path, projection, center_lat=None, center_lon=None,
                oblique_lat1=None, oblique_lon1=None,
                oblique_lat2=None, oblique_lon2=None,
                airport1=None, airport2=None,
+               pole_lat=None, pole_lon=None,
+               eq_lat=None, eq_lon=None,
                width=1024, height=512, stroke="#333333", fill="none",
                background="#ffffff", stroke_width=0.5, point_radius=2.0,
                overlay_earth_eq=False, overlay_proj_eq=False):
@@ -156,6 +158,11 @@ def render_svg(input_path, projection, center_lat=None, center_lon=None,
         elif oblique_mode == "airports":
             if airport1 and airport2:
                 cmd.extend(["-greatcircle", airport1, airport2])
+        elif oblique_mode == "pole":
+            if all(v is not None for v in [pole_lat, pole_lon, eq_lat, eq_lon]):
+                cmd.extend(["-oblique-pole",
+                            str(float(pole_lat)), str(float(pole_lon)),
+                            str(float(eq_lat)), str(float(eq_lon))])
 
         if overlay_earth_eq:
             cmd.append("-overlay-earth-equator")

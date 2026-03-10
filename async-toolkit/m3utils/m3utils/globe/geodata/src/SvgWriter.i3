@@ -15,6 +15,11 @@ TYPE
     fill        : TEXT     := "none";
     background  : TEXT     := "#ffffff";
     pointRadius : LONGREAL := 2.0d0;
+    discRadius  : LONGREAL := 0.0d0;
+    (* When discRadius > 0, the projection is bounded to a disc of that
+       radius in projected coordinates.  A filled circle is drawn as the
+       ocean/globe, features are clipped to it, and the area outside the
+       disc is rendered as dark space. *)
   END;
 
 PROCEDURE WriteFile(path : TEXT;

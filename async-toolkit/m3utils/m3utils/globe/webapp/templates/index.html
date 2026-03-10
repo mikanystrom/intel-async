@@ -60,6 +60,7 @@
           <option value="none">None</option>
           <option value="coordinates">By Coordinates</option>
           <option value="airports">By Airport Codes</option>
+          <option value="pole">By Pole + Equator Point</option>
         </select>
       </div>
 
@@ -101,6 +102,31 @@
         </div>
       </div>
 
+      <div class="control-group" id="oblique-pole-group" style="display:none">
+        <label>Pole (degrees)</label>
+        <div class="input-row">
+          <div class="input-field">
+            <label for="poleLat">Lat</label>
+            <input type="number" id="poleLat" value="90" min="-90" max="90" step="1">
+          </div>
+          <div class="input-field">
+            <label for="poleLon">Lon</label>
+            <input type="number" id="poleLon" value="0" min="-180" max="180" step="1">
+          </div>
+        </div>
+        <label>Equator Point (degrees)</label>
+        <div class="input-row">
+          <div class="input-field">
+            <label for="eqLat">Lat</label>
+            <input type="number" id="eqLat" value="0" min="-90" max="90" step="1">
+          </div>
+          <div class="input-field">
+            <label for="eqLon">Lon</label>
+            <input type="number" id="eqLon" value="0" min="-180" max="180" step="1">
+          </div>
+        </div>
+      </div>
+
       <div class="control-group">
         <label class="group-label">Overlays</label>
         <label><input type="checkbox" id="overlayEarthEquator"> Earth's equator</label>
@@ -135,14 +161,14 @@
           <div class="input-row">
             <div class="input-field">
               <label for="stroke">Stroke</label>
-              <input type="color" id="stroke" value="#333333">
+              <input type="color" id="stroke" value="#77aa77">
             </div>
             <div class="input-field">
               <label for="fill">Fill</label>
               <div class="color-with-none">
-                <input type="color" id="fill" value="#cccccc" disabled>
+                <input type="color" id="fill" value="#2d7744">
                 <label class="none-toggle">
-                  <input type="checkbox" id="fillNone" checked> none
+                  <input type="checkbox" id="fillNone"> none
                 </label>
               </div>
             </div>
@@ -150,7 +176,7 @@
           <div class="input-row">
             <div class="input-field">
               <label for="background">Background</label>
-              <input type="color" id="background" value="#ffffff">
+              <input type="color" id="background" value="#336699">
             </div>
           </div>
           <div class="input-field">
