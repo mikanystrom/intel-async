@@ -6,15 +6,15 @@
  */
 
 const PROJECTION_META = {
-  equirectangular:      { needsCenter: false, needsParallels: false },
-  mercator:             { needsCenter: false, needsParallels: false },
-  transversemercator:   { needsCenter: true,  needsParallels: false },
-  stereographic:        { needsCenter: true,  needsParallels: false },
-  orthographic:         { needsCenter: true,  needsParallels: false },
-  azimuthalequidistant: { needsCenter: true,  needsParallels: false },
-  lambertconformalconic:{ needsCenter: true,  needsParallels: true  },
-  albersequalarea:      { needsCenter: true,  needsParallels: true  },
-  robinson:             { needsCenter: false, needsParallels: false },
+  equirectangular:      { needsCenter: false, needsParallels: false, isMercator: false },
+  mercator:             { needsCenter: false, needsParallels: false, isMercator: true  },
+  transversemercator:   { needsCenter: true,  needsParallels: false, isMercator: false },
+  stereographic:        { needsCenter: true,  needsParallels: false, isMercator: false },
+  orthographic:         { needsCenter: true,  needsParallels: false, isMercator: false },
+  azimuthalequidistant: { needsCenter: true,  needsParallels: false, isMercator: false },
+  lambertconformalconic:{ needsCenter: true,  needsParallels: true,  isMercator: false },
+  albersequalarea:      { needsCenter: true,  needsParallels: true,  isMercator: false },
+  robinson:             { needsCenter: false, needsParallels: false, isMercator: false },
 };
 
 function updateProjectionControls() {
@@ -24,6 +24,8 @@ function updateProjectionControls() {
   document.getElementById("center-group").style.display = "";
   document.getElementById("parallels-group").style.display =
     meta.needsParallels ? "" : "none";
+  document.getElementById("mercator-lat-group").style.display =
+    meta.isMercator ? "" : "none";
 }
 
 function updateObliqueControls() {
@@ -35,6 +37,8 @@ function updateObliqueControls() {
     mode === "airports" ? "" : "none";
   document.getElementById("oblique-pole-group").style.display =
     mode === "pole" ? "" : "none";
+  document.getElementById("oblique-pole-airports-group").style.display =
+    mode === "pole_airports" ? "" : "none";
 }
 
 function initControls() {

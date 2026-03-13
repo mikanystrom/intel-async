@@ -40,40 +40,45 @@ PROCEDURE Dot(READONLY a, b : GeoCoord.XYZ) : LONGREAL =
   END Dot;
 
 PROCEDURE ComputeRotation(READONLY a, b : GeoCoord.LatLon) : Rotation =
-  (* The pole is computed as Cross(B, A) so that when the resulting
-     rotation maps the great circle to the equator, point A appears
-     at negative longitude (left) and B at positive longitude (right).
-     This gives the natural map orientation: "from" on the left,
-     "to" on the right. *)
+  (* The pole is Cross(A, B) so that "north" in the rotated system
+     corresponds to the left side of the A→B path (geographic north
+     of the route).  lonOffset centers the A–B arc. *)
   VAR
     va := GeoCoord.LatLonToXYZ(a);
     vb := GeoCoord.LatLonToXYZ(b);
-    pole := Normalize(Cross(vb, va));
+    pole := Normalize(Cross(va, vb));
     poleLl := GeoCoord.XYZToLatLon(pole);
+    rot : Rotation;
+    rotA, rotB : GeoCoord.LatLon;
   BEGIN
-    RETURN Rotation {
-      pole := pole,
-      sinPoleLat := Math.sin(poleLl.lat),
-      cosPoleLat := Math.cos(poleLl.lat),
-      poleLon := poleLl.lon,
-      lonOffset := 0.0d0
-    }
+    rot.pole := pole;
+    rot.sinPoleLat := Math.sin(poleLl.lat);
+    rot.cosPoleLat := Math.cos(poleLl.lat);
+    rot.poleLon := poleLl.lon;
+    rot.lonOffset := 0.0d0;
+    (* Center the route: lonOffset = midpoint so A is left, B is right.
+       Use atan2 to compute the circular mean, which handles wraparound
+       at ±π correctly (e.g. when the two rotated longitudes straddle
+       the antimeridian). *)
+    rotA := RotateForward(rot, a);
+    rotB := RotateForward(rot, b);
+    rot.lonOffset := Math.atan2(Math.sin(rotA.lon) + Math.sin(rotB.lon),
+                                Math.cos(rotA.lon) + Math.cos(rotB.lon));
+    RETURN rot
   END ComputeRotation;
 
 (* Rotate coordinates so the great circle becomes the equator.
    This is equivalent to rotating the sphere so that the computed pole
    moves to the geographic north pole.
 
-   The rotation is:
-   1. Shift longitude so pole is at lon=0
-   2. Rotate latitude so pole is at lat=90
+   Derived from the 3D rotation matrix: first R_z(-poleLon) to bring
+   the pole to the prime meridian, then R_y(alpha) to tilt it to the
+   north pole (sin alpha = -cosPoleLat, cos alpha = sinPoleLat).
 
-   In spherical coordinates:
-     lon' = lon - poleLon
-     Then apply the latitude rotation matrix:
-       lat_new = asin(sin(lat) * sin(poleLat) + cos(lat) * cos(poleLat) * cos(lon'))
-       lon_new = atan2(cos(lat) * sin(lon'),
-                       sin(lat) * cos(poleLat) - cos(lat) * sin(poleLat) * cos(lon'))
+   The resulting spherical coordinates are:
+     lat' = asin(sin(lat) sin(poleLat) + cos(lat) cos(poleLat) cos(dlon))
+     lon' = atan2(cos(lat) sin(dlon),
+                  cos(lat) sin(poleLat) cos(dlon) - sin(lat) cos(poleLat))
 *)
 
 PROCEDURE RotateForward(READONLY rot : Rotation;
@@ -89,8 +94,8 @@ PROCEDURE RotateForward(READONLY rot : Rotation;
     result.lat := Math.asin(sinLat * rot.sinPoleLat +
                             cosLat * rot.cosPoleLat * cosDlon);
     result.lon := Math.atan2(cosLat * sinDlon,
-                             sinLat * rot.cosPoleLat -
-                             cosLat * rot.sinPoleLat * cosDlon)
+                             cosLat * rot.sinPoleLat * cosDlon -
+                             sinLat * rot.cosPoleLat)
                   - rot.lonOffset;
     RETURN result
   END RotateForward;
@@ -105,20 +110,22 @@ PROCEDURE RotateInverse(READONLY rot : Rotation;
     sinLon := Math.sin(adjLon);
     result : GeoCoord.LatLon;
   BEGIN
-    result.lat := Math.asin(sinLat * rot.sinPoleLat +
+    result.lat := Math.asin(sinLat * rot.sinPoleLat -
                             cosLat * rot.cosPoleLat * cosLon);
     result.lon := GeoCoord.NormalizeLon(
                     rot.poleLon +
                     Math.atan2(cosLat * sinLon,
-                               sinLat * rot.cosPoleLat -
+                               sinLat * rot.cosPoleLat +
                                cosLat * rot.sinPoleLat * cosLon));
     RETURN result
   END RotateInverse;
 
 PROCEDURE FromPole(READONLY pole, eqPoint : GeoCoord.LatLon) : Rotation =
   (* Build rotation from an explicit pole.  The pole becomes the north
-     pole of the rotated coordinate system.  lonOffset is set so that
-     eqPoint maps to lon=0 on the rotated equator. *)
+     pole of the rotated coordinate system exactly as given.  lonOffset
+     is set so that eqPoint maps to lon=0 on the rotated equator.
+     The equator point need not be exactly 90 deg from the pole —
+     it is used only to orient the rotated longitude. *)
   VAR
     poleXYZ := GeoCoord.LatLonToXYZ(pole);
     rot : Rotation;
@@ -129,7 +136,7 @@ PROCEDURE FromPole(READONLY pole, eqPoint : GeoCoord.LatLon) : Rotation =
     rot.cosPoleLat := Math.cos(pole.lat);
     rot.poleLon := pole.lon;
     rot.lonOffset := 0.0d0;
-    (* Rotate eqPoint and see where it lands; use that as the offset *)
+    (* Rotate eqPoint and use its longitude as the offset *)
     eqRot := RotateForward(rot, eqPoint);
     rot.lonOffset := eqRot.lon;
     RETURN rot

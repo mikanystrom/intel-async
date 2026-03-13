@@ -115,9 +115,12 @@ def render_svg(input_path, projection, center_lat=None, center_lon=None,
                airport1=None, airport2=None,
                pole_lat=None, pole_lon=None,
                eq_lat=None, eq_lon=None,
+               pole_airport1=None, pole_airport2=None,
                width=1024, height=512, stroke="#333333", fill="none",
                background="#ffffff", stroke_width=0.5, point_radius=2.0,
-               overlay_earth_eq=False, overlay_proj_eq=False):
+               overlay_earth_eq=False, overlay_proj_eq=False,
+               use_mesh=True,
+               mercator_min_lat=0, mercator_max_lat=0):
     """Invoke globetool and return the SVG output as a string."""
 
     binary = find_globetool()
@@ -163,11 +166,24 @@ def render_svg(input_path, projection, center_lat=None, center_lon=None,
                 cmd.extend(["-oblique-pole",
                             str(float(pole_lat)), str(float(pole_lon)),
                             str(float(eq_lat)), str(float(eq_lon))])
+        elif oblique_mode == "pole_airports":
+            if pole_airport1 and pole_airport2:
+                cmd.extend(["-pole-airports", pole_airport1, pole_airport2])
 
         if overlay_earth_eq:
             cmd.append("-overlay-earth-equator")
         if overlay_proj_eq:
             cmd.append("-overlay-proj-equator")
+
+        if use_mesh:
+            cmd.append("-mesh")
+        else:
+            cmd.append("-no-mesh")
+
+        if mercator_min_lat and mercator_min_lat != 0:
+            cmd.extend(["-mercator-min-lat", str(float(mercator_min_lat))])
+        if mercator_max_lat and mercator_max_lat != 0:
+            cmd.extend(["-mercator-max-lat", str(float(mercator_max_lat))])
 
         result = subprocess.run(
             cmd,

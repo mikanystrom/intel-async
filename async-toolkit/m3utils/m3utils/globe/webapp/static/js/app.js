@@ -76,6 +76,8 @@ function collectParams() {
     poleLon:    parseFloat(document.getElementById("poleLon").value) || 0,
     eqLat:      parseFloat(document.getElementById("eqLat").value) || 0,
     eqLon:      parseFloat(document.getElementById("eqLon").value) || 0,
+    poleAirport1: document.getElementById("poleAirport1").value.trim(),
+    poleAirport2: document.getElementById("poleAirport2").value.trim(),
     width:      parseInt(document.getElementById("width").value) || 1024,
     height:     parseInt(document.getElementById("height").value) || 512,
     stroke:     document.getElementById("stroke").value,
@@ -85,6 +87,9 @@ function collectParams() {
     pointRadius: parseFloat(document.getElementById("pointRadius").value) || 2.0,
     overlayEarthEquator: document.getElementById("overlayEarthEquator").checked,
     overlayProjEquator: document.getElementById("overlayProjEquator").checked,
+    useMesh: document.getElementById("useMesh").checked,
+    mercatorMinLat: parseFloat(document.getElementById("mercatorMinLat").value) || 0,
+    mercatorMaxLat: parseFloat(document.getElementById("mercatorMaxLat").value) || 0,
     datasets:   getSelectedDatasets(),
   };
   return params;
@@ -163,15 +168,12 @@ async function renderMap() {
     document.getElementById("downloadBtn").disabled = false;
     fitSvgToContainer();
 
-    // Restore zoom state if the base viewBox dimensions match
+    // Restore zoom state (preserve zoom level across re-renders)
     if (savedViewBox) {
       const newSvg = container.querySelector("svg");
       if (newSvg) {
-        const newVb = newSvg.getAttribute("viewBox");
         const op = savedViewBox.split(/[\s,]+/).map(Number);
-        const np = newVb.split(/[\s,]+/).map(Number);
-        if (op.length === 4 && np.length === 4 &&
-            Math.abs(op[2] - np[2]) < 1 && Math.abs(op[3] - np[3]) < 1) {
+        if (op.length === 4) {
           newSvg.setAttribute("viewBox", savedViewBox);
         }
       }

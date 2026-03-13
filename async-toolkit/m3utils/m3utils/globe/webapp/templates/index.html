@@ -54,13 +54,28 @@
         </div>
       </div>
 
+      <div class="control-group" id="mercator-lat-group" style="display:none">
+        <label>Latitude Bounds</label>
+        <div class="input-row">
+          <div class="input-field">
+            <label for="mercatorMinLat">Min</label>
+            <input type="number" id="mercatorMinLat" value="-85" min="-89" max="0" step="1">
+          </div>
+          <div class="input-field">
+            <label for="mercatorMaxLat">Max</label>
+            <input type="number" id="mercatorMaxLat" value="85" min="0" max="89" step="1">
+          </div>
+        </div>
+      </div>
+
       <div class="control-group">
         <label for="obliqueMode">Oblique</label>
         <select id="obliqueMode">
           <option value="none">None</option>
           <option value="coordinates">By Coordinates</option>
           <option value="airports">By Airport Codes</option>
-          <option value="pole">By Pole + Equator Point</option>
+          <option value="pole">By Pole + Equator Direction</option>
+          <option value="pole_airports">By Pole + Equator Airports</option>
         </select>
       </div>
 
@@ -114,7 +129,7 @@
             <input type="number" id="poleLon" value="0" min="-180" max="180" step="1">
           </div>
         </div>
-        <label>Equator Point (degrees)</label>
+        <label>Equator Direction (degrees)</label>
         <div class="input-row">
           <div class="input-field">
             <label for="eqLat">Lat</label>
@@ -127,10 +142,29 @@
         </div>
       </div>
 
+      <div class="control-group" id="oblique-pole-airports-group" style="display:none">
+        <label>Pole Airport + Equator Direction Airport</label>
+        <div class="input-row">
+          <div class="input-field">
+            <label for="poleAirport1">Pole</label>
+            <input type="text" id="poleAirport1" value="SVO" maxlength="4" placeholder="ICAO/IATA">
+          </div>
+          <div class="input-field">
+            <label for="poleAirport2">Eq. Dir.</label>
+            <input type="text" id="poleAirport2" value="DXB" maxlength="4" placeholder="ICAO/IATA">
+          </div>
+        </div>
+      </div>
+
       <div class="control-group">
         <label class="group-label">Overlays</label>
         <label><input type="checkbox" id="overlayEarthEquator"> Earth's equator</label>
         <label><input type="checkbox" id="overlayProjEquator"> Projection's equator</label>
+      </div>
+
+      <div class="control-group">
+        <label class="group-label">Debug</label>
+        <label><input type="checkbox" id="useMesh"> Show mesh</label>
       </div>
 
       <div class="control-group" id="arrow-key-group">

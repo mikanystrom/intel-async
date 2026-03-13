@@ -343,13 +343,18 @@ PROCEDURE FixAntimeridianRing(ring : ProjPointArray) : ProjPointArray =
                                  firstY, firstFromRight);
     IF crossCount = 0 THEN RETURN ring END;
 
-    IF crossCount MOD 2 = 1 THEN
-      (* Odd crossings: rearrange at first crossing, then x-unwrap
-         the coastline portion (skip the 2 bottom-edge corners). *)
+    IF crossCount = 1 THEN
+      (* Single crossing (globe-spanning ring): rearrange so the
+         crossing is at start/end with bottom-edge closure. *)
       ring := RearrangeGlobeSpanning(ring, n, firstI1, firstI2,
                                      firstY, firstFromRight);
-      n := NUMBER(ring^);
-      XUnwrapRing(ring, 0, n - 2);
+    ELSIF crossCount MOD 2 = 1 THEN
+      (* Odd > 1 crossings (globe-spanning ring with complex coast):
+         Don't rearrange or x-unwrap.  The original ring winds once
+         around the pole, so nonzero fill is correct despite the
+         cross-map segments.  RingsHaveCrossMapJumps detects these
+         and switches to fill-rule="nonzero". *)
+      RETURN ring;
     ELSE
       (* Even crossings: x-unwrap the entire ring. *)
       XUnwrapRing(ring, 0, n);
@@ -725,6 +730,42 @@ PROCEDURE EmitLineString(wr : Wr.T;
     Wr.PutText(wr, "\"/>\n");
   END EmitLineString;
 
+PROCEDURE RingsHaveCrossMapJumps(rings : ProjRingArray) : BOOLEAN =
+  (* Check if any ring has consecutive valid points with |dx| > π.
+     These "cross-map jumps" occur in rearranged globe-spanning rings
+     with multiple antimeridian crossings. *)
+  VAR prevValid : INTEGER;
+  BEGIN
+    IF rings = NIL THEN RETURN FALSE END;
+    FOR i := 0 TO LAST(rings^) DO
+      IF rings[i] # NIL AND NUMBER(rings[i]^) > 1 THEN
+        prevValid := -1;
+        FOR j := 0 TO LAST(rings[i]^) DO
+          IF rings[i][j].valid THEN
+            IF prevValid >= 0 AND
+               ABS(rings[i][j].x - rings[i][prevValid].x) > Pi THEN
+              RETURN TRUE
+            END;
+            prevValid := j;
+          END;
+        END;
+      END;
+    END;
+    RETURN FALSE
+  END RingsHaveCrossMapJumps;
+
+PROCEDURE FillRule(rings : ProjRingArray) : TEXT =
+  (* Use "nonzero" fill when cross-map jumps are present.  With
+     evenodd, a cross-map segment creates false boundary crossings
+     that invert the fill in horizontal bands.  With nonzero, the
+     consistent winding direction of the ring makes the fill correct
+     regardless of cross-map segments. *)
+  BEGIN
+    IF RingsHaveCrossMapJumps(rings) THEN RETURN "nonzero"
+    ELSE RETURN "evenodd"
+    END;
+  END FillRule;
+
 PROCEDURE EmitPolygon(wr : Wr.T;
                       rings : ProjRingArray;
                       READONLY t : Transform;
@@ -732,7 +773,7 @@ PROCEDURE EmitPolygon(wr : Wr.T;
                       discRadius : LONGREAL) =
   BEGIN
     IF rings = NIL THEN RETURN END;
-    Wr.PutText(wr, "<path class=\"" & FeatureClass(cssClass) & "\" fill-rule=\"evenodd\"");
+    Wr.PutText(wr, "<path class=\"" & FeatureClass(cssClass) & "\" fill-rule=\"" & FillRule(rings) & "\"");
     IF name # NIL AND NOT TextEmpty(name) THEN
       Wr.PutText(wr, " data-name=\"" & EscapeXML(name) & "\"");
     END;
@@ -767,7 +808,7 @@ PROCEDURE EmitMultiPolygon(wr : Wr.T;
                            discRadius : LONGREAL) =
   BEGIN
     IF rings = NIL THEN RETURN END;
-    Wr.PutText(wr, "<path class=\"" & FeatureClass(cssClass) & "\" fill-rule=\"evenodd\"");
+    Wr.PutText(wr, "<path class=\"" & FeatureClass(cssClass) & "\" fill-rule=\"" & FillRule(rings) & "\"");
     IF name # NIL AND NOT TextEmpty(name) THEN
       Wr.PutText(wr, " data-name=\"" & EscapeXML(name) & "\"");
     END;

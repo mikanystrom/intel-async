@@ -1,6 +1,7 @@
 """Flask application for the globe map projection tool."""
 
 import os
+import subprocess
 
 from flask import Flask, jsonify, render_template, request
 
@@ -92,7 +93,8 @@ def create_app():
 
         # Validate oblique
         oblique_mode = data.get("obliqueMode")
-        if oblique_mode not in (None, "none", "coordinates", "airports", "pole"):
+        if oblique_mode not in (None, "none", "coordinates", "airports",
+                                "pole", "pole_airports"):
             return jsonify({"error": f"Invalid oblique mode: {oblique_mode}"}), 400
         if oblique_mode == "none":
             oblique_mode = None
@@ -117,9 +119,26 @@ def create_app():
         eq_lat = _clamp_float(data.get("eqLat"), -90.0, 90.0)
         eq_lon = _clamp_float(data.get("eqLon"), -180.0, 180.0)
 
+        pole_airport1 = data.get("poleAirport1", "")
+        pole_airport2 = data.get("poleAirport2", "")
+        if oblique_mode == "pole_airports":
+            if not pole_airport1 or not pole_airport2:
+                return jsonify({"error": "Two airport codes required for pole mode"}), 400
+            if not config.AIRPORT_CODE_PATTERN.match(pole_airport1):
+                return jsonify({"error": f"Invalid airport code: {pole_airport1}"}), 400
+            if not config.AIRPORT_CODE_PATTERN.match(pole_airport2):
+                return jsonify({"error": f"Invalid airport code: {pole_airport2}"}), 400
+
         # Overlay options
         overlay_earth_eq = bool(data.get("overlayEarthEquator", False))
         overlay_proj_eq = bool(data.get("overlayProjEquator", False))
+
+        # Mercator latitude bounds
+        mercator_min_lat = _clamp_float(data.get("mercatorMinLat", 0), -89.0, 0.0)
+        mercator_max_lat = _clamp_float(data.get("mercatorMaxLat", 0), 0.0, 89.0)
+
+        # Renderer
+        use_mesh = bool(data.get("useMesh", True))
 
         # Merge datasets and render
         merged_path = None
@@ -144,6 +163,8 @@ def create_app():
                 pole_lon=pole_lon,
                 eq_lat=eq_lat,
                 eq_lon=eq_lon,
+                pole_airport1=pole_airport1,
+                pole_airport2=pole_airport2,
                 width=width,
                 height=height,
                 stroke=stroke,
@@ -153,6 +174,9 @@ def create_app():
                 point_radius=point_radius,
                 overlay_earth_eq=overlay_earth_eq,
                 overlay_proj_eq=overlay_proj_eq,
+                use_mesh=use_mesh,
+                mercator_min_lat=mercator_min_lat,
+                mercator_max_lat=mercator_max_lat,
             )
             return svg, 200, {"Content-Type": "image/svg+xml"}
 

@@ -4,7 +4,8 @@
 MODULE Main;
 
 IMPORT Params, Text, Fmt, Wr, Stdio, Process;
-IMPORT GeoCoord, Projection, GeoJSON, GeoJSONWriter, SvgWriter, GeoFeature;
+IMPORT GeoCoord, Projection, GeoJSON, GeoJSONWriter, SvgWriter, SvgMeshWriter,
+       GeoFeature;
 IMPORT Equirectangular, Mercator, TransverseMercator;
 IMPORT Stereographic, LambertConformalConic, AlbersEqualArea;
 IMPORT AzimuthalEquidistant, Orthographic, Robinson;
@@ -28,8 +29,12 @@ VAR
   eqPointLL   : GeoCoord.LatLon;
   overlayEarthEq : BOOLEAN := FALSE;
   overlayProjEq  : BOOLEAN := FALSE;
+  useMesh     : BOOLEAN := FALSE;
   format      : TEXT := "geojson";
   svgConfig   : SvgWriter.Config;
+  markerCount : INTEGER := 0;
+  markerLocs  : ARRAY [0..3] OF GeoCoord.LatLon;
+  markerLabels: ARRAY [0..3] OF TEXT;
 
 PROCEDURE Usage() =
   BEGIN
@@ -44,8 +49,11 @@ PROCEDURE Usage() =
       "  -oblique <lat1> <lon1> <lat2> <lon2>  Two points defining custom equator\n" &
       "  -oblique-pole <poleLat> <poleLon> <eqLat> <eqLon>  Pole + equator point\n" &
       "  -greatcircle <code1> <code2>  Airport codes (ICAO/IATA) for oblique equator\n" &
+      "  -pole-airports <code1> <code2>  Airport codes for pole + equator point\n" &
       "  -overlay-earth-equator       Add Earth's equator (lat=0) as a LineString\n" &
       "  -overlay-proj-equator        Add projection equator as a LineString\n" &
+      "  -mesh                        Show triangle mesh edges for debugging\n" &
+      "  -no-mesh                     Hide triangle mesh edges (default)\n" &
       "\n" &
       "SVG options (only with -format svg):\n" &
       "  -width <N>            SVG width in pixels (default: 1024)\n" &
@@ -55,6 +63,8 @@ PROCEDURE Usage() =
       "  -fill <color>         Fill color (default: none)\n" &
       "  -background <color>   Background color (default: #ffffff)\n" &
       "  -point-radius <N.N>   Point radius (default: 2.0)\n" &
+      "  -mercator-min-lat <N> Mercator min latitude in degrees (default: 0=auto)\n" &
+      "  -mercator-max-lat <N> Mercator max latitude in degrees (default: 0=auto)\n" &
       "\n" &
       "Projections: equirectangular, mercator, transversemercator, stereographic,\n" &
       "  lambertconformalconic, albersequalarea, azimuthalequidistant, orthographic,\n" &
@@ -73,6 +83,12 @@ PROCEDURE ResolveAirport(code : TEXT) : GeoCoord.LatLon =
     END;
     Wr.PutText(Stdio.stderr,
       "  " & a.iata & "/" & a.icao & " " & a.name & "\n");
+    (* Record marker for SVG rendering *)
+    IF markerCount <= LAST(markerLocs) THEN
+      markerLocs[markerCount] := a.loc;
+      markerLabels[markerCount] := a.iata;
+      INC(markerCount);
+    END;
     RETURN a.loc
   END ResolveAirport;
 
@@ -129,6 +145,14 @@ PROCEDURE ParseArgs() =
           obliqueB := ResolveAirport(Params.Get(i));
           useOblique := TRUE;
 
+        ELSIF Text.Equal(arg, "-pole-airports") AND i + 2 < Params.Count THEN
+          INC(i);
+          Wr.PutText(Stdio.stderr, "Resolving pole airports:\n");
+          poleLL := ResolveAirport(Params.Get(i));
+          INC(i);
+          eqPointLL := ResolveAirport(Params.Get(i));
+          usePole := TRUE;
+
         ELSIF Text.Equal(arg, "-format") AND i + 1 < Params.Count THEN
           INC(i); format := ToLower(Params.Get(i));
 
@@ -153,11 +177,23 @@ PROCEDURE ParseArgs() =
         ELSIF Text.Equal(arg, "-point-radius") AND i + 1 < Params.Count THEN
           INC(i); svgConfig.pointRadius := ScanLongReal(Params.Get(i));
 
+        ELSIF Text.Equal(arg, "-mercator-min-lat") AND i + 1 < Params.Count THEN
+          INC(i); svgConfig.mercatorMinLat := ScanLongReal(Params.Get(i));
+
+        ELSIF Text.Equal(arg, "-mercator-max-lat") AND i + 1 < Params.Count THEN
+          INC(i); svgConfig.mercatorMaxLat := ScanLongReal(Params.Get(i));
+
         ELSIF Text.Equal(arg, "-overlay-earth-equator") THEN
           overlayEarthEq := TRUE;
 
         ELSIF Text.Equal(arg, "-overlay-proj-equator") THEN
           overlayProjEq := TRUE;
+
+        ELSIF Text.Equal(arg, "-mesh") THEN
+          useMesh := TRUE;
+
+        ELSIF Text.Equal(arg, "-no-mesh") THEN
+          useMesh := FALSE;
 
         ELSIF Text.Equal(arg, "-help") OR Text.Equal(arg, "-h") THEN
           Usage();
@@ -373,9 +409,14 @@ BEGIN
               VAR rot := GreatCircle.ComputeRotation(obliqueA, obliqueB); BEGIN
               newArr[idx] := GenerateProjEquator(rot);
               END;
+            ELSIF usePole THEN
+              VAR rot := GreatCircle.FromPole(poleLL, eqPointLL); BEGIN
+              newArr[idx] := GenerateProjEquator(rot);
+              END;
             ELSE
               newArr[idx] := GenerateEquator();
               newArr[idx].name := "Projection Equator";
+              newArr[idx].cssClass := "proj-equator";
             END;
             INC(idx);
           END;
@@ -394,8 +435,18 @@ BEGIN
       "Features:   " & Fmt.Int(NUMBER(fc.features^)) & "\n" &
       "Output:     " & outputFile & "\n");
 
+    (* Populate markers from resolved airports *)
+    IF markerCount > 0 THEN
+      svgConfig.markers := NEW(SvgWriter.MarkerArray, markerCount);
+      FOR i := 0 TO markerCount - 1 DO
+        svgConfig.markers[i].loc := markerLocs[i];
+        svgConfig.markers[i].label := markerLabels[i];
+      END;
+    END;
+
     IF Text.Equal(format, "svg") THEN
-      SvgWriter.WriteFile(outputFile, fc, proj, svgConfig);
+      svgConfig.showMesh := useMesh;
+      SvgMeshWriter.WriteFile(outputFile, fc, proj, svgConfig);
     ELSE
       GeoJSONWriter.WriteFile(outputFile, fc, proj);
     END;
