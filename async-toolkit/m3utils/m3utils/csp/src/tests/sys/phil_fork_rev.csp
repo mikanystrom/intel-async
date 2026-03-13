@@ -1,0 +1,2 @@
+int x;
+*[ RG!1 ; RA?x ; LG!1 ; LA?x ]

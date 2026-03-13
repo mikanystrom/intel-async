@@ -1,0 +1,37 @@
+// Dining Philosophers (N=2) with deterministic fork.
+// Fork alternates: serve left, wait return, serve right, wait return.
+// Naive philosopher: picks up left fork then right.
+// Expected: DEADLOCK (circular wait — both hold left fork, wait for right).
+system DiningDet;
+  // Fork 0: left side = Phil 0, right side = Phil 1
+  var f0lg : channel(32);
+  var f0la : channel(32);
+  var f0rg : channel(32);
+  var f0ra : channel(32);
+
+  // Fork 1: left side = Phil 1, right side = Phil 0
+  var f1lg : channel(32);
+  var f1la : channel(32);
+  var f1rg : channel(32);
+  var f1ra : channel(32);
+
+  process Fork = "phil_fork_det.csp"
+    port out LG : channel(32)
+    port in  LA : channel(32)
+    port out RG : channel(32)
+    port in  RA : channel(32);
+
+  process Phil = "phil_naive.csp"
+    port in  LG : channel(32)
+    port out LT : channel(32)
+    port in  RG : channel(32)
+    port out RT : channel(32);
+
+begin
+  var fork0 : Fork(LG => f0lg, LA => f0la, RG => f0rg, RA => f0ra);
+  var fork1 : Fork(LG => f1lg, LA => f1la, RG => f1rg, RA => f1ra);
+  // Phil 0: left fork = fork0, right fork = fork1
+  var phil0 : Phil(LG => f0lg, LT => f0la, RG => f1rg, RT => f1ra);
+  // Phil 1: left fork = fork1, right fork = fork0
+  var phil1 : Phil(LG => f1lg, LT => f1la, RG => f0rg, RT => f0ra);
+end.

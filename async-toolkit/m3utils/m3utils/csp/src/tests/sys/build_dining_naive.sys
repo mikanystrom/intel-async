@@ -1,0 +1,37 @@
+// Dining Philosophers (N=2), naive: each picks up left fork then right.
+// Fork uses probes to nondeterministically serve either neighbor.
+// Expected: DEADLOCK (both philosophers grab their left fork, then
+// wait forever for the right fork which the other philosopher holds).
+system DiningNaive;
+  // Fork 0 channels: left side = Phil 0, right side = Phil 1
+  var f0lg : channel(32);
+  var f0la : channel(32);
+  var f0rg : channel(32);
+  var f0ra : channel(32);
+
+  // Fork 1 channels: left side = Phil 1, right side = Phil 0
+  var f1lg : channel(32);
+  var f1la : channel(32);
+  var f1rg : channel(32);
+  var f1ra : channel(32);
+
+  process Fork = "phil_fork.csp"
+    port out LG : channel(32)
+    port in  LA : channel(32)
+    port out RG : channel(32)
+    port in  RA : channel(32);
+
+  process Phil = "phil_naive.csp"
+    port in  LG : channel(32)
+    port out LT : channel(32)
+    port in  RG : channel(32)
+    port out RT : channel(32);
+
+begin
+  var fork0 : Fork(LG => f0lg, LA => f0la, RG => f0rg, RA => f0ra);
+  var fork1 : Fork(LG => f1lg, LA => f1la, RG => f1rg, RA => f1ra);
+  // Phil 0: left fork = fork0, right fork = fork1
+  var phil0 : Phil(LG => f0lg, LT => f0la, RG => f1rg, RT => f1ra);
+  // Phil 1: left fork = fork1, right fork = fork0
+  var phil1 : Phil(LG => f1lg, LT => f1la, RG => f0rg, RT => f0ra);
+end.

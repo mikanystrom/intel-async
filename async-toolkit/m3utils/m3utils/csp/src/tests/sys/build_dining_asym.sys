@@ -1,0 +1,37 @@
+// Dining Philosophers (N=2), asymmetric forks: Fork0 serves left first,
+// Fork1 serves right first.  Breaks the circular wait.
+// Expected: DEADLOCK-FREE.
+system DiningAsym;
+  var f0lg : channel(32);
+  var f0la : channel(32);
+  var f0rg : channel(32);
+  var f0ra : channel(32);
+  var f1lg : channel(32);
+  var f1la : channel(32);
+  var f1rg : channel(32);
+  var f1ra : channel(32);
+
+  process Fork = "phil_fork_det.csp"
+    port out LG : channel(32)
+    port in  LA : channel(32)
+    port out RG : channel(32)
+    port in  RA : channel(32);
+
+  process ForkRev = "phil_fork_rev.csp"
+    port out LG : channel(32)
+    port in  LA : channel(32)
+    port out RG : channel(32)
+    port in  RA : channel(32);
+
+  process Phil = "phil_naive.csp"
+    port in  LG : channel(32)
+    port out LT : channel(32)
+    port in  RG : channel(32)
+    port out RT : channel(32);
+
+begin
+  var fork0 : Fork(LG => f0lg, LA => f0la, RG => f0rg, RA => f0ra);
+  var fork1 : ForkRev(LG => f1lg, LA => f1la, RG => f1rg, RA => f1ra);
+  var phil0 : Phil(LG => f0lg, LT => f0la, RG => f1rg, RT => f1ra);
+  var phil1 : Phil(LG => f1lg, LT => f1la, RG => f0rg, RT => f0ra);
+end.

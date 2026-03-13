@@ -1,0 +1,42 @@
+// Dining Philosophers (N=3), asymmetric: Fork2 reversed, breaks cycle.
+// Expected: DEADLOCK-FREE.
+system DiningThreeAsym;
+  var f0lg : channel(32);
+  var f0la : channel(32);
+  var f0rg : channel(32);
+  var f0ra : channel(32);
+  var f1lg : channel(32);
+  var f1la : channel(32);
+  var f1rg : channel(32);
+  var f1ra : channel(32);
+  var f2lg : channel(32);
+  var f2la : channel(32);
+  var f2rg : channel(32);
+  var f2ra : channel(32);
+
+  process Fork = "phil_fork_det.csp"
+    port out LG : channel(32)
+    port in  LA : channel(32)
+    port out RG : channel(32)
+    port in  RA : channel(32);
+
+  process ForkRev = "phil_fork_rev.csp"
+    port out LG : channel(32)
+    port in  LA : channel(32)
+    port out RG : channel(32)
+    port in  RA : channel(32);
+
+  process Phil = "phil_naive.csp"
+    port in  LG : channel(32)
+    port out LT : channel(32)
+    port in  RG : channel(32)
+    port out RT : channel(32);
+
+begin
+  var fork0 : Fork(LG => f0lg, LA => f0la, RG => f0rg, RA => f0ra);
+  var fork1 : Fork(LG => f1lg, LA => f1la, RG => f1rg, RA => f1ra);
+  var fork2 : ForkRev(LG => f2lg, LA => f2la, RG => f2rg, RA => f2ra);
+  var phil0 : Phil(LG => f0lg, LT => f0la, RG => f1rg, RT => f1ra);
+  var phil1 : Phil(LG => f1lg, LT => f1la, RG => f2rg, RT => f2ra);
+  var phil2 : Phil(LG => f2lg, LT => f2la, RG => f0rg, RT => f0ra);
+end.
