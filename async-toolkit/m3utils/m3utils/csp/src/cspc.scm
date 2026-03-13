@@ -311,6 +311,7 @@
 
 (load "codegen-m3.scm")
 (load "driver.scm")     ;; main entry point is here
+(load "lts.scm")        ;; LTS extraction for formal verification
 
 (define *reload-name*   "cspc.scm")
 
