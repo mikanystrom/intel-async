@@ -355,6 +355,7 @@ PROCEDURE EmitMeshPolygon(wr : Wr.T;
                           READONLY t : Transform;
                           READONLY vp : MeshProject.BBox;
                           discMode : BOOLEAN;
+                          xPeriodic : BOOLEAN;
                           showMesh : BOOLEAN;
                           featIdx : INTEGER;
                           name, cssClass : TEXT) =
@@ -408,12 +409,14 @@ PROCEDURE EmitMeshPolygon(wr : Wr.T;
           INC(triCount);
         END;
       ELSE
-        (* Non-disc: x-unwrap vertices to be within π of vertex 0 *)
-        FOR k := 1 TO 2 DO
-          WHILE x[k] - x[0] > Pi DO x[k] := x[k] - TwoPi END;
-          WHILE x[k] - x[0] < -Pi DO x[k] := x[k] + TwoPi END;
+        IF xPeriodic THEN
+          (* Cylindrical: x-unwrap vertices to be within π of vertex 0 *)
+          FOR k := 1 TO 2 DO
+            WHILE x[k] - x[0] > Pi DO x[k] := x[k] - TwoPi END;
+            WHILE x[k] - x[0] < -Pi DO x[k] := x[k] + TwoPi END;
+          END;
         END;
-        (* Emit at every position that overlaps the viewport *)
+        (* Emit at the original position *)
         IF TriOverlapsVP(x, y, 0.0d0, vp) THEN
           IF showMesh THEN
             EmitDebugTri(wr, x, y, 0.0d0, t,
@@ -423,20 +426,23 @@ PROCEDURE EmitMeshPolygon(wr : Wr.T;
           END;
           INC(triCount);
         END;
-        IF TriOverlapsVP(x, y, TwoPi, vp) THEN
-          IF showMesh THEN
-            EmitDebugTri(wr, x, y, TwoPi, t,
-                         prefix & Fmt.Int(triCount) & "p", name, cssClass);
-          ELSE
-            EmitTriAt(wr, x, y, TwoPi, t);
+        IF xPeriodic THEN
+          (* Cylindrical: also emit at ±2π for wrap-around copies *)
+          IF TriOverlapsVP(x, y, TwoPi, vp) THEN
+            IF showMesh THEN
+              EmitDebugTri(wr, x, y, TwoPi, t,
+                           prefix & Fmt.Int(triCount) & "p", name, cssClass);
+            ELSE
+              EmitTriAt(wr, x, y, TwoPi, t);
+            END;
           END;
-        END;
-        IF TriOverlapsVP(x, y, -TwoPi, vp) THEN
-          IF showMesh THEN
-            EmitDebugTri(wr, x, y, -TwoPi, t,
-                         prefix & Fmt.Int(triCount) & "n", name, cssClass);
-          ELSE
-            EmitTriAt(wr, x, y, -TwoPi, t);
+          IF TriOverlapsVP(x, y, -TwoPi, vp) THEN
+            IF showMesh THEN
+              EmitDebugTri(wr, x, y, -TwoPi, t,
+                           prefix & Fmt.Int(triCount) & "n", name, cssClass);
+            ELSE
+              EmitTriAt(wr, x, y, -TwoPi, t);
+            END;
           END;
         END;
       END;
@@ -737,6 +743,7 @@ PROCEDURE WriteWr(wr : Wr.T;
           GeoFeature.GeometryKind.MultiPolygon =>
           EmitMeshPolygon(wr, features[i].mesh, t, bb,
                           cfg.discRadius > 0.0d0,
+                          cfg.xPeriodic,
                           cfg.showMesh, i,
                           features[i].name, features[i].cssClass);
           IF NOT cfg.showMesh THEN

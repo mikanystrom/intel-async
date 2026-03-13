@@ -37,6 +37,11 @@ TYPE
        Relative to the projection's equator, not Earth's equator. *)
     markers     : MarkerArray := NIL;
     (* Airport or point-of-interest markers to render as dots + labels *)
+    xPeriodic   : BOOLEAN  := TRUE;
+    (* TRUE for cylindrical projections (Equirectangular, Mercator, Robinson)
+       where the projected x-axis wraps with period 2*pi.  FALSE for conic
+       and other projections where x-unwrapping and repeat emission must
+       be disabled. *)
   END;
 
 PROCEDURE WriteFile(path : TEXT;

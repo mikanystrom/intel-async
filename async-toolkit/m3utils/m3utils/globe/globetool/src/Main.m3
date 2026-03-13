@@ -430,6 +430,11 @@ BEGIN
       svgConfig.discRadius := 1.0d0;
     END;
 
+    (* Only cylindrical projections have x-periodic output *)
+    svgConfig.xPeriodic := Text.Equal(projName, "equirectangular") OR
+                           Text.Equal(projName, "mercator") OR
+                           Text.Equal(projName, "robinson");
+
     Wr.PutText(Stdio.stdout,
       "Projection: " & proj.name & "\n" &
       "Features:   " & Fmt.Int(NUMBER(fc.features^)) & "\n" &

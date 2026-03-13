@@ -165,7 +165,33 @@ else
   fail "empty SVG for Antarctica test case"
 fi
 
-# --- 11. Pole airport maps to the projection pole ---
+# --- 11. Non-cylindrical projections must not duplicate the world ---
+# Compare triangle counts: conic/azimuthal should have similar count to equirectangular.
+# If duplicated, they'd have ~3x the triangles.
+echo ""
+echo "=== No world duplication (conic/azimuthal vs cylindrical) ==="
+run "tricount equirect" -projection equirectangular -input "$DATA" -format svg \
+    -fill '#2d7744' -mesh -output "$OUTDIR/tricount_equirect.svg"
+base_count=$(grep -c 'class="mesh-tri' "$OUTDIR/tricount_equirect.svg" || echo 0)
+echo "  equirectangular triangles: $base_count"
+
+for proj in lambertconformalconic albersequalarea azimuthalequidistant transversemercator; do
+  run "tricount $proj" -projection "$proj" -center 40 -100 -parallels 29.5 45.5 \
+      -input "$DATA" -format svg -fill '#2d7744' -mesh -output "$OUTDIR/tricount_${proj}.svg"
+  count=$(grep -c 'class="mesh-tri' "$OUTDIR/tricount_${proj}.svg" || echo 0)
+  echo "  $proj triangles: $count"
+  # Should be no more than 1.5x the equirectangular count (allow for different
+  # visibility/culling but catch 3x duplication)
+  max_allowed=$((base_count * 3 / 2))
+  if [ "$count" -le "$max_allowed" ]; then
+    pass
+  else
+    fail "$proj has $count triangles (base: $base_count, max: $max_allowed) — world likely duplicated"
+  fi
+done
+
+# --- 12. Pole airport maps to the projection pole ---
+
 echo ""
 echo "=== Pole airport at projection pole ==="
 # In orthographic, the pole maps to the center of the disc (512, 256).
