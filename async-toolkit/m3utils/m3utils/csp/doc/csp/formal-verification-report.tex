@@ -1,0 +1,921 @@
+% Copyright (c) 2025 Intel Corporation.  All rights reserved.  See the file COPYRIGHT for more information.
+% SPDX-License-Identifier: Apache-2.0
+
+\documentclass[11pt]{article}
+
+% Page layout
+\usepackage[letterpaper, margin=1in]{geometry}
+\setlength{\headheight}{14pt}
+\usepackage{parskip}
+\setlength{\parindent}{0pt}
+
+% Typography
+\usepackage{fancyvrb}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+% Code listings
+\usepackage{listings}
+\lstset{
+    basicstyle=\ttfamily\small,
+    columns=fullflexible,
+    keepspaces=true,
+    showstringspaces=false,
+    breaklines=true,
+    frame=none,
+    xleftmargin=2em,
+}
+
+% Hyperlinks
+\usepackage[colorlinks=true, linkcolor=blue, urlcolor=blue, citecolor=blue]{hyperref}
+
+% Headers and footers
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\textit{Formal Verification for the Fulcrum CSP Toolchain}}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\title{\textbf{Formal Verification for the Fulcrum CSP Toolchain} \\[0.5em]
+\large Feasibility Study, Project Plan, and Implementation Report}
+\author{Mika Nystr\"om \and Claude (Anthropic)}
+\date{DRAFT Version 0.2\\
+\today}
+
+\begin{document}
+
+\maketitle
+
+\vspace{1em}
+
+\noindent
+ Copyright \copyright\ 2025 Intel Corporation
+
+ Licensed under the Apache License, Version 2.0 (the ``License'');
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+ {\tt http://www.apache.org/licenses/LICENSE-2.0}
+
+\tableofcontents
+\newpage
+
+%======================================================================
+\section{Introduction}
+%======================================================================
+
+Asynchronous circuit design offers compelling advantages in power
+efficiency, modularity, and electromagnetic compatibility, but it
+introduces verification challenges that synchronous flows do not face.
+The absence of a global clock means that correctness depends entirely on
+the interplay of handshaking protocols: a single missing acknowledgment
+or misordered communication can cause a physical deadlock that is
+invisible to simulation until the right interleaving is exercised.
+
+The Fulcrum CSP toolchain compiles Communicating Sequential Processes
+(CSP) descriptions into cycle-accurate Modula-3 simulators.  Simulation
+is effective for validating functional behavior, but it explores only a
+subset of the reachable state space.  Formal verification---exhaustive
+or symbolic exploration of \emph{all} reachable states---can provide
+mathematical guarantees of deadlock freedom, livelock freedom, and
+protocol conformance that simulation alone cannot.
+
+This report assesses the feasibility of adding FDR4-style formal
+verification capabilities to the Fulcrum CSP toolchain.  It surveys the
+relevant theory, compares the Fulcrum CSP dialect with the CSPM input
+language of FDR4, identifies favorable structural properties and
+key challenges, proposes three implementation approaches, and
+recommends an incremental path forward with a phased project plan.
+
+%======================================================================
+\section{Background}
+%======================================================================
+
+%----------------------------------------------------------------------
+\subsection{CSP Theory and Semantic Models}
+%----------------------------------------------------------------------
+
+CSP (Communicating Sequential Processes), introduced by Hoare~\cite{hoare1985},
+provides a process algebra for describing systems of concurrent agents
+that interact by synchronous message passing over named channels.
+The theory defines three progressively richer semantic models:
+
+\begin{description}
+\item[Traces model ($\mathcal{T}$).]
+  A process is characterized by the set of finite sequences of
+  events (traces) it can perform.  The traces model supports
+  safety properties: ``nothing bad happens.''
+
+\item[Stable failures model ($\mathcal{F}$).]
+  A process is characterized by its traces together with its
+  \emph{failures}---pairs $(s, X)$ where $s$ is a trace and $X$ is a
+  set of events the process can refuse after performing~$s$.
+  The failures model supports deadlock analysis and determinism
+  checking.
+
+\item[Failures-divergences model ($\mathcal{FD}$).]
+  Extends the failures model with \emph{divergences}---traces after
+  which the process can perform an infinite sequence of internal
+  ($\tau$) actions.  This is the richest standard model and supports
+  livelock analysis.
+\end{description}
+
+Refinement checking is the central verification technique: a system
+$\mathit{Impl}$ satisfies a specification $\mathit{Spec}$ if
+$\mathit{Impl}$ refines $\mathit{Spec}$ in the chosen model, written
+$\mathit{Spec} \sqsubseteq \mathit{Impl}$.  In the traces model this
+means the implementation produces no trace that the specification
+forbids; in the failures model it additionally means the implementation
+refuses no more than the specification allows.
+
+%----------------------------------------------------------------------
+\subsection{FDR4: Architecture and Algorithms}
+%----------------------------------------------------------------------
+
+FDR4~\cite{fdr4} (Failures-Divergences Refinement checker, version~4)
+is the standard tool for CSP refinement checking.  Its architecture
+comprises several stages:
+
+\begin{enumerate}
+\item \textbf{Parsing.}  The input language is CSPM (machine-readable
+  CSP), a functional language with pattern matching, let-bindings,
+  comprehensions, and built-in types (sets, sequences, tuples).
+  Processes are defined using CSP operators: prefix ($\to$),
+  external choice ($\Box$), internal choice ($\sqcap$), parallel
+  composition ($\|$), interleaving ($|||$), hiding, and renaming.
+
+\item \textbf{Supercombinator compilation.}  Process expressions are
+  compiled into \emph{supercombinators}---compact representations that
+  enumerate the transitions of a process as a function of its
+  parameters.  This is the key innovation of FDR4: supercombinators
+  enable on-the-fly state enumeration without materializing the full
+  state graph up front.
+
+\item \textbf{State exploration.}  FDR4 explores the product state
+  space using BFS or DFS, driven by the supercombinator transition
+  functions.  Compression techniques (diamond, sbisimulation,
+  $\tau$-loop elimination) reduce the state space during exploration.
+
+\item \textbf{Refinement checking.}  The tool checks
+  $\mathit{Spec} \sqsubseteq_X \mathit{Impl}$ where $X$ is the
+  chosen semantic model ($\mathcal{T}$, $\mathcal{F}$, or
+  $\mathcal{FD}$).  Special-case checkers exist for deadlock freedom,
+  livelock freedom, and determinism, which do not require an explicit
+  specification process.
+\end{enumerate}
+
+FDR4 achieves scalability through several mechanisms: symbolic
+representation of transitions, compression of the explored state
+space, and multi-core parallel exploration.  Nevertheless, state
+explosion remains the fundamental limit: a system of $n$ processes
+each with $k$ states has a product space of up to $k^n$ states.
+
+%======================================================================
+\section{The Fulcrum CSP Toolchain}
+%======================================================================
+
+The Fulcrum CSP toolchain compiles hardware-oriented CSP descriptions
+into native simulator binaries.  Its architecture is:
+
+\begin{Verbatim}[samepage=true]
+  .csp source          .sys system description
+       |                        |
+       v                        v
+    cspfe (parser)       sys-file parser (Scheme)
+       |                        |
+       v                        v
+  S-expression AST       system graph (channels,
+  (.scm files)           process instances, ports)
+       |                        |
+       +-------+    +-----------+
+               |    |
+               v    v
+     cspc (9-pass Scheme compiler)
+               |
+               v
+     Modula-3 state machines
+     (m3__*.m3, SimMain.m3, m3makefile)
+               |
+               v
+     cm3 -build -override
+               |
+               v
+     Native simulator binary (sim)
+\end{Verbatim}
+
+\subsection{Key Components}
+
+\begin{description}
+\item[\texttt{cspparse} (\texttt{cspfe}).]
+  Lex/Yacc-based parser that reads \texttt{.csp} source files and
+  emits an S-expression representation of the AST.  The AST is defined
+  by the \texttt{cspgrammar} library.
+
+\item[\texttt{cspgrammar}.]
+  Modula-3 library defining the abstract syntax tree.  Key types
+  include \texttt{CspExpression} (literals, binary/unary operators,
+  channel operations like \texttt{Receive}, \texttt{Peek},
+  \texttt{Probe}), \texttt{CspStatement} (assignment,
+  \texttt{DetSelection}, \texttt{NondetSelection},
+  \texttt{DetRepetition}, \texttt{Sequential}, \texttt{Parallel},
+  \texttt{Send}, \texttt{Recv}), and \texttt{CspType} (integers,
+  booleans, channels, arrays, structures).
+
+\item[\texttt{cspc}.]
+  The compiler driver.  Invoked with \texttt{-scm} it enters a Scheme
+  REPL (via the embedded \texttt{mscheme} interpreter) that drives a
+  9-pass compilation pipeline.  Scheme stubs expose the Modula-3 AST
+  types to Scheme code, which performs type checking, optimization,
+  and code generation.
+
+\item[\texttt{cspsimlib}.]
+  Modula-3 simulation runtime providing the scheduler, channel
+  implementations (with configurable slack), process dispatch,
+  and multi-threaded worker coordination.
+
+\item[\texttt{cspbuild}.]
+  A Scheme-level build system that reads \texttt{.sys} files
+  (multi-process system descriptions), orchestrates compilation of
+  each process, and generates the final simulator binary.
+\end{description}
+
+\subsection{Simulation Capabilities}
+
+The generated simulator supports multiple scheduling strategies
+(\texttt{-greedy}, \texttt{-nondet}, \texttt{-eager}), multi-threaded
+execution (\texttt{-mt}~$N$), and distributed simulation
+(\texttt{-master}/\texttt{-worker}).  It exercises one execution
+path per run; randomized scheduling (\texttt{-nondet}) can improve
+coverage but cannot guarantee exhaustive exploration.
+
+%======================================================================
+\section{Language Comparison: Fulcrum CSP vs.\ CSPM}
+%======================================================================
+
+The Fulcrum CSP dialect (sometimes called CAST) is designed for
+hardware process descriptions, while CSPM is a general-purpose
+process algebra notation.  The following table summarizes the key
+differences:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+\textbf{Feature} & \textbf{Fulcrum CSP / CAST} & \textbf{CSPM (FDR4)} \\
+\midrule
+Channel model     & Bundled-data, directional & Abstract events \\
+                  & (\texttt{L?x}, \texttt{R!x}) & (\texttt{c.v -> P}) \\
+Data types        & Fixed-width integers, arrays, & Sets, sequences, tuples, \\
+                  & structs & user-defined datatypes \\
+Choice            & Deterministic (\texttt{[\,]}) & External ($\Box$), \\
+                  & nondeterministic (\texttt{:[\,]:}) & internal ($\sqcap$) \\
+Repetition        & \texttt{*[\,]} (infinite loop) & Recursion \\
+Parallelism       & \texttt{||} (interleaved), & $\|$, $|||$, $[|\ldots|]$ \\
+                  & implicit via \texttt{.sys} & with alphabet control \\
+Hiding            & Not explicit & \texttt{P \textbackslash\ X} \\
+Renaming          & Port bindings in \texttt{.sys} & \texttt{P[[a<-b]]} \\
+Specification     & None (simulation only) & Refinement assertions \\
+State space       & Implicit (simulated) & Explicit (enumerated) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Despite the syntactic differences, the underlying computational model
+is similar: both describe networks of sequential processes that
+communicate via synchronous handshakes on named channels.  The Intel
+dialect is closer to the ``blocking point'' formulation where a process
+alternates between computation and a single blocking communication,
+which is actually \emph{favorable} for verification---it constrains
+the branching factor of the state graph.
+
+%======================================================================
+\section{Feasibility Analysis}
+%======================================================================
+
+%----------------------------------------------------------------------
+\subsection{Favorable Factors}
+%----------------------------------------------------------------------
+
+Several properties of the Fulcrum CSP toolchain and the circuits it
+describes make formal verification feasible:
+
+\begin{description}
+\item[Static topology.]
+  The \texttt{.sys} file declares all processes and channels
+  statically.  There is no dynamic process creation or channel
+  allocation.  The system graph is known at compile time, which
+  is a prerequisite for state enumeration.
+
+\item[Bounded data.]
+  Hardware processes operate on fixed-width integers (typically
+  8--64~bits).  While the raw data domain is large, abstract
+  interpretation or data-independence arguments can often reduce
+  the effective data range.  Many protocol properties (deadlock
+  freedom, channel protocol conformance) are independent of data
+  values entirely.
+
+\item[Blocking-point structure.]
+  Fulcrum CSP processes alternate between local computation and a
+  single blocking communication (send or receive on a channel).
+  Between blocking points, the process executes deterministically.
+  This means the LTS (Labelled Transition System) of each process
+  has transitions only at communication points, dramatically reducing
+  the number of states compared to a fine-grained interleaving
+  semantics.
+
+\item[Existing AST infrastructure.]
+  The \texttt{cspgrammar} library provides a complete, well-typed
+  AST.  The Scheme-accessible AST means that analysis passes can be
+  prototyped rapidly in the existing \texttt{cspc} environment.
+
+\item[Guarded-command normal form.]
+  The \texttt{DetSelection} and \texttt{NondetSelection} statement
+  types directly correspond to CSP external and internal choice.
+  Guards are channel operations (\texttt{Probe}, \texttt{Receive}),
+  which map naturally to LTS transitions.
+\end{description}
+
+%----------------------------------------------------------------------
+\subsection{Challenges}
+%----------------------------------------------------------------------
+
+\begin{description}
+\item[State explosion.]
+  Even with the favorable blocking-point structure, realistic circuits
+  have many processes.  The MiniMIPS reference design has 7~processes;
+  a production pipeline might have 20--50.  With channel slack
+  (buffering), each channel with slack~$d$ and width~$w$ adds up to
+  $(2^w)^d$ states, though data abstraction can mitigate this.
+
+\item[No specification language.]
+  The Fulcrum CSP dialect has no mechanism for writing specifications or
+  refinement assertions.  Deadlock freedom can be checked without a
+  spec, but richer properties (e.g., ``the output channel produces
+  values in sorted order'') require a specification language or
+  assertion mechanism.
+
+\item[Channel slack semantics.]
+  FDR4 models channels as zero-buffer synchronous communications.
+  The Intel toolchain supports non-unit channel slack (buffering),
+  which must be modeled as explicit buffer processes in the LTS.
+  This increases the state space but is straightforward to implement.
+
+\item[Data-dependent control flow.]
+  Some guards depend on data values (e.g., \texttt{x > 0}).
+  Data-dependent branching requires either concrete enumeration of
+  data values or symbolic techniques (SAT/SMT) to handle efficiently.
+
+\item[Integration complexity.]
+  FDR4 is a standalone tool written in Haskell with a C++ exploration
+  engine.  Direct integration with the Modula-3/Scheme toolchain
+  would require either a translation layer or a native implementation.
+\end{description}
+
+%======================================================================
+\section{Proposed Approaches}
+%======================================================================
+
+We identify three approaches for adding formal verification to the
+Fulcrum CSP toolchain, ranging from lowest implementation effort to
+deepest integration.
+
+%----------------------------------------------------------------------
+\subsection{Approach~1: Translate to CSPM and Use FDR4}
+%----------------------------------------------------------------------
+
+Write a translator (in Scheme, within \texttt{cspc}) that converts
+the compiled process network into CSPM syntax, emitting a
+\texttt{.csp}\footnote{CSPM files conventionally use the \texttt{.csp}
+extension; to avoid confusion with Intel \texttt{.csp} files, we would
+use \texttt{.cspm} or \texttt{.fdr} as the extension.} file suitable
+for FDR4.
+
+\textbf{Advantages:}
+\begin{itemize}
+\item Leverages the mature, heavily optimized FDR4 engine.
+\item Immediate access to all FDR4 analyses (deadlock, livelock,
+  determinism, refinement).
+\item Lowest implementation effort for basic functionality.
+\end{itemize}
+
+\textbf{Disadvantages:}
+\begin{itemize}
+\item FDR4 is proprietary software (University of Oxford); requires
+  a license for commercial use.
+\item Semantic gap: channel slack, data types, and probe operations
+  require careful encoding.
+\item Counterexample traces must be mapped back to the original
+  Fulcrum CSP source, which adds complexity.
+\item Maintenance burden: the translation must track changes in both
+  the Fulcrum CSP dialect and CSPM.
+\end{itemize}
+
+%----------------------------------------------------------------------
+\subsection{Approach~2: Native LTS Explorer}
+%----------------------------------------------------------------------
+
+Build a state-space exploration engine directly in the Fulcrum CSP
+toolchain.  The engine would:
+
+\begin{enumerate}
+\item Compile each process to an LTS (states = blocking points,
+  transitions = communication events).
+\item Compose the per-process LTSs into a product LTS following the
+  system topology declared in the \texttt{.sys} file.
+\item Explore the product LTS using BFS/DFS with hash-based state
+  storage, checking for deadlock (no enabled transitions) and
+  optionally other properties.
+\end{enumerate}
+
+The natural implementation platform is Modula-3 (for performance)
+with a Scheme API for scripting analyses, mirroring the existing
+simulation architecture.
+
+\textbf{Advantages:}
+\begin{itemize}
+\item No external tool dependencies; fully open-source.
+\item Direct access to the AST and the simulation runtime's data
+  structures (channels, process state).
+\item Counterexample traces are in the native format.
+\item Can exploit domain-specific optimizations: blocking-point
+  reduction, data abstraction tailored to hardware channels.
+\end{itemize}
+
+\textbf{Disadvantages:}
+\begin{itemize}
+\item Significant implementation effort for the exploration engine.
+\item Must implement compression techniques (partial-order reduction,
+  symmetry reduction) to handle realistic circuits.
+\item Initially limited to deadlock/livelock freedom; refinement
+  checking requires substantially more infrastructure.
+\end{itemize}
+
+%----------------------------------------------------------------------
+\subsection{Approach~3: SAT/BDD-Based Symbolic Model Checking}
+%----------------------------------------------------------------------
+
+Encode the process network as a Boolean transition relation and use
+SAT solvers or BDD libraries for reachability analysis.  This is the
+approach used by hardware model checkers (e.g., NuSMV, ABC).
+
+\textbf{Advantages:}
+\begin{itemize}
+\item Handles large data widths efficiently (symbolic representation).
+\item Mature tool ecosystem (MiniSat, CaDiCaL, CUDD).
+\item Natural fit for hardware-oriented descriptions with fixed-width
+  data.
+\end{itemize}
+
+\textbf{Disadvantages:}
+\begin{itemize}
+\item Largest implementation effort.
+\item Encoding CSP concurrency semantics into Boolean relations is
+  non-trivial and error-prone.
+\item Loses the direct connection to CSP theory (traces, failures);
+  properties must be expressed in CTL/LTL rather than as refinements.
+\item Debugging counterexamples is harder (bit-level vs.\ process-level).
+\end{itemize}
+
+%======================================================================
+\section{Recommended Approach}
+%======================================================================
+
+We recommend \textbf{Approach~2: a native LTS explorer}, starting
+with deadlock freedom checking and incrementally adding capabilities.
+The rationale is:
+
+\begin{enumerate}
+\item \textbf{No licensing constraints.}  FDR4's proprietary license
+  is a significant obstacle for an open-source and Intel-internal
+  toolchain.  A native implementation avoids this entirely.
+
+\item \textbf{Domain-specific optimizations.}  The blocking-point
+  structure of Fulcrum CSP processes means that each process's LTS is
+  compact---typically tens to hundreds of states, not thousands.
+  The main challenge is the product-space explosion, which can be
+  addressed incrementally with partial-order reduction and
+  compositional reasoning.
+
+\item \textbf{Natural integration.}  The existing toolchain already
+  compiles processes to state machines for simulation.  The same
+  compilation pipeline can produce an LTS representation instead of
+  (or in addition to) Modula-3 simulation code.  The Scheme scripting
+  layer provides a natural interface for expressing verification
+  queries.
+
+\item \textbf{Incremental value.}  Deadlock freedom is the single
+  most valuable property for asynchronous circuits, and it requires
+  no specification language---only exhaustive exploration of the
+  product state space.  This can be delivered as a first milestone
+  with immediate practical value.
+
+\item \textbf{Path to richer analyses.}  Once the LTS explorer
+  exists, adding livelock detection (cycle detection on $\tau$-only
+  paths) and trace refinement (product with a specification LTS) is
+  a natural extension.
+\end{enumerate}
+
+The high-level architecture of the proposed verification engine is:
+
+\begin{Verbatim}[samepage=true]
+  .sys system description
+           |
+           v
+    System graph (processes, channels, topology)
+           |
+           v
+    Per-process LTS extraction
+    (states = blocking points, transitions = chan ops)
+           |
+           v
+    Product LTS composition (on-the-fly)
+           |
+           v
+    +------+------+------+
+    |      |      |      |
+    v      v      v      v
+  Deadlock  Livelock  Trace    Failures
+  check     check     refine.  refine.
+\end{Verbatim}
+
+%======================================================================
+\section{Project Plan}
+%======================================================================
+
+The project is organized into four phases, each delivering a usable
+increment of verification capability.
+
+%----------------------------------------------------------------------
+\subsection{Phase~1: Per-Process LTS Extraction}
+%----------------------------------------------------------------------
+
+\textbf{Goal:} Extract an explicit LTS from a single compiled CSP
+process.
+
+\textbf{Deliverables:}
+\begin{itemize}
+\item A new compilation target in \texttt{cspc} that emits an LTS
+  (set of states, initial state, set of labelled transitions) instead
+  of Modula-3 simulation code.
+\item States correspond to blocking points (channel send, receive,
+  select).  Transitions are labelled with the channel operation
+  (event).
+\item Data variables are handled by bounded enumeration with
+  configurable abstraction (e.g., collapse all values to a single
+  abstract value for data-independent properties).
+\item LTS output in a simple textual format (e.g., Aldebaran
+  \texttt{.aut} or a custom S-expression format readable by
+  \texttt{cspc}).
+\item Scheme API: \texttt{(extract-lts \textit{process})} returns
+  an LTS object.
+\item Unit tests on the existing CSP test suite.
+\end{itemize}
+
+\textbf{Milestone:} Can extract and display the LTS of any single-process
+CSP program (e.g., the producer and consumer from the \texttt{cspbuild}
+examples).
+
+%----------------------------------------------------------------------
+\subsection{Phase~2: Product Composition and Deadlock Checking}
+%----------------------------------------------------------------------
+
+\textbf{Goal:} Compose per-process LTSs into a product system and
+check for deadlock.
+
+\textbf{Deliverables:}
+\begin{itemize}
+\item Product-state composition engine that synchronizes processes on
+  shared channel events, following the topology from the \texttt{.sys}
+  file.
+\item Channel slack modeled as explicit FIFO buffer processes inserted
+  between communicating processes.
+\item On-the-fly BFS/DFS exploration with hash-based visited-state
+  set.
+\item Deadlock detection: a product state is a deadlock if no process
+  can make progress (no enabled transitions in any component).
+\item Counterexample generation: on deadlock, emit the trace
+  (sequence of events) leading to the deadlocked state.
+\item Scheme API: \texttt{(check-deadlock! \textit{sys-file})} returns
+  either \texttt{\#t} (deadlock-free) or a counterexample trace.
+\item Tested on the MiniMIPS reference design and the
+  \texttt{cspbuild} examples.
+\end{itemize}
+
+\textbf{Milestone:} Can verify deadlock freedom of the producer-consumer
+example and detect intentionally introduced deadlocks in test cases.
+
+%----------------------------------------------------------------------
+\subsection{Phase~3: State-Space Reduction}
+%----------------------------------------------------------------------
+
+\textbf{Goal:} Scale the explorer to handle realistic circuits
+(20+ processes) through state-space reduction techniques.
+
+\textbf{Deliverables:}
+\begin{itemize}
+\item \textbf{Partial-order reduction (POR):} Exploit the independence
+  of events on disjoint channels to avoid exploring redundant
+  interleavings.  The static topology from the \texttt{.sys} file
+  directly provides the independence relation.
+\item \textbf{Symmetry reduction:} Exploit structural symmetry in
+  regular process arrays (e.g., pipeline stages, arbiters).
+\item \textbf{Data abstraction:} Automatic abstraction of data
+  channels for data-independent properties; user-guided abstraction
+  for data-dependent properties.
+\item \textbf{Compositional reasoning:} Verify subsystems independently
+  and compose results, exploiting the hierarchical structure of
+  asynchronous designs.
+\item Performance benchmarks comparing exploration time and peak
+  memory with and without each reduction.
+\end{itemize}
+
+\textbf{Milestone:} The MiniMIPS 7-process design is verified for
+deadlock freedom within reasonable time and memory bounds (under
+1~minute, under 1~GB).
+
+%----------------------------------------------------------------------
+\subsection{Phase~4: Livelock and Refinement Checking}
+%----------------------------------------------------------------------
+
+\textbf{Goal:} Extend the verification engine beyond deadlock freedom.
+
+\textbf{Deliverables:}
+\begin{itemize}
+\item \textbf{Livelock detection:} Detect cycles in the product LTS
+  that involve only internal ($\tau$) transitions and no visible
+  progress.  Uses Tarjan's SCC algorithm on the $\tau$-reachable
+  subgraph.
+\item \textbf{Specification language:} A lightweight assertion
+  mechanism, either embedded in \texttt{.sys} files or as a separate
+  \texttt{.spec} file, for expressing trace properties (e.g.,
+  ``channel~\texttt{out} always follows channel~\texttt{in}'').
+\item \textbf{Trace refinement:} Check that the implementation's
+  trace set is a subset of the specification's trace set, following
+  the standard CSP refinement algorithm.
+\item \textbf{Failures refinement} (stretch goal): Full
+  failures-model refinement checking.
+\item Documentation and user guide.
+\end{itemize}
+
+\textbf{Milestone:} Can express and verify a simple ordering property
+on the producer-consumer example (``consumer receives values in the
+order the producer sent them'').
+
+%----------------------------------------------------------------------
+\subsection{Timeline Summary}
+%----------------------------------------------------------------------
+
+\begin{center}
+\begin{tabular}{llll}
+\toprule
+\textbf{Phase} & \textbf{Focus} & \textbf{Key Deliverable} & \textbf{Duration} \\
+\midrule
+1 & LTS extraction  & Per-process LTS from \texttt{cspc} & 6--8 weeks \\
+2 & Deadlock checking & Product explorer + counterexamples & 8--10 weeks \\
+3 & Reduction  & POR, symmetry, data abstraction & 8--12 weeks \\
+4 & Livelock \& refinement & Spec language + refinement checker & 10--14 weeks \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Phases~1 and~2 together deliver the minimum viable product: a deadlock
+checker for multi-process CSP systems.  Phases~3 and~4 extend
+scalability and expressiveness incrementally.
+
+%======================================================================
+\section{Implementation Status}
+%======================================================================
+
+Phases~1 and~2 have been implemented in the \texttt{cspc} toolchain.
+This section documents what was built, how it performs, and what
+we learned.
+
+%----------------------------------------------------------------------
+\subsection{Phase~1: Per-Process LTS Extraction (Complete)}
+%----------------------------------------------------------------------
+
+LTS extraction is implemented as a Scheme pass within \texttt{cspc}.
+The function \texttt{(extract-system-lts!~\textit{sys-file})} compiles
+each process type referenced by a \texttt{.sys} file, runs the 9-pass
+compiler to produce the intermediate representation, and then performs a
+symbolic walk of the compiled state machine.  States correspond to
+blocking points (channel sends and receives); transitions are labelled
+with \texttt{(send~\textit{ch})} or \texttt{(recv~\textit{ch})} for
+channel operations, and \texttt{tau} for internal (unobservable)
+transitions such as guarded-repetition termination.
+
+The per-process LTSs are compact.  For the dining philosophers
+benchmark, the deterministic fork process has 5~states and 4~transitions;
+the na\"ive philosopher has 5~states and 4~transitions.  This confirms
+the blocking-point hypothesis: hardware CSP processes yield small LTSs.
+
+%----------------------------------------------------------------------
+\subsection{Phase~2a: Explicit-State Product Composition (Complete)}
+%----------------------------------------------------------------------
+
+The explicit-state deadlock checker composes per-process LTSs into a
+product LTS on-the-fly using BFS.  Synchronization follows the
+\texttt{.sys} topology: a \texttt{(send~\textit{ch})} transition in one
+instance synchronizes with a \texttt{(recv~\textit{ch})} transition in
+the connected instance; \texttt{tau} transitions are taken independently.
+A product state is deadlocked if no component has an enabled transition.
+
+When deadlock is found, the checker returns a counterexample trace
+(sequence of synchronization events leading to the deadlocked state).
+The BFS guarantees the trace is of minimum length.
+
+The checker is implemented in Scheme (\texttt{product.scm}) and uses
+the Modula-3 \texttt{RefSeq.T} type for the BFS queue.  It handles
+all 15~acceptance tests, including $N = 2$ and $N = 3$ dining
+philosophers with both deterministic and probe-based forks.
+
+\textbf{Limitation:} The explicit-state approach enumerates product
+states one at a time.  For $N = 8$ dining philosophers, the product
+state space has $5^{16} \approx 1.5 \times 10^{11}$ states
+(8~forks $\times$ 8~philosophers, each with 5~states), which is
+infeasible for explicit enumeration.
+
+%----------------------------------------------------------------------
+\subsection{Phase~2b: BDD-Based Symbolic Deadlock Checking (Complete)}
+%----------------------------------------------------------------------
+
+To handle larger systems, a BDD-based symbolic deadlock checker was
+implemented (\texttt{symbolic.scm}).  The checker encodes process states
+as Boolean variables (2~bits per instance for a 5-state process),
+builds the product transition relation $T(V, V')$ as a single BDD,
+and computes reachability via a fixed-point iteration:
+\[
+  \mathit{Reached}_{i+1} = \mathit{Reached}_i \cup
+    \mathit{Image}(\mathit{Reached}_i, T)
+\]
+where $\mathit{Image}$ conjoins the reached set with $T$, existentially
+quantifies out the current-state variables, and renames next-state
+variables to current-state variables.
+
+After convergence, deadlocked states are those in the reached set with
+no successor: $\mathit{Deadlock} = \mathit{Reached} \wedge \neg \mathit{HasSucc}$,
+where $\mathit{HasSucc} = \exists V'. T(V, V')$.
+
+The implementation uses the existing \texttt{bdd} library (part of
+the CM3 tree).  All BDD operations are accessible from Scheme via
+auto-generated stubs (\texttt{SchemeStubs}).
+
+\textbf{Results.}
+The symbolic checker handles $N = 8$ dining philosophers (16~instances,
+32~BDD variables) and reaches the fixed point in 8~iterations.
+The following table shows the BDD size of the reached set at each
+iteration:
+
+\begin{center}
+\begin{tabular}{rr}
+\toprule
+\textbf{Iteration} & \textbf{BDD nodes} \\
+\midrule
+0 & 194 \\
+1 & 474 \\
+2 & 866 \\
+3 & 1,230 \\
+4 & 1,454 \\
+5 & 1,542 \\
+6 & 1,562 \\
+7 & 1,564 \\
+8 (fixed point) & 1,564 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The BDD representation is compact: 1,564~nodes encode the full
+reachable state set (which contains an exponential number of concrete
+states).  The deadlock BDD has 66~nodes.  Execution time on Apple~M2
+is approximately 35~seconds, dominated by the image computation at each
+iteration.  Peak memory is approximately 2.7~GB.
+
+%----------------------------------------------------------------------
+\subsection{Memory Analysis and BDD Garbage Collection}
+%----------------------------------------------------------------------
+
+The 2.7~GB peak memory for $N = 8$ dining philosophers motivated an
+investigation into BDD garbage collection.  The \texttt{bdd} library
+maintains two data structures per variable that grow without bound:
+
+\begin{description}
+\item[Unique tables.]  Map $(l, r) \to \mathit{node}$, ensuring
+  that structurally identical BDD nodes are pointer-equal (canonicity).
+  Every BDD node ever created under a variable remains in this table.
+\item[Operation caches.]  Map $(\mathit{input}_1, \mathit{input}_2)
+  \to \mathit{result}$ for each operation (And, Or, Not, MakeTrue,
+  MakeFalse).  These provide memoization for recursive BDD operations.
+\end{description}
+
+Both tables hold strong references to BDD nodes, preventing the
+Modula-3 garbage collector from reclaiming them even when no user
+code references the intermediate results.
+
+\textbf{Solution: explicit mark-and-sweep.}
+Four procedures were added to the \texttt{BDD} interface
+(in the CM3 repository):
+
+\begin{description}
+\item[\texttt{ClearCaches()}.]  Drops all operation caches.
+  $O(\text{number of variables})$, no DAG traversal.
+\item[\texttt{MarkRoot(t)}.]  Adds \texttt{t} to a GC root set.
+\item[\texttt{UnmarkRoots()}.]  Clears the GC root set.
+\item[\texttt{CollectGarbage()}.]  Marks all nodes reachable from the
+  root set, rebuilds each variable's unique table keeping only live
+  entries, clears all operation caches, and clears the root set.
+\end{description}
+
+These are callable from Scheme via auto-generated stubs
+(\texttt{BDD.ClearCaches}, \texttt{BDD.MarkRoot}, etc.).
+
+\textbf{Benchmark results.}
+Inserting \texttt{CollectGarbage} between fixed-point iterations on
+the $N = 8$ dining philosophers benchmark yielded the following:
+
+\begin{center}
+\begin{tabular}{lrr}
+\toprule
+& \textbf{Without GC} & \textbf{With GC} \\
+\midrule
+Peak RSS     & 2,702~MB & 2,749~MB \\
+Wall time    & 34.7~s   & 47.8~s \\
+Result       & DEADLOCK & DEADLOCK \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The GC does not reduce peak memory and adds approximately 38\%
+overhead.  The reason is that peak memory is dominated by
+\emph{within-iteration} temporaries: the image computation
+$\texttt{BDD.And}(\mathit{reached}, T)$ creates a large intermediate
+BDD that is live throughout the existential quantification loop.
+The GC runs \emph{between} iterations, by which time the Modula-3
+runtime has already grown its heap to accommodate the peak, and
+does not return memory to the operating system.
+
+\textbf{Conclusion.}
+The GC hooks are retained in the BDD library for future use but
+are not called by the symbolic checker.  Reducing memory for
+large problems will require algorithmic improvements:
+partitioned transition relations (conjunctive/disjunctive
+partitioning of $T$), saturation-based image computation, or
+BDD variable reordering.  These are natural Phase~3 targets.
+
+%======================================================================
+\section{References}
+%======================================================================
+
+\begin{thebibliography}{99}
+
+\bibitem{hoare1985}
+C.~A.~R. Hoare,
+\emph{Communicating Sequential Processes},
+Prentice Hall, 1985.
+Available online: \url{http://www.usingcsp.com/}
+
+\bibitem{roscoe2010}
+A.~W. Roscoe,
+\emph{Understanding Concurrent Systems},
+Springer, 2010.
+
+\bibitem{fdr4}
+T.~Gibson-Robinson, P.~Armstrong, A.~Boulgakov, A.~W. Roscoe,
+``FDR3: A Modern Refinement Checker for CSP,''
+\emph{Proc.\ TACAS}, LNCS 8413, pp.~187--201, 2014.
+FDR4 documentation: \url{https://cocotec.io/fdr/}
+
+\bibitem{martin1990}
+A.~J. Martin,
+``Programming in VLSI: From Communicating Processes to Delay-Insensitive Circuits,''
+\emph{Developments in Concurrency and Communication}, UT Year of Programming Series,
+Addison-Wesley, pp.~1--64, 1990.
+
+\bibitem{martin2006}
+A.~J. Martin, M.~Nystr\"om,
+``Asynchronous Techniques for System-on-Chip Design,''
+\emph{Proc.\ IEEE}, vol.~94, no.~6, pp.~1089--1120, June 2006.
+
+\bibitem{josephs1995}
+M.~B. Josephs, J.~T. Udding,
+``An Overview of DI Algebra,''
+\emph{Proc.\ Hawaii International Conference on System Sciences}, 1995.
+
+\bibitem{por}
+P.~Godefroid,
+\emph{Partial-Order Methods for the Verification of Concurrent Systems},
+LNCS 1032, Springer, 1996.
+
+\bibitem{mcmillan1993}
+K.~L. McMillan,
+\emph{Symbolic Model Checking},
+Kluwer Academic Publishers, 1993.
+
+\bibitem{supercomb}
+A.~W. Roscoe,
+``Compiling Shared-Nothing CSP to Supercombinators: A Progress Report,''
+Technical report, University of Oxford, 2013.
+
+\end{thebibliography}
+
+\end{document}
