@@ -1,0 +1,51 @@
+// Dining Philosophers (N=8) with deterministic fork.
+// Expected: DEADLOCK (circular wait).
+system DiningEightDet;
+  var f0lg : channel(32); var f0la : channel(32);
+  var f0rg : channel(32); var f0ra : channel(32);
+  var f1lg : channel(32); var f1la : channel(32);
+  var f1rg : channel(32); var f1ra : channel(32);
+  var f2lg : channel(32); var f2la : channel(32);
+  var f2rg : channel(32); var f2ra : channel(32);
+  var f3lg : channel(32); var f3la : channel(32);
+  var f3rg : channel(32); var f3ra : channel(32);
+  var f4lg : channel(32); var f4la : channel(32);
+  var f4rg : channel(32); var f4ra : channel(32);
+  var f5lg : channel(32); var f5la : channel(32);
+  var f5rg : channel(32); var f5ra : channel(32);
+  var f6lg : channel(32); var f6la : channel(32);
+  var f6rg : channel(32); var f6ra : channel(32);
+  var f7lg : channel(32); var f7la : channel(32);
+  var f7rg : channel(32); var f7ra : channel(32);
+
+  process Fork = "phil_fork_det.csp"
+    port out LG : channel(32)
+    port in  LA : channel(32)
+    port out RG : channel(32)
+    port in  RA : channel(32);
+
+  process Phil = "phil_naive.csp"
+    port in  LG : channel(32)
+    port out LT : channel(32)
+    port in  RG : channel(32)
+    port out RT : channel(32);
+
+begin
+  var fork0 : Fork(LG => f0lg, LA => f0la, RG => f0rg, RA => f0ra);
+  var fork1 : Fork(LG => f1lg, LA => f1la, RG => f1rg, RA => f1ra);
+  var fork2 : Fork(LG => f2lg, LA => f2la, RG => f2rg, RA => f2ra);
+  var fork3 : Fork(LG => f3lg, LA => f3la, RG => f3rg, RA => f3ra);
+  var fork4 : Fork(LG => f4lg, LA => f4la, RG => f4rg, RA => f4ra);
+  var fork5 : Fork(LG => f5lg, LA => f5la, RG => f5rg, RA => f5ra);
+  var fork6 : Fork(LG => f6lg, LA => f6la, RG => f6rg, RA => f6ra);
+  var fork7 : Fork(LG => f7lg, LA => f7la, RG => f7rg, RA => f7ra);
+
+  var phil0 : Phil(LG => f0lg, LT => f0la, RG => f1rg, RT => f1ra);
+  var phil1 : Phil(LG => f1lg, LT => f1la, RG => f2rg, RT => f2ra);
+  var phil2 : Phil(LG => f2lg, LT => f2la, RG => f3rg, RT => f3ra);
+  var phil3 : Phil(LG => f3lg, LT => f3la, RG => f4rg, RT => f4ra);
+  var phil4 : Phil(LG => f4lg, LT => f4la, RG => f5rg, RT => f5ra);
+  var phil5 : Phil(LG => f5lg, LT => f5la, RG => f6rg, RT => f6ra);
+  var phil6 : Phil(LG => f6lg, LT => f6la, RG => f7rg, RT => f7ra);
+  var phil7 : Phil(LG => f7lg, LT => f7la, RG => f0rg, RT => f0ra);
+end.
