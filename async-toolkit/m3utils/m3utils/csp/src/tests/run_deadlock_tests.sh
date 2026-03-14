@@ -305,6 +305,87 @@ fi
 rm -rf "$TDIR3"
 
 # ============================================================================
+#  BATCH 4: Symbolic (BDD-based) deadlock checking (1 cspc invocation)
+# ============================================================================
+#
+# Same systems as batches 1-3, checked with check-deadlock-symbolic!.
+# Verifies that BDD-based results agree with explicit-state results.
+
+echo ""
+echo "--- Batch 4: symbolic deadlock checking ---"
+
+TDIR4=$(mktemp -d)
+
+cp "$SYSDIR"/*.csp "$TDIR4/" 2>/dev/null || true
+cp "$SYSDIR"/build_prodcons.sys "$TDIR4/"
+cp "$SYSDIR"/build_pipeline.sys "$TDIR4/"
+cp "$SYSDIR"/build_dining_det.sys "$TDIR4/"
+cp "$SYSDIR"/build_dining_asym.sys "$TDIR4/"
+cp "$SYSDIR"/build_dining_three_det.sys "$TDIR4/"
+cp "$SYSDIR"/build_dining_three_asym.sys "$TDIR4/"
+
+cat > "$TDIR4/driver.scm" <<'ENDSCM'
+(load (string-append (Env.Get "M3UTILS") "/csp/src/setup.scm"))
+(load (string-append (Env.Get "M3UTILS") "/csp/src/cspbuild.scm"))
+
+(define (symbolic-test name sys-file expect-deadlock-free)
+  (define result (check-deadlock-symbolic! sys-file))
+  (if expect-deadlock-free
+      (dis name ".sym-deadlock-free="
+           (if (eq? result #t) "yes" "no") dnl)
+      (dis name ".sym-deadlock="
+           (if (eq? result #f) "yes" "no") dnl)))
+
+;; Deadlock-free systems
+(symbolic-test "prodcons"   "build_prodcons.sys"           #t)
+(symbolic-test "pipeline"   "build_pipeline.sys"           #t)
+(symbolic-test "dining_asym_2" "build_dining_asym.sys"     #t)
+(symbolic-test "dining_asym_3" "build_dining_three_asym.sys" #t)
+
+;; Deadlock systems
+(symbolic-test "dining_det_2"   "build_dining_det.sys"       #f)
+(symbolic-test "dining_det_3"   "build_dining_three_det.sys" #f)
+
+(dis "BATCH4-DONE" dnl)
+(exit)
+ENDSCM
+
+run_cspc "$TDIR4" driver.scm
+
+if [ $_RC -ne 0 ]; then
+    echo "  FAIL  batch 4 cspc exited with rc=$_RC"
+    echo "$_OUTPUT" | tail -20
+    FAIL=$((FAIL + 6))
+    TOTAL=$((TOTAL + 6))
+else
+    if ! echo "$_OUTPUT" | grep -q "BATCH4-DONE"; then
+        echo "  FAIL  batch 4 did not complete"
+        echo "$_OUTPUT" | tail -20
+        FAIL=$((FAIL + 6))
+        TOTAL=$((TOTAL + 6))
+    else
+        for name in prodcons pipeline dining_asym_2 dining_asym_3; do
+            if check_result "${name}.sym-deadlock-free" "yes"; then
+                pass "sym-deadlock-free:$name"
+            else
+                actual=$(get_result "${name}.sym-deadlock-free")
+                fail "sym-deadlock-free:$name" "expected sym-deadlock-free=yes, got '$actual'"
+            fi
+        done
+        for name in dining_det_2 dining_det_3; do
+            if check_result "${name}.sym-deadlock" "yes"; then
+                pass "sym-deadlock:$name"
+            else
+                actual=$(get_result "${name}.sym-deadlock")
+                fail "sym-deadlock:$name" "expected sym-deadlock=yes, got '$actual'"
+            fi
+        done
+    fi
+fi
+
+rm -rf "$TDIR4"
+
+# ============================================================================
 #  Summary
 # ============================================================================
 

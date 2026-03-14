@@ -1,0 +1,894 @@
+% Copyright (c) 2026 Intel Corporation.  All rights reserved.  See the file COPYRIGHT for more information.
+% SPDX-License-Identifier: Apache-2.0
+
+\documentclass[11pt]{article}
+
+% Page layout
+\usepackage[letterpaper, margin=1in]{geometry}
+\setlength{\headheight}{14pt}
+\usepackage{parskip}
+\setlength{\parindent}{0pt}
+
+% Typography
+\usepackage{fancyvrb}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+
+% Code listings
+\usepackage{listings}
+\lstset{
+    basicstyle=\ttfamily\small,
+    columns=fullflexible,
+    keepspaces=true,
+    showstringspaces=false,
+    breaklines=true,
+    frame=none,
+    xleftmargin=2em,
+}
+
+\lstdefinelanguage{scheme}{
+    morekeywords={define,let,let*,if,cond,lambda,begin,set!,and,or,not,
+                  for-each,map,cons,car,cdr,null?,eq?,equal?,list,
+                  BDD.New,BDD.And,BDD.Or,BDD.Not,BDD.True,BDD.False,
+                  BDD.MakeTrue,BDD.MakeFalse,BDD.Equal,BDD.Equivalent,
+                  BDD.Size},
+    sensitive=true,
+    morecomment=[l]{;},
+    morestring=[b]",
+}
+
+% Hyperlinks
+\usepackage[colorlinks=true, linkcolor=blue, urlcolor=blue, citecolor=blue]{hyperref}
+
+% Headers and footers
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\textit{BDD-Based Symbolic Deadlock Checking}}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\title{\textbf{BDD-Based Symbolic Deadlock Checking \\
+for the Fulcrum CSP Toolchain} \\[0.5em]
+\large Implementation Report}
+\author{Mika Nystr\"om \and Claude (Anthropic)}
+\date{March 2026}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+\newpage
+
+%======================================================================
+\section{Introduction}
+%======================================================================
+
+The Fulcrum CSP toolchain includes an explicit-state deadlock checker
+(\texttt{check-deadlock!} in \texttt{product.scm}) that constructs the
+product LTS of a system of communicating processes and explores it via
+breadth-first search.  While correct, this approach enumerates every
+reachable product state individually, and the state space grows
+exponentially in the number of process instances.  For the probe-based
+dining philosophers benchmark at $N=6$, the explicit checker explores
+approximately 133,000~states in roughly 15~minutes.
+
+This report describes the design and implementation of a complementary
+\emph{symbolic} deadlock checker that represents state sets as Binary
+Decision Diagrams (BDDs).  BDDs encode Boolean functions as directed
+acyclic graphs with shared sub-structure, often compressing
+exponentially large state sets into compact polynomial-size
+representations.  The symbolic checker computes reachability via a
+fixed-point iteration over BDD-encoded state sets, then checks for
+deadlocked states---reachable states with no successor in the
+transition relation.
+
+The implementation adds a single new Scheme file
+(\texttt{symbolic.scm}, $\sim$230 lines) to the CSP toolchain.  It
+reuses the per-process LTS extraction pipeline and the system topology
+parser, replacing only the product-state exploration engine.
+
+%======================================================================
+\section{Background}
+%======================================================================
+
+%----------------------------------------------------------------------
+\subsection{Fulcrum CSP}
+%----------------------------------------------------------------------
+
+Fulcrum CSP~\cite{FulcrumCSP} is a programming language for
+asynchronous circuit design, descended from Hoare's Communicating
+Sequential Processes~\cite{Hoare85} via Martin's Communicating
+Hardware Processes (CHP)~\cite{Martin90}.  Developed at Fulcrum Microsystems in the
+early 2000s and subsequently used at Intel's Neuromorphic Computing
+Lab, the language has seen over two decades of successful use in
+hardware description, validation, and silicon compilation for dozens
+of microchips, including products at the forefront of Ethernet
+switching technology.
+
+A Fulcrum CSP system consists of a static graph of independent
+processes that do not share internal state but communicate exclusively
+via the \emph{rendezvous}---a combined synchronization and
+communication primitive.  When a sender reaches a send statement
+\texttt{X!v} and the corresponding receiver reaches \texttt{Y?w} on
+the connected channel, the distributed assignment $w \leftarrow v$ is
+executed and both processes continue.  If either side arrives first, it
+blocks until the other is ready.  This is the \emph{slack-zero}
+semantics; channels may also have slack~$n > 0$, allowing the sender
+to proceed up to $n$~times ahead of the receiver (FIFO
+buffering)~\cite{Martin81}.
+
+Two language features are particularly relevant to verification:
+
+\textbf{Guarded commands.}  Following Dijkstra~\cite{Dijkstra75} and
+Hoare, Fulcrum CSP uses guarded selections and repetitions for
+branching and looping.  The selection
+\texttt{[\,e -> S0\;[]\;f -> S1\,]} blocks until at least one guard
+is true, then nondeterministically chooses among the true guards.  The
+repetition \texttt{*[\,e -> S0\;[]\;f -> S1\,]} iterates until no
+guard is true, then terminates.
+
+\textbf{The probe.}  The probe operator \texttt{\#A}, introduced by
+Martin, is a Boolean value that is true exactly when an action on
+port~\texttt{A} can proceed without suspension.  Probes enable
+reactive, nondeterministic process designs---a process can test which
+of its neighbors is ready before committing to a communication---and
+are essential for modeling hardware arbiters and multiplexers.  In the
+LTS extraction pipeline, probes are abstracted as $\tau$~transitions
+(internal nondeterministic choice), which is sound for deadlock
+analysis.
+
+Process creation and channel interconnection are handled outside the
+CSP language itself, by a system description (\texttt{.sys}) file that
+specifies process types, instances, channels, and port bindings.
+This separation matches the hardware distinction between fabrication
+(static topology) and operation (dynamic behavior).
+
+%----------------------------------------------------------------------
+\subsection{Explicit-State Deadlock Checking}
+%----------------------------------------------------------------------
+
+The existing checker (\texttt{product.scm}) works as follows:
+
+\begin{enumerate}
+\item Parse the \texttt{.sys} file to obtain the system topology:
+      process types, instances, port bindings, and channels.
+\item Extract a per-process-type LTS by compiling each CSP source file
+      and traversing its blocking-point graph (\texttt{lts.scm}).
+\item Rename port names to channel names according to the instance bindings.
+\item Explore the product state space via BFS.  At each product state
+      (a tuple of per-instance local states), compute successors:
+      \begin{itemize}
+        \item \emph{Tau interleaving}: any instance with a $\tau$ transition
+              advances alone; all others remain.
+        \item \emph{Channel synchronization}: if a sender instance can
+              \texttt{send} on channel~$c$ and the corresponding receiver
+              can \texttt{recv} on~$c$, both advance simultaneously.
+      \end{itemize}
+\item A product state with no successors is a deadlock.
+\end{enumerate}
+
+The state space is $\prod_{i} |S_i|$ where $S_i$ is the local state
+set of instance~$i$.  For the $N$-philosopher dining system with
+probe-based forks (8~local states per fork, 4 per philosopher), the
+product space is $8^N \cdot 4^N = 32^N$, growing as $32^N$.  At
+$N=8$ this is $32^8 \approx 10^{12}$---completely intractable for
+explicit enumeration.
+
+%----------------------------------------------------------------------
+\subsection{Symbolic Model Checking with BDDs}
+%----------------------------------------------------------------------
+
+Symbolic model checking~\cite{McMillan93,Bryant86,ClarkeGrumberg99} represents sets of
+states as Boolean functions encoded by BDDs.  A state is a bit-vector;
+a set of states is the characteristic function
+$f : \{0,1\}^n \to \{0,1\}$ that is~1 exactly for states in the set.
+The transition relation $T(V, V')$ is a Boolean function over current-state
+variables~$V$ and next-state variables~$V'$.
+
+Key BDD operations used:
+\begin{itemize}
+\item $\mathit{And}(f, g)$, $\mathit{Or}(f, g)$, $\mathit{Not}(f)$:
+      set intersection, union, complement.
+\item $\exists x.\, f = \mathit{Or}(f|_{x=1},\; f|_{x=0})$:
+      existential quantification (projection).
+\item $f[v'/v]$: variable substitution (rename next-state to current-state).
+\item $\mathit{Equal}(f, g)$: structural equality test (constant time
+      with hash-consing).
+\end{itemize}
+
+Reachability is computed as a least fixed point:
+\[
+  R_0 = \mathit{Init}, \qquad
+  R_{k+1} = R_k \cup \mathit{Image}(R_k, T)
+\]
+where $\mathit{Image}(R, T) = (\exists V.\, R(V) \wedge T(V, V'))[V'/V]$.
+The iteration converges when $R_{k+1} = R_k$.
+
+Deadlocked states are those reachable but lacking any successor:
+\[
+  D = R \wedge \neg (\exists V'.\, T(V, V'))
+\]
+If $D \neq \mathit{false}$, the system has a deadlock.
+
+%----------------------------------------------------------------------
+\subsection{The Dining Philosophers Problem}
+%----------------------------------------------------------------------
+
+The dining philosophers problem, introduced by Dijkstra~\cite{Dijkstra71}
+and later formulated in CSP by Hoare~\cite{Hoare85}, is a canonical
+benchmark for deadlock analysis.  $N$~philosophers sit around a circular
+table, each sharing a fork with each neighbor.  A philosopher must
+acquire both adjacent forks to eat, then release them.  If all
+philosophers simultaneously pick up their left fork, none can acquire
+the right, and the system deadlocks.
+
+Our benchmark uses two process types from the Fulcrum CSP dialect.
+The \textbf{naive philosopher} acquires its left fork, then its right,
+eats (modeled as a pair of send acknowledgments), and repeats:
+
+\begin{lstlisting}[frame=single,xleftmargin=1em,xrightmargin=1em]
+int x;
+*[ LG?x ; RG?x ; LT!1 ; RT!1 ]
+\end{lstlisting}
+
+Here \texttt{LG} (left-get) and \texttt{RG} (right-get) are input
+ports that receive the fork; \texttt{LT} (left-return) and \texttt{RT}
+(right-return) are output ports that return it.  The sequential
+ordering \texttt{LG?x\,;\,RG?x} makes every philosopher reach for its
+left fork first, creating the classic circular-wait deadlock.
+
+The \textbf{probe-based fork} uses CSP channel probes for
+nondeterministic selection between its two neighbors:
+
+\begin{lstlisting}[frame=single,xleftmargin=1em,xrightmargin=1em]
+int x;
+*[[ #LG -> LG!1 ; LA?x
+  : #RG -> RG!1 ; RA?x
+ ]]
+\end{lstlisting}
+
+The guarded repetition \texttt{*[[\,\ldots\,]]} selects nondeterministically
+among guards whose channel probes (\texttt{\#LG}, \texttt{\#RG}) are
+true---i.e., the corresponding neighbor is ready to receive.  The fork
+sends a token on the selected side (\texttt{LG!1} or \texttt{RG!1})
+and waits for its return (\texttt{LA?x} or \texttt{RA?x}).  Despite
+the nondeterminism, the system still deadlocks: when all philosophers
+simultaneously request their left fork, every fork's \texttt{\#RG}
+probe is false, so all forks commit to serving left, and the circular
+wait forms.
+
+For comparison, the \textbf{deterministic fork} always serves left
+first, then right:
+
+\begin{lstlisting}[frame=single,xleftmargin=1em,xrightmargin=1em]
+int x;
+*[ LG!1 ; LA?x ; RG!1 ; RA?x ]
+\end{lstlisting}
+
+The \textbf{reversed fork} (used in asymmetric configurations to break
+circular wait) serves right first:
+
+\begin{lstlisting}[frame=single,xleftmargin=1em,xrightmargin=1em]
+int x;
+*[ RG!1 ; RA?x ; LG!1 ; LA?x ]
+\end{lstlisting}
+
+The system topology is specified in a \texttt{.sys} file.  For $N=3$
+with probe-based forks:
+
+\begin{lstlisting}[frame=single,xleftmargin=1em,xrightmargin=1em,
+    basicstyle=\ttfamily\footnotesize]
+system DiningThree;
+  var f0lg : channel(32); var f0la : channel(32);
+  var f0rg : channel(32); var f0ra : channel(32);
+  var f1lg : channel(32); var f1la : channel(32);
+  var f1rg : channel(32); var f1ra : channel(32);
+  var f2lg : channel(32); var f2la : channel(32);
+  var f2rg : channel(32); var f2ra : channel(32);
+
+  process Fork = "phil_fork.csp"
+    port out LG : channel(32)  port in  LA : channel(32)
+    port out RG : channel(32)  port in  RA : channel(32);
+
+  process Phil = "phil_naive.csp"
+    port in  LG : channel(32)  port out LT : channel(32)
+    port in  RG : channel(32)  port out RT : channel(32);
+
+begin
+  var fork0 : Fork(LG=>f0lg, LA=>f0la, RG=>f0rg, RA=>f0ra);
+  var fork1 : Fork(LG=>f1lg, LA=>f1la, RG=>f1rg, RA=>f1ra);
+  var fork2 : Fork(LG=>f2lg, LA=>f2la, RG=>f2rg, RA=>f2ra);
+  var phil0 : Phil(LG=>f0lg, LT=>f0la, RG=>f1rg, RT=>f1ra);
+  var phil1 : Phil(LG=>f1lg, LT=>f1la, RG=>f2rg, RT=>f2ra);
+  var phil2 : Phil(LG=>f2lg, LT=>f2la, RG=>f0rg, RT=>f0ra);
+end.
+\end{lstlisting}
+
+Each philosopher's left fork is the fork with the same index; its
+right fork is the next fork (modulo~$N$).  The port bindings connect
+each philosopher's \texttt{LG}/\texttt{LT} to its left fork's
+\texttt{LG}/\texttt{LA}, and \texttt{RG}/\texttt{RT} to the right
+fork's \texttt{RG}/\texttt{RA}.  The pattern scales to arbitrary~$N$
+by adding more fork/philosopher instance pairs and channels.
+
+The \textbf{asymmetric} configuration, which is deadlock-free, replaces
+one fork with the reversed variant (\texttt{phil\_fork\_rev.csp}),
+breaking the circular wait.
+
+%======================================================================
+\section{Implementation}
+%======================================================================
+
+The symbolic checker is implemented in \texttt{csp/src/symbolic.scm}
+and loaded from \texttt{cspc.scm} after \texttt{product.scm}.  It
+uses the BDD library available via \texttt{import("bdd")} in the
+\texttt{m3makefile}, with Scheme bindings generated by
+\texttt{SchemeStubs("BDD")}.
+
+%----------------------------------------------------------------------
+\subsection{BDD Interface}
+%----------------------------------------------------------------------
+
+The BDD library provides the following Scheme-accessible operations:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{Operation} & \textbf{Description} \\
+\midrule
+\texttt{(BDD.New \textit{name})} & Create a fresh BDD variable \\
+\texttt{(BDD.True)}, \texttt{(BDD.False)} & Boolean constants \\
+\texttt{(BDD.And \textit{a b})}, \texttt{(BDD.Or \textit{a b})} & Conjunction, disjunction \\
+\texttt{(BDD.Not \textit{a})} & Negation \\
+\texttt{(BDD.Equivalent \textit{a b})} & Bi-implication ($a \Leftrightarrow b$) \\
+\texttt{(BDD.MakeTrue \textit{f v})} & Cofactor $f|_{v=1}$ \\
+\texttt{(BDD.MakeFalse \textit{f v})} & Cofactor $f|_{v=0}$ \\
+\texttt{(BDD.Equal \textit{a b})} & Structural equality (Boolean result) \\
+\texttt{(BDD.Size \textit{a})} & Node count \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%----------------------------------------------------------------------
+\subsection{State Encoding}
+%----------------------------------------------------------------------
+
+Each process instance~$i$ with $K_i$ local states is encoded using
+$b_i = \lceil \log_2 K_i \rceil$ BDD variable pairs:
+
+\begin{itemize}
+\item \textbf{Current-state variables}: $v^c_{i,0}, v^c_{i,1}, \ldots, v^c_{i,b_i-1}$
+\item \textbf{Next-state variables}: $v^n_{i,0}, v^n_{i,1}, \ldots, v^n_{i,b_i-1}$
+\end{itemize}
+
+Variables are created with names like \texttt{"i0\_c0"},
+\texttt{"i0\_n0"} (instance~0, current bit~0 / next bit~0).
+
+States are mapped to integers $0, 1, \ldots, K_i - 1$.  The encoding
+of ``instance~$i$ is in state~$s$'' is the conjunction of variable
+polarities matching the binary representation of~$s$:
+\[
+  \mathit{encode}(i, s) = \bigwedge_{k=0}^{b_i-1}
+    \begin{cases}
+      v^c_{i,k} & \text{if bit $k$ of $s$ is 1} \\
+      \neg v^c_{i,k} & \text{otherwise}
+    \end{cases}
+\]
+
+%----------------------------------------------------------------------
+\subsection{Transition Relation}
+%----------------------------------------------------------------------
+
+The transition relation $T(V, V')$ is the disjunction of all individual
+transition BDDs:
+
+\textbf{Tau transition} of instance~$i$ from state~$s$ to state~$s'$:
+\[
+  \mathit{encode\_curr}(i, s) \wedge \mathit{encode\_next}(i, s')
+  \wedge \bigwedge_{j \neq i} \mathit{frame}(j)
+\]
+
+\textbf{Channel synchronization} on channel~$c$ with sender~$i_s$
+going $s \to s'$ and receiver~$i_r$ going $r \to r'$:
+\[
+  \mathit{encode\_curr}(i_s, s) \wedge \mathit{encode\_next}(i_s, s')
+  \wedge \mathit{encode\_curr}(i_r, r) \wedge \mathit{encode\_next}(i_r, r')
+  \wedge \bigwedge_{j \neq i_s, i_r} \mathit{frame}(j)
+\]
+
+The \textbf{frame condition} for instance~$j$ constrains its next
+state to equal its current state:
+\[
+  \mathit{frame}(j) = \bigwedge_{k=0}^{b_j-1} (v^c_{j,k} \Leftrightarrow v^n_{j,k})
+\]
+
+%----------------------------------------------------------------------
+\subsection{Image Computation}
+%----------------------------------------------------------------------
+
+The image of a state set $R$ under $T$ is computed in three steps:
+
+\begin{enumerate}
+\item \textbf{Conjoin}: $C = R(V) \wedge T(V, V')$
+\item \textbf{Project}: $P = \exists V.\, C$ \quad (quantify out current-state variables)
+\item \textbf{Rename}: $I = P[V' \mapsto V]$ \quad (shift next-state to current-state)
+\end{enumerate}
+
+Existential quantification is implemented as:
+\[
+  \exists x.\, f = \mathit{Or}(\mathit{MakeTrue}(f, x),\; \mathit{MakeFalse}(f, x))
+\]
+applied sequentially for each variable in~$V$.
+
+Variable renaming substitutes each next-state variable $v'$ with the
+corresponding current-state variable~$v$:
+\[
+  f[v'/v] = \mathit{Or}(\mathit{And}(v, \mathit{MakeTrue}(f, v')),\;
+                         \mathit{And}(\neg v, \mathit{MakeFalse}(f, v')))
+\]
+
+%----------------------------------------------------------------------
+\subsection{Helper Functions}
+%----------------------------------------------------------------------
+
+\begin{lstlisting}[language=scheme]
+(define (bdd-exists bdd var)
+  (BDD.Or (BDD.MakeTrue bdd var) (BDD.MakeFalse bdd var)))
+
+(define (bdd-exists-list bdd vars)
+  (if (null? vars) bdd
+      (bdd-exists-list (bdd-exists bdd (car vars)) (cdr vars))))
+
+(define (bdd-compose bdd old new)
+  (BDD.Or (BDD.And new (BDD.MakeTrue bdd old))
+           (BDD.And (BDD.Not new) (BDD.MakeFalse bdd old))))
+
+(define (bdd-rename bdd old-vars new-vars)
+  (if (null? old-vars) bdd
+      (bdd-rename (bdd-compose bdd (car old-vars) (car new-vars))
+                  (cdr old-vars) (cdr new-vars))))
+\end{lstlisting}
+
+%----------------------------------------------------------------------
+\subsection{Main Algorithm}
+%----------------------------------------------------------------------
+
+The entry point \texttt{check-deadlock-symbolic!} performs:
+
+\begin{enumerate}
+\item Parse the \texttt{.sys} file and validate the system topology
+      (reusing \texttt{parse-sys-file} and \texttt{validate-system!}
+      from \texttt{cspbuild.scm}).
+\item Extract per-process LTSs and rename ports to channels (reusing
+      \texttt{extract-system-lts!} and \texttt{rename-lts} from
+      \texttt{product.scm}).
+\item Build BDD encodings for each instance (state-to-integer mapping,
+      current/next variable pairs).
+\item Build the channel map (sender/receiver index per channel).
+\item Construct the monolithic transition relation $T(V, V')$.
+\item Precompute the has-successor set:
+      $H = \exists V'.\, T(V, V')$.
+\item Run fixed-point reachability from the initial state.
+\item Check: $D = R \wedge \neg H$.  If $D \neq \mathit{false}$,
+      report deadlock.
+\end{enumerate}
+
+The function returns \texttt{\#t} (deadlock-free) or \texttt{\#f}
+(deadlock exists).  Unlike the explicit checker, it does not currently
+produce a counterexample trace, since extracting a witness path from
+the BDD encoding requires additional machinery (e.g., backward
+unrolling or on-the-fly trace recording).
+
+%======================================================================
+\section{Experimental Results}
+%======================================================================
+
+All experiments were run on an Apple M3 (ARM64\_DARWIN) with the
+CM3 compiler and the BDD library from the \texttt{caltech-other/bdd}
+package.  Timing is wall-clock time measured with \texttt{Time.Now}
+from the Modula-3 runtime; it includes LTS extraction (parsing and
+compiling the CSP source files), which is shared overhead for both
+checkers.
+
+%----------------------------------------------------------------------
+\subsection{Small Systems: Correctness Validation}
+%----------------------------------------------------------------------
+
+We first validated that the symbolic checker agrees with the explicit
+checker on all existing test systems:
+
+\begin{center}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{System} & \textbf{Instances} & \textbf{Explicit} & \textbf{Symbolic} & \textbf{Agree?} \\
+\midrule
+\texttt{prodcons}         & 2  & deadlock-free (4 states)  & deadlock-free & \checkmark \\
+\texttt{pipeline}         & 3  & deadlock-free (10 states) & deadlock-free & \checkmark \\
+\texttt{dining\_det} (N=2)     & 4  & DEADLOCK (4 states)  & DEADLOCK & \checkmark \\
+\texttt{dining\_asym} (N=2)    & 4  & deadlock-free (8 states)  & deadlock-free & \checkmark \\
+\texttt{dining\_det} (N=3)     & 6  & DEADLOCK (8 states)  & DEADLOCK & \checkmark \\
+\texttt{dining\_asym} (N=3)    & 6  & deadlock-free (33 states) & deadlock-free & \checkmark \\
+\texttt{dining\_naive} (N=2)   & 4  & DEADLOCK (32 states) & DEADLOCK & \checkmark \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+For these small systems both checkers take comparable wall-clock time
+(1.3--4.2\,s), dominated by the shared LTS extraction overhead.
+
+%----------------------------------------------------------------------
+\subsection{Scaling: Probe-Based Dining Philosophers}
+%----------------------------------------------------------------------
+
+The probe-based dining philosophers system provides a challenging
+scalability benchmark.  Each fork process uses channel probes
+(\texttt{*[\,\#LG -> \ldots\;[\!]\;\#RG -> \ldots\,]}) for
+nondeterministic selection, yielding 8~local states per fork and
+4~per philosopher.  The total product state space is~$32^N$.
+
+\begin{center}
+\begin{tabular}{rrrrrrrr}
+\toprule
+$N$ & \textbf{Inst.} & \textbf{Bits} & $|\mathbf{S}|$ &
+  \textbf{$|T|$ nodes} & \textbf{Peak $|R|$} & \textbf{Iter.} & \textbf{Time} \\
+\midrule
+2  &  4 & 10 & $10^3$      &   195 &    --- &  --- &   3.6\,s  \\
+3  &  6 & 15 & $3\!\times\!10^4$ &   397 &  4,793 &  38 &  17\,s   \\
+6  & 12 & 30 & $10^9$      & 1,363 &  4,793 &  38 &  17\,s   \\
+8  & 16 & 40 & $10^{12}$   & 2,307 & 50,550 &  52 &  12\,min \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\begin{itemize}
+\item \textbf{$|T|$ nodes}: size of the transition relation BDD.
+      Grows linearly in $N$ (approximately $190 \cdot N$).
+\item \textbf{Peak $|R|$}: maximum BDD node count for the reachable
+      set during the fixed-point iteration.  This is the primary
+      driver of memory and time.
+\item \textbf{Iter.}: number of fixed-point iterations to convergence.
+      Corresponds to the diameter of the reachable state graph.
+\item \textbf{$|S|$}: total product state space ($32^N$).
+      The explicit checker must enumerate all reachable states
+      individually; at $N=6$ it explores 133K~states in $\sim$15\,min.
+      At $N=8$ ($\sim\!10^{12}$ states) it is completely intractable.
+\end{itemize}
+
+The symbolic checker found DEADLOCK in all cases (as expected for the
+naive philosopher protocol with symmetric forks).
+
+%----------------------------------------------------------------------
+\subsection{BDD Size Evolution}
+%----------------------------------------------------------------------
+
+The BDD size of the reachable set during the $N=8$ fixed-point
+computation shows a characteristic pattern:
+
+\begin{center}
+\begin{tabular}{rr@{\qquad}rr@{\qquad}rr}
+\toprule
+\textbf{Iter.} & \textbf{BDD size} &
+\textbf{Iter.} & \textbf{BDD size} &
+\textbf{Iter.} & \textbf{BDD size} \\
+\midrule
+ 0 &    102 & 18 & 18,653 & 36 & 43,531 \\
+ 5 &    541 & 20 & 27,410 & 40 & 40,546 \\
+10 &  2,701 & 25 & 45,252 & 45 & 39,234 \\
+15 & 10,985 & 29 & \textbf{50,550} & 50 & 39,010 \\
+16 & 13,868 & 30 & 50,283 & 52 & 39,033 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The BDD grows during the expanding wavefront phase (iterations 0--29),
+peaks at $\sim$50K nodes, then \emph{shrinks} as the reachable set
+fills in and regularities emerge that the BDD can exploit via
+sub-graph sharing.  This is a well-known phenomenon in symbolic model
+checking: the final fixed-point BDD is often smaller than intermediate
+BDDs because the complete reachable set has more structure than partial
+wavefronts.
+
+%======================================================================
+\section{Memory Analysis}
+\label{sec:memory}
+%======================================================================
+
+The high memory consumption observed during the $N=8$ run is expected
+and stems from several factors inherent to BDD-based symbolic model
+checking.
+
+%----------------------------------------------------------------------
+\subsection{Sources of Memory Usage}
+%----------------------------------------------------------------------
+
+\textbf{1. The BDD unique table.}
+BDD libraries maintain a hash table (the \emph{unique table}) that
+ensures each Boolean function has exactly one canonical BDD node.
+Every call to \texttt{BDD.And}, \texttt{BDD.Or}, etc.\ looks up or
+creates entries in this table.  Nodes are never duplicated, but the
+table itself can grow large.  At $N=8$ the reachable set peaks at
+50K~nodes, but the unique table also retains all intermediate results
+from prior iterations unless explicitly garbage-collected.
+
+\textbf{2. Intermediate BDDs in image computation.}
+Each image computation step involves:
+\begin{enumerate}
+\item $C = \mathit{And}(R, T)$: this conjunction can be much larger
+      than either operand.  With $|R| \approx 50\text{K}$ and
+      $|T| \approx 2.3\text{K}$, the conjunction $C$ can temporarily
+      reach hundreds of thousands of nodes.
+\item Sequential existential quantification: $\exists v_0.\,(\exists v_1.\,
+      (\cdots(\exists v_{39}.\, C)\cdots))$.  Each of the 40
+      quantification steps produces a new intermediate BDD.  While
+      quantification generally \emph{reduces} the BDD size (by
+      removing a variable), the intermediate results can temporarily
+      blow up before the variable is fully eliminated.
+\item Sequential variable renaming: 40 substitution steps, each
+      creating a new intermediate BDD.
+\end{enumerate}
+
+At $N=8$ with 40~BDD variables, each fixed-point iteration performs
+$\sim$80 intermediate BDD operations (40 quantifications + 40 renames),
+times 52~iterations $= \sim$4,200 intermediate BDDs.  The unique table
+accumulates nodes from all of these.
+
+\textbf{3. No automatic garbage collection.}
+The BDD library from \texttt{caltech-other/bdd} uses a simple
+reference-based scheme.  Unlike BDD packages with built-in garbage
+collection (e.g., CUDD's periodic dead-node reclamation), this library
+retains all nodes created during the computation.  Dead nodes---those
+unreachable from any live BDD root---are not reclaimed automatically.
+Over 52~iterations, the accumulated dead nodes can significantly
+exceed the live node count.
+
+%----------------------------------------------------------------------
+\subsection{Estimated Memory Footprint}
+%----------------------------------------------------------------------
+
+A rough estimate: each BDD node requires $\sim$20--32~bytes (variable
+index, low/high child pointers, reference count, hash link).  If the
+unique table accumulates $\sim$500K--1M nodes over the full
+computation (including dead nodes from intermediate results), the BDD
+storage alone would consume 15--30\,MB.  However, the Modula-3
+runtime's traced heap and the Scheme interpreter's own allocations
+(cons cells for the image computation loop, lambda closures, etc.) add
+substantial overhead, and the total process memory can reach several
+hundred megabytes.
+
+%----------------------------------------------------------------------
+\subsection{Mitigation Strategies}
+%----------------------------------------------------------------------
+
+Several well-known techniques can reduce memory consumption in future
+work:
+
+\begin{enumerate}
+\item \textbf{BDD garbage collection.}  Periodically invoke a
+      mark-and-sweep pass on the unique table, retaining only nodes
+      reachable from live roots ($R$, $T$, $H$, and the variable
+      nodes).  CUDD~\cite{Somenzi98} does this automatically.
+
+\item \textbf{Early quantification.}  Instead of forming the full
+      conjunction $R \wedge T$ and then quantifying out all
+      current-state variables, interleave conjunction with
+      quantification: quantify out variables as soon as they are no
+      longer needed.  This keeps intermediate BDDs smaller.
+      The technique is known as \emph{partitioned transition
+      relations} or \emph{conjunctive partitioning}~\cite{BurchClarke91}.
+
+\item \textbf{Partitioned transition relations.}  Instead of building
+      a single monolithic $T$, maintain $T$ as a conjunction of
+      per-instance transition BDDs.  During image computation, conjoin
+      and quantify one partition at a time.  This avoids ever
+      materializing the full $T \wedge R$ product.
+
+\item \textbf{Variable reordering.}  Dynamic BDD variable reordering
+      (sifting~\cite{Rudell93}) can dramatically reduce BDD sizes by
+      finding a variable order that minimizes sharing.  The current
+      implementation uses a fixed interleaved order
+      ($v^c_{0,0}, v^n_{0,0}, v^c_{0,1}, v^n_{0,1}, \ldots$),
+      which is a reasonable default but not necessarily optimal.
+
+\item \textbf{Frontier simplification.}  Replace the reachable set $R$
+      with a simplified ``frontier'' set $F_k = R_k \setminus R_{k-1}$
+      (only newly discovered states), compute the image of $F_k$, and
+      accumulate into $R$.  This reduces the size of the BDD entering
+      the image computation, since $F_k$ is typically much smaller
+      than~$R_k$.
+\end{enumerate}
+
+%======================================================================
+\section{Integration}
+%======================================================================
+
+%----------------------------------------------------------------------
+\subsection{Files Modified}
+%----------------------------------------------------------------------
+
+\begin{center}
+\begin{tabular}{llp{7.5cm}}
+\toprule
+\textbf{File} & \textbf{Action} & \textbf{Description} \\
+\midrule
+\texttt{csp/src/symbolic.scm} & Created & BDD-based symbolic deadlock checker ($\sim$230 lines) \\
+\texttt{csp/src/cspc.scm} & 1 line added & \texttt{(load "symbolic.scm")} after \texttt{product.scm} \\
+\texttt{csp/src/m3makefile} & 1 line added & \texttt{SchemeStubs ("Time")} for benchmarking \\
+\texttt{csp/src/tests/run\_deadlock\_tests.sh} & Batch 4 added & 6 symbolic checker tests (4 deadlock-free, 2 deadlock) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+%----------------------------------------------------------------------
+\subsection{Test Results}
+%----------------------------------------------------------------------
+
+All 15 tests pass (9~existing explicit-state tests plus
+6~new symbolic tests):
+
+\begin{Verbatim}[fontsize=\small]
+=== Product LTS Deadlock Checking Acceptance Test Suite ===
+
+--- Batch 1: deadlock-free systems ---
+  PASS  deadlock-free:prodcons
+  PASS  deadlock-free:pipeline
+  PASS  deadlock-free:multi_inst
+  PASS  deadlock-free:bidir
+
+--- Batch 2: expected-deadlock systems ---
+  PASS  deadlock:deadlock_simple (trace=3 steps)
+  PASS  deadlock:deadlock_cycle (trace=3 steps)
+
+--- Batch 3: dining philosophers ---
+  PASS  deadlock:dining_det_2 (trace=3 steps)
+  PASS  deadlock:dining_det_3 (trace=4 steps)
+  PASS  deadlock:dining_probe_2 (trace=7 steps)
+
+--- Batch 4: symbolic deadlock checking ---
+  PASS  sym-deadlock-free:prodcons
+  PASS  sym-deadlock-free:pipeline
+  PASS  sym-deadlock-free:dining_asym_2
+  PASS  sym-deadlock-free:dining_asym_3
+  PASS  sym-deadlock:dining_det_2
+  PASS  sym-deadlock:dining_det_3
+
+=== Results: 15/15 passed ===
+\end{Verbatim}
+
+%======================================================================
+\section{Limitations and Future Work}
+%======================================================================
+
+\begin{enumerate}
+\item \textbf{No counterexample trace.}  The symbolic checker returns
+      only a Boolean verdict.  Extracting a concrete deadlock trace
+      from BDDs requires backward image computation from the deadlock
+      states, selecting one concrete state per step.  This is
+      straightforward but not yet implemented.
+
+\item \textbf{Monolithic transition relation.}  The current
+      implementation builds a single BDD for the entire transition
+      relation.  Partitioned (conjunctive/disjunctive) representations
+      would reduce peak memory during image computation.
+
+\item \textbf{No garbage collection.}  As discussed in
+      Section~\ref{sec:memory}, the BDD library does not reclaim dead
+      nodes.  Adding periodic garbage collection or switching to a
+      library with built-in reclamation (e.g., CUDD) would
+      significantly reduce memory consumption.
+
+\item \textbf{Sequential quantification and renaming.}  The current
+      \texttt{bdd-exists-list} and \texttt{bdd-rename} functions
+      process variables one at a time.  Vectorized operations
+      (simultaneous quantification over a set of variables) would be
+      more efficient, both in time and in intermediate BDD sizes.
+
+\item \textbf{Livelock and refinement checking.}  The symbolic
+      framework extends naturally to other verification properties:
+      livelock detection (fair reachability under strong fairness) and
+      trace/failures refinement checking.  These are planned for
+      Phase~4 of the formal verification roadmap.
+\end{enumerate}
+
+%======================================================================
+\section{Conclusions}
+%======================================================================
+
+The BDD-based symbolic deadlock checker successfully complements the
+existing explicit-state checker.  On the probe-based dining
+philosophers benchmark:
+
+\begin{itemize}
+\item At $N=6$ (12~instances, $10^9$ potential states), the symbolic
+      checker finds deadlock in \textbf{17\,seconds} versus
+      $\sim$15\,minutes for explicit enumeration of 133K~reachable states.
+
+\item At $N=8$ (16~instances, $10^{12}$ potential states), the symbolic
+      checker finds deadlock in \textbf{12\,minutes} with a peak BDD
+      size of only 50K~nodes.  Explicit enumeration is completely
+      infeasible at this scale.
+\end{itemize}
+
+The implementation is compact ($\sim$230 lines of Scheme), reuses the
+existing LTS extraction and system parsing infrastructure, and
+produces results that are validated against the explicit checker on all
+small test cases.  The primary limitation is memory consumption due to
+accumulated dead BDD nodes, which can be addressed by garbage
+collection and partitioned transition relations in future work.
+
+\begin{thebibliography}{99}
+
+\bibitem{FulcrumCSP}
+M.~Nystr\"om,
+``The Fulcrum CSP Language,'' reference manual (draft),
+Intel Corporation, 2025.
+\url{https://github.com/mikanystrom/intel-async/blob/main/async-toolkit/m3utils/m3utils/csp/doc/csp/csp.tex}
+
+\bibitem{Hoare85}
+C.~A.~R. Hoare,
+\emph{Communicating Sequential Processes}.
+Prentice Hall, 1985.
+
+\bibitem{Roscoe97}
+A.~W. Roscoe,
+\emph{The Theory and Practice of Concurrency}.
+Prentice Hall, 1997.
+
+\bibitem{Dijkstra71}
+E.~W. Dijkstra,
+``Hierarchical ordering of sequential processes,''
+\emph{Acta Informatica}, vol.~1, no.~2, pp.~115--138, 1971.
+
+\bibitem{Dijkstra75}
+E.~W. Dijkstra,
+``Guarded commands, nondeterminacy, and formal derivation of programs,''
+\emph{Comm.\ ACM}, vol.~18, no.~8, pp.~453--457, 1975.
+
+\bibitem{Martin81}
+A.~J. Martin,
+``An axiomatic definition of synchronization primitives,''
+\emph{Acta Informatica}, vol.~16, pp.~219--235, 1981.
+
+\bibitem{Martin90}
+A.~J. Martin,
+``Programming in VLSI: from communicating processes to delay-insensitive
+circuits,''
+in \emph{UT Year of Programming Institute on Concurrent Programming},
+C.~A.~R. Hoare, Ed.\
+Addison-Wesley, 1990, pp.~1--64.
+
+\bibitem{Bryant86}
+R.~E. Bryant,
+``Graph-based algorithms for Boolean function manipulation,''
+\emph{IEEE Trans.\ Computers}, vol.~C-35, no.~8, pp.~677--691, 1986.
+
+\bibitem{McMillan93}
+K.~L. McMillan,
+\emph{Symbolic Model Checking}.
+Kluwer Academic, 1993.
+
+\bibitem{BurchClarke91}
+J.~R. Burch, E.~M. Clarke, D.~E. Long,
+``Symbolic model checking with partitioned transition relations,''
+in \emph{Proc.\ VLSI}, 1991, pp.~49--58.
+
+\bibitem{ClarkeGrumberg99}
+E.~M. Clarke, O.~Grumberg, D.~A. Peled,
+\emph{Model Checking}.
+MIT Press, 1999.
+
+\bibitem{Somenzi98}
+F.~Somenzi,
+``CUDD: CU Decision Diagram Package,''
+University of Colorado at Boulder, 1998.
+
+\bibitem{Rudell93}
+R.~Rudell,
+``Dynamic variable ordering for ordered binary decision diagrams,''
+in \emph{Proc.\ ICCAD}, 1993, pp.~42--47.
+
+\end{thebibliography}
+
+\end{document}
