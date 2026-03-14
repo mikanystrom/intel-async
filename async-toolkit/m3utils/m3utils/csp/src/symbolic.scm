@@ -346,15 +346,18 @@
                                                            (lts-initial
                                                             (car ltss)))))))))
 
-                    ;; Fixed-point reachability
+                    ;; Fixed-point reachability (frontier-based)
                     (dis "check-deadlock-symbolic!: computing reachability ..." dnl)
-                    (let loop ((reached init-bdd) (iter 0))
-                      (let* ((img (symbolic-image reached T encodings))
-                             (new-reached (BDD.Or reached img)))
+                    (let loop ((reached init-bdd) (frontier init-bdd) (iter 0))
+                      (let* ((img (symbolic-image frontier T encodings))
+                             (new-frontier (BDD.And img (BDD.Not reached)))
+                             (new-reached (BDD.Or reached new-frontier)))
                         (dis "  iteration " (number->string iter)
-                             ", BDD size: "
-                             (number->string (BDD.Size new-reached)) dnl)
-                        (if (BDD.Equal new-reached reached)
+                             ", reached BDD: "
+                             (number->string (BDD.Size new-reached))
+                             ", frontier BDD: "
+                             (number->string (BDD.Size new-frontier)) dnl)
+                        (if (BDD.Equal new-frontier (BDD.False))
                             ;; Fixed point reached
                             (let ((deadlocked (BDD.And reached
                                                        (BDD.Not has-succ))))
@@ -372,7 +375,7 @@
                                          dnl)
                                     #t)))
                             ;; Continue iterating
-                            (loop new-reached (+ iter 1)))))))))))))))
+                            (loop new-reached new-frontier (+ iter 1)))))))))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
