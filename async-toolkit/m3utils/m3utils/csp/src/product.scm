@@ -312,20 +312,24 @@
                    (init-key   (make-product-state-key init-state))
                    (visited    (make-hash-table 1000 atom-hash))
                    (parent     (make-hash-table 1000 atom-hash))
-                   (queue      (list init-state))
+                   (queue      (obj-method-wrap
+                                ((obj-method-wrap
+                                  (new-modula-object 'RefSeq.T) 'RefSeq.T)
+                                 'init 1000)
+                                'RefSeq.T))
                    (explored   0)
                    (deadlock   #f))
 
               (visited 'add-entry! init-key #t)
+              (queue 'addhi init-state)
 
               ;; BFS loop
               (let bfs ()
-                (if (and (not (null? queue)) (not deadlock))
-                    (let* ((current (car queue))
+                (if (and (> (queue 'size) 0) (not deadlock))
+                    (let* ((current (queue 'remlo))
                            (succs (product-successors current
                                                       indices
                                                       channel-map)))
-                      (set! queue (cdr queue))
                       (set! explored (+ explored 1))
 
                       (if (null? succs)
@@ -347,9 +351,7 @@
                                                (cons (make-product-state-key
                                                       current)
                                                      act))
-                                       (set! queue
-                                             (append queue
-                                                     (list new-state)))))))
+                                       (queue 'addhi new-state)))))
                              succs)
                             (bfs))))))
 
