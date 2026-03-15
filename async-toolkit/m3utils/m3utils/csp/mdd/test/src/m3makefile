@@ -1,0 +1,9 @@
+% MDD acceptance tests
+
+import ("libm3")
+import ("cit_util")
+import ("mdd")
+
+implementation ("TestMDD")
+
+program ("testmdd")

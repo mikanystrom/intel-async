@@ -314,6 +314,7 @@
 (load "lts.scm")        ;; LTS extraction for formal verification
 (load "product.scm")    ;; product LTS composition + deadlock checking
 (load "symbolic.scm")   ;; BDD-based symbolic deadlock checking
+(load "saturation.scm") ;; MDD/saturation-based symbolic deadlock checking
 
 (define *reload-name*   "cspc.scm")
 

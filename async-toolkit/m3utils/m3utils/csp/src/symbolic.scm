@@ -9,6 +9,12 @@
 ;;  many states in compact BDD form, complementing the explicit-state
 ;;  checker in product.scm.
 ;;
+;;  Uses partitioned transition relations to avoid forming a monolithic
+;;  transition BDD.  Each partition covers one instance (tau) or two
+;;  instances (channel sync), without explicit frame conditions —
+;;  non-participating instances' state is preserved implicitly by
+;;  only quantifying/renaming the participating variables.
+;;
 ;;  Usage:
 ;;    (check-deadlock-symbolic! "build_prodcons.sys")  -> #t or #f
 ;;
@@ -62,6 +68,7 @@
                 (BDD.And acc
                          (if (= bit 1) (car vs) (BDD.Not (car vs)))))))))
 
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;  2. Per-instance encoding
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -109,97 +116,103 @@
     (encode-pattern (encoding-next-vars enc) idx)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;  3. Frame conditions
+;;  3. Partition records
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(define (build-frame-bdd enc)
-  ;; Frame condition: next-state equals current-state for this instance.
-  ;; Conjunction of Equivalent(curr_k, next_k) for each bit k.
-  (let loop ((cvs (encoding-curr-vars enc))
-             (nvs (encoding-next-vars enc))
-             (acc (BDD.True)))
-    (if (null? cvs)
-        acc
-        (loop (cdr cvs) (cdr nvs)
-              (BDD.And acc (BDD.Equivalent (car cvs) (car nvs)))))))
+;; Each partition: (type inst-indices bdd involved-curr-vars involved-next-vars)
+;; type: 'tau or 'sync
+;; inst-indices: list of instance indices (1 for tau, 2 for sync)
+;; bdd: the partition's transition BDD (no frame conditions for uninvolved)
+;; involved-curr-vars: curr-state BDD vars of participating instances
+;; involved-next-vars: next-state BDD vars of participating instances
+
+(define (make-partition type inst-indices bdd curr-vars next-vars)
+  (list type inst-indices bdd curr-vars next-vars))
+
+(define (partition-type p)       (car p))
+(define (partition-instances p)  (cadr p))
+(define (partition-bdd p)        (caddr p))
+(define (partition-curr-vars p)  (cadddr p))
+(define (partition-next-vars p)  (car (cddddr p)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;  4. Transition relation
+;;  4. Partitioned transition relation
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(define (build-all-frames encodings)
-  ;; Precompute frame BDD for each instance.
-  (map build-frame-bdd encodings))
+(define (build-transition-partitions encodings renamed-lts-list channel-map)
+  ;; Build partitioned transition relation: a list of partition records.
+  ;; Each partition covers one instance (tau) or two instances (sync),
+  ;; with no frame conditions for non-participating instances.
+  (let ((n (length encodings))
+        (partitions '()))
 
-(define (frame-for-all frames except-indices)
-  ;; Conjunction of frame BDDs for all instances except those in except-indices.
-  (let loop ((fs frames) (i 0) (acc (BDD.True)))
-    (if (null? fs)
-        acc
-        (loop (cdr fs) (+ i 1)
-              (if (memv i except-indices)
-                  acc
-                  (BDD.And acc (car fs)))))))
-
-(define (build-transition-bdd encodings renamed-lts-list channel-map)
-  ;; Build the full transition relation T(V, V') as a single BDD.
-  (let ((frames (build-all-frames encodings))
-        (n (length encodings)))
-
-    (let ((T (BDD.False)))
-
-      ;; Tau transitions: for each instance, each tau edge
-      (let iloop ((i 0) (ltss renamed-lts-list) (encs encodings))
-        (if (< i n)
-            (let ((enc (car encs))
-                  (lts (car ltss))
-                  (tau-frame (frame-for-all frames (list i))))
+    ;; Tau transitions: one partition per instance, accumulating all
+    ;; tau edges for that instance into a single BDD.
+    (let iloop ((i 0) (ltss renamed-lts-list) (encs encodings))
+      (if (< i n)
+          (let ((enc (car encs))
+                (lts (car ltss)))
+            (let ((tau-bdd (BDD.False)))
               (for-each
                (lambda (tr)
                  (let ((src (car tr))
                        (act (cadr tr))
                        (dst (caddr tr)))
                    (if (eq? act 'tau)
-                       (set! T (BDD.Or T
-                                       (BDD.And
-                                        (BDD.And (encode-curr enc src)
-                                                 (encode-next enc dst))
-                                        tau-frame))))))
+                       (set! tau-bdd
+                             (BDD.Or tau-bdd
+                                     (BDD.And (encode-curr enc src)
+                                              (encode-next enc dst)))))))
                (lts-transitions lts))
-              (iloop (+ i 1) (cdr ltss) (cdr encs)))))
+              ;; Only add partition if this instance has tau transitions
+              (if (not (BDD.Equal tau-bdd (BDD.False)))
+                  (set! partitions
+                        (cons (make-partition 'tau (list i) tau-bdd
+                                              (encoding-curr-vars enc)
+                                              (encoding-next-vars enc))
+                              partitions))))
+            (iloop (+ i 1) (cdr ltss) (cdr encs)))))
 
-      ;; Channel synchronizations
-      (for-each
-       (lambda (ch-entry)
-         (let* ((ch-name  (car ch-entry))
-                (si       (cadr ch-entry))
-                (ri       (caddr ch-entry))
-                (enc-s    (list-ref encodings si))
-                (enc-r    (list-ref encodings ri))
-                (lts-s    (list-ref renamed-lts-list si))
-                (lts-r    (list-ref renamed-lts-list ri))
-                (sync-frame (frame-for-all frames (list si ri))))
-           ;; Find all send transitions on this channel
+    ;; Channel synchronizations: one partition per channel,
+    ;; accumulating all send/recv pairs into a single BDD.
+    (for-each
+     (lambda (ch-entry)
+       (let* ((ch-name  (car ch-entry))
+              (si       (cadr ch-entry))
+              (ri       (caddr ch-entry))
+              (enc-s    (list-ref encodings si))
+              (enc-r    (list-ref encodings ri))
+              (lts-s    (list-ref renamed-lts-list si))
+              (lts-r    (list-ref renamed-lts-list ri)))
+         (let ((sync-bdd (BDD.False)))
+           ;; Find all send/recv pairs on this channel
            (for-each
             (lambda (st)
               (if (equal? (cadr st) (list 'send ch-name))
-                  ;; For each matching recv transition
                   (for-each
                    (lambda (rt)
                      (if (equal? (cadr rt) (list 'recv ch-name))
-                         (set! T (BDD.Or T
-                                         (BDD.And
-                                          (BDD.And
-                                           (BDD.And (encode-curr enc-s (car st))
-                                                    (encode-next enc-s (caddr st)))
-                                           (BDD.And (encode-curr enc-r (car rt))
-                                                    (encode-next enc-r (caddr rt))))
-                                          sync-frame)))))
+                         (set! sync-bdd
+                               (BDD.Or sync-bdd
+                                       (BDD.And
+                                        (BDD.And (encode-curr enc-s (car st))
+                                                 (encode-next enc-s (caddr st)))
+                                        (BDD.And (encode-curr enc-r (car rt))
+                                                 (encode-next enc-r (caddr rt))))))))
                    (lts-transitions lts-r))))
-            (lts-transitions lts-s))))
-       channel-map)
+            (lts-transitions lts-s))
+           (if (not (BDD.Equal sync-bdd (BDD.False)))
+               (set! partitions
+                     (cons (make-partition
+                            'sync (list si ri) sync-bdd
+                            (append (encoding-curr-vars enc-s)
+                                    (encoding-curr-vars enc-r))
+                            (append (encoding-next-vars enc-s)
+                                    (encoding-next-vars enc-r)))
+                           partitions))))))
+     channel-map)
 
-      T)))
+    (reverse partitions)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;  5. Image computation
@@ -211,19 +224,55 @@
 (define (all-next-vars encodings)
   (apply append (map encoding-next-vars encodings)))
 
-(define (symbolic-image reached T encodings)
-  ;; Compute image: states reachable in one step from 'reached'.
-  ;; 1. Conjoin reached with T
-  ;; 2. Existentially quantify out current-state vars
-  ;; 3. Rename next-state vars to current-state vars
+(define (partitioned-image frontier partitions encodings)
+  ;; Compute image using partitioned transition relation.  For each partition:
+  ;;   1. Conjoin frontier with partition BDD (small: only involved vars)
+  ;;   2. Quantify out participating curr-vars
+  ;;   3. Rename participating next-vars to curr-vars
+  ;;   4. OR into result
+  ;; Non-participating curr-vars pass through unchanged — this IS the
+  ;; frame condition: other instances keep their state.  No need to
+  ;; build explicit frame BDDs.
+  (let ((result (BDD.False)))
+    (for-each
+     (lambda (p)
+       (let* ((involved-curr (partition-curr-vars p))
+              (involved-next (partition-next-vars p))
+              ;; Conjoin frontier with partition BDD — the partition
+              ;; only mentions participating vars so the intermediate
+              ;; is bounded by O(|frontier| * |partition|)
+              (conj (BDD.And frontier (partition-bdd p)))
+              ;; Quantify out participating curr-vars
+              (img-partial (bdd-exists-list conj involved-curr))
+              ;; Rename participating next-vars to curr-vars
+              (img-renamed (bdd-rename img-partial involved-next involved-curr)))
+         (set! result (BDD.Or result img-renamed))))
+     partitions)
+    result))
+
+(define (symbolic-image-monolithic reached T encodings)
+  ;; Original monolithic image computation (kept for reference).
   (let* ((conj (BDD.And reached T))
          (curr-vars (all-curr-vars encodings))
          (next-vars (all-next-vars encodings))
-         ;; Project out current-state variables
          (img-next (bdd-exists-list conj curr-vars))
-         ;; Rename next-state to current-state
          (img-curr (bdd-rename img-next next-vars curr-vars)))
     img-curr))
+
+(define (partitioned-has-succ partitions)
+  ;; Compute has-successor BDD from partitions.
+  ;; A product state has a successor if ANY partition can fire.
+  ;; Each partition's contribution (quantified over its next-vars) is a BDD
+  ;; over only the participating curr-vars, which implicitly allows all
+  ;; values for other instances — correct semantics for OR.
+  (let ((result (BDD.False)))
+    (for-each
+     (lambda (p)
+       (let ((p-has-succ (bdd-exists-list (partition-bdd p)
+                                          (partition-next-vars p))))
+         (set! result (BDD.Or result p-has-succ))))
+     partitions)
+    result))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;  6. Main entry point
@@ -322,60 +371,70 @@
                          " bits" dnl)
                     (iloop (+ i 1) (cdr encs) (cdr ltss)))))
 
-            ;; Build transition relation
-            (dis "check-deadlock-symbolic!: building transition relation ..." dnl)
-            (let ((T (build-transition-bdd encodings instance-lts-list
-                                           channel-map)))
+            ;; Build partitioned transition relation
+            (dis "check-deadlock-symbolic!: building transition partitions ..." dnl)
+            (let ((partitions (build-transition-partitions
+                               encodings instance-lts-list channel-map)))
 
-              (dis "check-deadlock-symbolic!: T has "
-                   (number->string (BDD.Size T)) " BDD nodes" dnl)
+              (dis "check-deadlock-symbolic!: "
+                   (number->string (length partitions)) " partitions" dnl)
+              (let ploop ((ps partitions) (pi 0))
+                (if (not (null? ps))
+                    (let ((p (car ps)))
+                      (dis "  partition " (number->string pi) " ("
+                           (symbol->string (partition-type p)) "): "
+                           (number->string (BDD.Size (partition-bdd p)))
+                           " BDD nodes" dnl)
+                      (ploop (cdr ps) (+ pi 1)))))
 
-              ;; Compute has-successor: states that have at least one successor
-              (let ((next-vars (all-next-vars encodings)))
-                (let ((has-succ (bdd-exists-list T next-vars)))
+              ;; Compute has-successor from partitions
+              (let ((has-succ (partitioned-has-succ partitions)))
 
-                  ;; Initial state: conjunction of all instances at initial state
-                  (let ((init-bdd
-                         (let loop ((encs encodings) (ltss instance-lts-list)
-                                    (acc (BDD.True)))
-                           (if (null? encs)
-                               acc
-                               (loop (cdr encs) (cdr ltss)
-                                     (BDD.And acc
-                                              (encode-curr (car encs)
-                                                           (lts-initial
-                                                            (car ltss)))))))))
+                ;; Initial state: conjunction of all instances at initial state
+                (let ((init-bdd
+                       (let loop ((encs encodings) (ltss instance-lts-list)
+                                  (acc (BDD.True)))
+                         (if (null? encs)
+                             acc
+                             (loop (cdr encs) (cdr ltss)
+                                   (BDD.And acc
+                                            (encode-curr (car encs)
+                                                         (lts-initial
+                                                          (car ltss)))))))))
 
-                    ;; Fixed-point reachability (frontier-based)
-                    (dis "check-deadlock-symbolic!: computing reachability ..." dnl)
-                    (let loop ((reached init-bdd) (frontier init-bdd) (iter 0))
-                      (let* ((img (symbolic-image frontier T encodings))
-                             (new-frontier (BDD.And img (BDD.Not reached)))
-                             (new-reached (BDD.Or reached new-frontier)))
-                        (dis "  iteration " (number->string iter)
-                             ", reached BDD: "
-                             (number->string (BDD.Size new-reached))
-                             ", frontier BDD: "
-                             (number->string (BDD.Size new-frontier)) dnl)
-                        (if (BDD.Equal new-frontier (BDD.False))
-                            ;; Fixed point reached
-                            (let ((deadlocked (BDD.And reached
-                                                       (BDD.Not has-succ))))
-                              (dis "check-deadlock-symbolic!: fixed point at iteration "
-                                   (number->string iter) dnl)
-                              (if (not (BDD.Equal deadlocked (BDD.False)))
-                                  (begin
-                                    (dis "check-deadlock-symbolic!: DEADLOCK FOUND"
-                                         " (deadlock BDD size: "
-                                         (number->string (BDD.Size deadlocked))
-                                         ")" dnl)
-                                    #f)
-                                  (begin
-                                    (dis "check-deadlock-symbolic!: system is deadlock-free."
-                                         dnl)
-                                    #t)))
-                            ;; Continue iterating
-                            (loop new-reached new-frontier (+ iter 1)))))))))))))))
+                  ;; Fixed-point reachability (frontier-based, partitioned image)
+                  (dis "check-deadlock-symbolic!: computing reachability ..." dnl)
+                  (let loop ((reached init-bdd) (frontier init-bdd) (iter 0))
+                    (let* ((img (partitioned-image frontier partitions encodings))
+                           (new-frontier (BDD.And img (BDD.Not reached)))
+                           (new-reached (BDD.Or reached new-frontier)))
+                      (dis "  iteration " (number->string iter)
+                           ", reached BDD: "
+                           (number->string (BDD.Size new-reached))
+                           ", frontier BDD: "
+                           (number->string (BDD.Size new-frontier)) dnl)
+                      ;; Clear operation caches between iterations to reclaim
+                      ;; memory from small intermediates
+                      (BDD.ClearCaches)
+                      (if (BDD.Equal new-frontier (BDD.False))
+                          ;; Fixed point reached
+                          (let ((deadlocked (BDD.And reached
+                                                     (BDD.Not has-succ))))
+                            (dis "check-deadlock-symbolic!: fixed point at iteration "
+                                 (number->string iter) dnl)
+                            (if (not (BDD.Equal deadlocked (BDD.False)))
+                                (begin
+                                  (dis "check-deadlock-symbolic!: DEADLOCK FOUND"
+                                       " (deadlock BDD size: "
+                                       (number->string (BDD.Size deadlocked))
+                                       ")" dnl)
+                                  #f)
+                                (begin
+                                  (dis "check-deadlock-symbolic!: system is deadlock-free."
+                                       dnl)
+                                  #t)))
+                          ;; Continue iterating
+                          (loop new-reached new-frontier (+ iter 1))))))))))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

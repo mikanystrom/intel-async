@@ -41,7 +41,7 @@
 \title{\textbf{Formal Verification for the Fulcrum CSP Toolchain} \\[0.5em]
 \large Feasibility Study, Project Plan, and Implementation Report}
 \author{Mika Nystr\"om \and Claude (Anthropic)}
-\date{DRAFT Version 0.2\\
+\date{DRAFT Version 0.4\\
 \today}
 
 \begin{document}
@@ -742,20 +742,35 @@ infeasible for explicit enumeration.
 
 To handle larger systems, a BDD-based symbolic deadlock checker was
 implemented (\texttt{symbolic.scm}).  The checker encodes process states
-as Boolean variables (2~bits per instance for a 5-state process),
-builds the product transition relation $T(V, V')$ as a single BDD,
-and computes reachability via a fixed-point iteration:
+as Boolean variables (2~bits per instance for a 5-state process)
+and computes reachability via a frontier-based fixed-point iteration:
 \[
-  \mathit{Reached}_{i+1} = \mathit{Reached}_i \cup
-    \mathit{Image}(\mathit{Reached}_i, T)
+  F_{k+1} = \mathit{Image}(F_k) \setminus R_k, \qquad
+  R_{k+1} = R_k \cup F_{k+1}
 \]
-where $\mathit{Image}$ conjoins the reached set with $T$, existentially
-quantifies out the current-state variables, and renames next-state
-variables to current-state variables.
+
+The transition relation uses \emph{partitioned transition relations}
+rather than a single monolithic BDD.  Each partition covers either
+one instance (tau transitions) or two instances (channel synchronization),
+with no frame conditions for non-participating instances.  The image
+is computed per-partition:
+\[
+  \mathit{Image}(F) = \bigcup_{i} \bigl(
+    \exists V_i.\; F \wedge T_i(V_i, V'_i)
+  \bigr)[V'_i / V_i]
+\]
+where $T_i$ mentions only the current- and next-state variables
+$V_i, V'_i$ of the 1--2 participating instances.  Non-participating
+instances' state passes through unchanged in the conjunction with $F$,
+which implicitly provides the frame condition without building explicit
+equivalence BDDs.  Each conjunction $F \wedge T_i$ produces a small
+intermediate because $T_i$ involves only 4--8 BDD variables.
 
 After convergence, deadlocked states are those in the reached set with
 no successor: $\mathit{Deadlock} = \mathit{Reached} \wedge \neg \mathit{HasSucc}$,
-where $\mathit{HasSucc} = \exists V'. T(V, V')$.
+where $\mathit{HasSucc} = \bigvee_i \exists V'_i.\; T_i(V_i, V'_i)$.
+Operation caches are cleared between iterations via
+\texttt{BDD.ClearCaches} to reclaim memory from small intermediates.
 
 The implementation uses the existing \texttt{bdd} library (part of
 the CM3 tree).  All BDD operations are accessible from Scheme via
@@ -763,104 +778,210 @@ auto-generated stubs (\texttt{SchemeStubs}).
 
 \textbf{Results.}
 The symbolic checker handles $N = 8$ dining philosophers (16~instances,
-32~BDD variables) and reaches the fixed point in 8~iterations.
-The following table shows the BDD size of the reached set at each
-iteration:
+32~BDD variables, 32~partitions of 16--18~nodes each) and reaches the
+fixed point in 8~iterations.  The following table shows the BDD size
+of the reached set at each iteration:
 
 \begin{center}
-\begin{tabular}{rr}
+\begin{tabular}{rrr}
 \toprule
-\textbf{Iteration} & \textbf{BDD nodes} \\
+\textbf{Iteration} & \textbf{Reached BDD} & \textbf{Frontier BDD} \\
 \midrule
-0 & 194 \\
-1 & 474 \\
-2 & 866 \\
-3 & 1,230 \\
-4 & 1,454 \\
-5 & 1,542 \\
-6 & 1,562 \\
-7 & 1,564 \\
-8 (fixed point) & 1,564 \\
+0 & 194 & 192 \\
+1 & 474 & 452 \\
+2 & 866 & 756 \\
+3 & 1,230 & 896 \\
+4 & 1,454 & 756 \\
+5 & 1,542 & 452 \\
+6 & 1,562 & 192 \\
+7 & 1,564 & 66 \\
+8 (fixed point) & 1,564 & 1 \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 The BDD representation is compact: 1,564~nodes encode the full
 reachable state set (which contains an exponential number of concrete
-states).  The deadlock BDD has 66~nodes.  Execution time on Apple~M2
-is approximately 35~seconds, dominated by the image computation at each
-iteration.  Peak memory is approximately 2.7~GB.
+states).  The deadlock BDD has 66~nodes.  Peak memory is
+approximately 217\,MB on Apple~M2.
 
 %----------------------------------------------------------------------
-\subsection{Memory Analysis and BDD Garbage Collection}
+\subsection{Memory Optimization}
 %----------------------------------------------------------------------
 
-The 2.7~GB peak memory for $N = 8$ dining philosophers motivated an
-investigation into BDD garbage collection.  The \texttt{bdd} library
-maintains two data structures per variable that grow without bound:
+The initial monolithic implementation (a single BDD for the full
+transition relation~$T$) used approximately 2.7\,GB peak memory for
+$N = 8$ dining philosophers, because the conjunction
+$F \wedge T$ exploded into a large intermediate BDD.
 
-\begin{description}
-\item[Unique tables.]  Map $(l, r) \to \mathit{node}$, ensuring
-  that structurally identical BDD nodes are pointer-equal (canonicity).
-  Every BDD node ever created under a variable remains in this table.
-\item[Operation caches.]  Map $(\mathit{input}_1, \mathit{input}_2)
-  \to \mathit{result}$ for each operation (And, Or, Not, MakeTrue,
-  MakeFalse).  These provide memoization for recursive BDD operations.
-\end{description}
+\textbf{BDD garbage collection.}
+Four procedures were added to the \texttt{BDD} interface for explicit
+memory management: \texttt{ClearCaches} (drops operation caches),
+\texttt{MarkRoot}/\texttt{UnmarkRoots} (GC root set management),
+and \texttt{CollectGarbage} (mark-and-sweep).  However, GC between
+iterations had no effect on peak memory (2,749\,MB vs.\ 2,702\,MB)
+because the peak occurs \emph{within} an iteration during the
+monolithic conjunction.
 
-Both tables hold strong references to BDD nodes, preventing the
-Modula-3 garbage collector from reclaiming them even when no user
-code references the intermediate results.
-
-\textbf{Solution: explicit mark-and-sweep.}
-Four procedures were added to the \texttt{BDD} interface
-(in the CM3 repository):
-
-\begin{description}
-\item[\texttt{ClearCaches()}.]  Drops all operation caches.
-  $O(\text{number of variables})$, no DAG traversal.
-\item[\texttt{MarkRoot(t)}.]  Adds \texttt{t} to a GC root set.
-\item[\texttt{UnmarkRoots()}.]  Clears the GC root set.
-\item[\texttt{CollectGarbage()}.]  Marks all nodes reachable from the
-  root set, rebuilds each variable's unique table keeping only live
-  entries, clears all operation caches, and clears the root set.
-\end{description}
-
-These are callable from Scheme via auto-generated stubs
-(\texttt{BDD.ClearCaches}, \texttt{BDD.MarkRoot}, etc.).
-
-\textbf{Benchmark results.}
-Inserting \texttt{CollectGarbage} between fixed-point iterations on
-the $N = 8$ dining philosophers benchmark yielded the following:
+\textbf{Partitioned transition relations.}
+The solution was to never form the monolithic~$T$.  Each transition
+is kept as a separate partition BDD involving only the 1--2
+participating process instances (16--18 BDD nodes per partition).
+Frame conditions for non-participating instances are omitted entirely:
+by conjoining the frontier directly with a partition and quantifying
+out only the participating current-state variables, the other
+instances' state passes through unchanged.
 
 \begin{center}
 \begin{tabular}{lrr}
 \toprule
-& \textbf{Without GC} & \textbf{With GC} \\
+& \textbf{Monolithic $T$} & \textbf{Partitioned} \\
 \midrule
-Peak RSS     & 2,702~MB & 2,749~MB \\
-Wall time    & 34.7~s   & 47.8~s \\
-Result       & DEADLOCK & DEADLOCK \\
+Transition BDD    & 2,307 nodes (1 BDD)   & 16--18 nodes $\times$ 32 partitions \\
+Peak RSS          & 2,702\,MB             & 217\,MB \\
+Memory reduction  & ---                   & \textbf{12.4$\times$} \\
+Result            & DEADLOCK              & DEADLOCK \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-The GC does not reduce peak memory and adds approximately 38\%
-overhead.  The reason is that peak memory is dominated by
-\emph{within-iteration} temporaries: the image computation
-$\texttt{BDD.And}(\mathit{reached}, T)$ creates a large intermediate
-BDD that is live throughout the existential quantification loop.
-The GC runs \emph{between} iterations, by which time the Modula-3
-runtime has already grown its heap to accommodate the peak, and
-does not return memory to the operating system.
+The partitioned approach also calls \texttt{BDD.ClearCaches} between
+iterations to reclaim operation cache memory from the many small
+intermediates produced by the per-partition image computation.
 
-\textbf{Conclusion.}
-The GC hooks are retained in the BDD library for future use but
-are not called by the symbolic checker.  Reducing memory for
-large problems will require algorithmic improvements:
-partitioned transition relations (conjunctive/disjunctive
-partitioning of $T$), saturation-based image computation, or
-BDD variable reordering.  These are natural Phase~3 targets.
+%----------------------------------------------------------------------
+\subsection{Phase~2c: MDD/Saturation-Based Symbolic Deadlock Checking}
+%----------------------------------------------------------------------
+
+While the BDD-based checker reduces memory by 12$\times$ over the
+monolithic approach, it still uses 217\,MB for $N = 8$ dining
+philosophers and would require gigabytes for $N = 16$.  The fundamental
+limitation is that BDDs encode each process instance using
+$\lceil \log_2 k \rceil$ Boolean variables (where $k$ is the number of
+local states), and the image computation must conjoin the frontier with
+transition relations across \emph{all} Boolean variables at once.
+
+Multi-valued Decision Diagrams (MDDs)~\cite{ciardo2001} offer a
+fundamentally different approach.  An MDD has one level per process
+instance, where each internal node at level~$i$ has $k_i$ children
+(one per local state of instance~$i$).  This eliminates the binary
+encoding overhead and enables the \emph{saturation algorithm}
+(Ciardo, Marmorstein, and Siminiceanu~\cite{ciardo2001}), which fires
+transition events bottom-up, level by level, achieving local fixed
+points before composing upward.
+
+\subsubsection{MDD Library}
+
+A new \texttt{csp/mdd/} package implements the MDD data structure and
+saturation algorithm:
+
+\begin{description}
+\item[\texttt{MDD.i3}, \texttt{MDDImpl.m3}.]
+  Quasi-reduced MDD forest with hash-consing (canonical nodes via
+  per-level unique tables).  Operations: \texttt{Union},
+  \texttt{Intersection}, \texttt{Difference}, \texttt{MakeNode},
+  \texttt{Singleton}.  Direct-mapped operation caches for set
+  operations.
+
+\item[\texttt{MDDEvent.i3/.m3}.]
+  Kronecker-encoded events.  Each transition event is represented
+  by sparse \texttt{(from, to)} matrices at the 1--2 affected MDD
+  levels (identity at all intervening levels).  Tau events affect
+  one level; synchronization events affect two levels (the sender
+  and receiver instances).
+
+\item[\texttt{MDDSaturation.i3/.m3}.]
+  The saturation algorithm.  Events are partitioned by their top level
+  and fired bottom-up.  At each level, all events whose top level
+  matches are fired repeatedly until a fixed point is reached.
+  A direct-mapped saturation cache (65,536 entries) records already-saturated
+  nodes.  The \texttt{HasSuccessor} procedure computes the subset of
+  states with at least one enabled transition, enabling deadlock
+  detection as $\mathit{Deadlock} = \mathit{Reached} \setminus
+  \mathit{HasSucc}$.
+\end{description}
+
+The library is integrated into \texttt{cspc} via auto-generated Scheme
+stubs (\texttt{SchemeStubs}) for all three modules.  The Scheme entry
+point is \texttt{(check-deadlock-saturation! \textit{sys-file})}, implemented
+in \texttt{saturation.scm}.
+
+\subsubsection{Benchmark Results}
+
+\begin{center}
+\begin{tabular}{llrrrr}
+\toprule
+\textbf{System} & \textbf{Method} & \textbf{Nodes} & \textbf{Peak RSS} & \textbf{Time} & \textbf{Result} \\
+\midrule
+Dining $N{=}2$ det & Saturation & 9 & --- & $< 1$\,s & DEADLOCK \\
+Dining $N{=}3$ det & Saturation & 21 & --- & $< 1$\,s & DEADLOCK \\
+Dining $N{=}3$ asym & Saturation & 26 & --- & $< 1$\,s & deadlock-free \\
+\midrule
+Dining $N{=}8$ det & BDD (partitioned) & 1,564 & 217\,MB & 3.7\,s & DEADLOCK \\
+Dining $N{=}8$ det & MDD saturation & 765 & \textbf{38\,MB} & \textbf{2.1\,s} & DEADLOCK \\
+\midrule
+Dining $N{=}16$ det & BDD & \multicolumn{3}{c}{\textit{impractical}} & --- \\
+Dining $N{=}16$ det & MDD saturation & 196,605 & 233\,MB & 7.2\,s & DEADLOCK \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+For $N = 8$, the MDD/saturation approach uses \textbf{5.7$\times$ less
+memory} (38\,MB vs.\ 217\,MB) and runs \textbf{1.8$\times$ faster}
+(2.1\,s vs.\ 3.7\,s) than the BDD approach with partitioned transition
+relations.  More importantly, the MDD approach scales to $N = 16$
+(32~instances, 64~events, 32~MDD levels) in 7.2~seconds and 233\,MB,
+a problem size that is impractical for BDDs.
+
+The MDD representation is also more compact: 765~MDD nodes for $N = 8$
+vs.\ 1,564~BDD nodes.  This is because each MDD level directly
+represents a process instance's state as a multi-valued child array,
+whereas the BDD must decompose each state into binary variables.
+
+The 50 unit tests in the MDD test suite (\texttt{csp/mdd/test/})
+cover terminal nodes, singletons, set operations, quasi-reduced form,
+hash-consing, event construction, and saturation on mutex,
+producer-consumer, and dining philosopher systems.
+
+\subsubsection{Saturation Algorithm Correctness}
+
+The key algorithmic insight is the mutual recursion between
+\texttt{Saturate}, \texttt{SatFire}, and \texttt{RecFire}.  At each
+MDD level, events are fired until a fixed point.  When an event fires
+and produces new states, the merged node is re-saturated at that level.
+Termination is guaranteed because the state set can only grow (Union
+is monotone) and the total number of reachable states is finite.
+
+A subtle correctness issue arose during implementation: when
+\texttt{SatFire} at the top level of a sync event produces fired
+states that are already present in the MDD, the result of
+\texttt{Union(node, fired)} is the same node (by hash-consing).
+Without checking for this, \texttt{SaturateLocal} would be called
+recursively with an identical node, causing infinite mutual recursion
+(manifesting as a stack overflow on ARM64 macOS).  The fix is a
+single identity check: \texttt{IF merged = node THEN RETURN node END}.
+
+%----------------------------------------------------------------------
+\subsection{Summary of Verification Approaches}
+%----------------------------------------------------------------------
+
+\begin{center}
+\begin{tabular}{lrrrl}
+\toprule
+\textbf{Method} & \textbf{$N{=}2$} & \textbf{$N{=}8$} & \textbf{$N{=}16$} & \textbf{Scalability} \\
+\midrule
+Explicit-state (BFS) & $< 1$\,s & \textit{infeasible} & \textit{infeasible} & $O(k^n)$ states \\
+BDD (partitioned) & $< 1$\,s & 3.7\,s / 217\,MB & \textit{impractical} & exponential BDD growth \\
+MDD saturation & $< 1$\,s & 2.1\,s / 38\,MB & 7.2\,s / 233\,MB & best for async systems \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The MDD/saturation approach is the clear winner for asynchronous CSP
+systems.  Its level-by-level fixed-point computation exploits the
+locality of asynchronous events (each event affects only 1--2 process
+instances), which is exactly the structure of CSP systems composed via
+channel synchronization.
 
 %======================================================================
 \section{References}
@@ -915,6 +1036,11 @@ Kluwer Academic Publishers, 1993.
 A.~W. Roscoe,
 ``Compiling Shared-Nothing CSP to Supercombinators: A Progress Report,''
 Technical report, University of Oxford, 2013.
+
+\bibitem{ciardo2001}
+G.~Ciardo, G.~L\"uttgen, R.~Siminiceanu,
+``Saturation: An Efficient Iteration Strategy for Symbolic State-Space Generation,''
+\emph{Proc.\ TACAS}, LNCS 2031, pp.~328--342, 2001.
 
 \end{thebibliography}
 

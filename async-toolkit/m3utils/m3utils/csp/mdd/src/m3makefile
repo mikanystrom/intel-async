@@ -1,0 +1,25 @@
+% Copyright (c) 2026 Mika Nystrom.
+% SPDX-License-Identifier: Apache-2.0
+%
+% MDD -- Multi-valued Decision Diagrams with saturation
+
+import ("libm3")
+import ("cit_util")
+
+Interface ("MDDPrivate")
+Interface ("MDDLevel")
+Interface ("MDDUniqueTable")
+Interface ("MDDCache")
+Interface ("MDDEvent")
+Interface ("MDDSaturation")
+
+Module ("MDDLevel")
+Module ("MDDUniqueTable")
+Module ("MDDCache")
+Module ("MDDEvent")
+Module ("MDDSaturation")
+Interface ("MDD")
+
+implementation ("MDDImpl")
+
+library ("mdd")

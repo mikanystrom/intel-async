@@ -489,31 +489,33 @@ have been exhausted.
 %======================================================================
 
 \begin{center}
-\begin{tabular}{lcccc}
+\begin{tabular}{lcccl}
 \toprule
 \textbf{Approach} &
 \textbf{Memory} &
 \textbf{Effort} &
 \textbf{BDD lib} &
-\textbf{Priority} \\
+\textbf{Status} \\
 & \textbf{reduction} & & \textbf{changes?} & \\
 \midrule
-Frontier-based       & 2--5$\times$     & 0.5--1 day  & No  & Highest \\
-Partitioned TR       & 5--20$\times$    & 2--4 days   & No  & High \\
-BMC with SAT         & $\gg$10$\times$  & 3--5 days   & No  & Medium \\
-Static reordering    & 1.1--1.3$\times$ & 1--2 days   & No  & Low \\
-Complement edges     & 1.2--1.5$\times$ & 1--2 weeks  & Yes & Low \\
-Saturation (MDD)     & 100--1000$\times$& 2--4 weeks  & Yes & Future \\
-Dynamic sifting      & 1.1--1.5$\times$ & 1--2 weeks  & Yes & Low \\
+Frontier-based       & (see below)      & 0.5--1 day  & No  & Done \\
+Partitioned TR       & \textbf{12.4$\times$} & 2--4 days & No & Done \\
+BMC with SAT         & $\gg$10$\times$  & 3--5 days   & No  & Not started \\
+Static reordering    & 1.1--1.3$\times$ & 1--2 days   & No  & Not started \\
+Complement edges     & 1.2--1.5$\times$ & 1--2 weeks  & Yes & Not started \\
+Saturation (MDD)     & 100--1000$\times$& 2--4 weeks  & Yes & Not started \\
+Dynamic sifting      & 1.1--1.5$\times$ & 1--2 weeks  & Yes & Not started \\
 \bottomrule
 \end{tabular}
 \end{center}
 
 The frontier-based and partitioned approaches are complementary:
 frontier reduces the size of the left operand in the conjunction,
-while partitioning reduces the size of the right operand and enables
-early quantification.  Combined, they should reduce peak memory by
-10--50$\times$.
+while partitioning reduces the size of the right operand.  Frontier
+alone did not help (the bottleneck was the monolithic~$T$, not the
+reached set size), but combined with partitioning the result is a
+\textbf{12.4$\times$} reduction in peak memory (2,702\,MB to 217\,MB
+for $N = 8$ dining philosophers).
 
 %======================================================================
 \section{Recommended Plan}
@@ -543,6 +545,76 @@ early quantification.  Combined, they should reduce peak memory by
 Phases~A and~B together should bring peak memory for $N = 8$ dining
 philosophers from 2.7\,GB to well under 500\,MB, and enable scaling
 to larger systems that are currently infeasible.
+
+%======================================================================
+\section{Implementation Results}
+%======================================================================
+
+Phases~A and~B have been implemented in \texttt{symbolic.scm}.
+
+\subsection{Phase~A: Frontier-Based Computation}
+
+Frontier-based reachability was implemented first.  It did not reduce
+peak memory because the bottleneck is the conjunction with the
+monolithic~$T$, not the size of the reached set.  However, it is a
+prerequisite for Phase~B and remains in the final implementation.
+
+\subsection{Phase~B: Partitioned Transition Relations}
+
+The monolithic transition relation was replaced with a list of
+partition records.  Each partition covers one instance (tau transitions)
+or one channel (sync transitions), accumulating all edges of the same
+type into a single BDD.  For $N = 8$ dining philosophers this yields
+32~partitions (all sync, since the fork/philosopher processes have no
+tau transitions), each with 16--18~BDD nodes.
+
+The image computation conjoins the frontier with each partition BDD
+separately, quantifies out only the participating current-state
+variables, and renames the participating next-state variables.
+Non-participating instances' state passes through unchanged in the
+conjunction---this implicitly provides the frame condition without
+building explicit equivalence BDDs.
+
+\textbf{Key correctness note.}  The original plan called for
+early quantification of non-participating current-state variables from
+the frontier \emph{before} the conjunction (projecting the frontier
+down to just the participating variables).  This is incorrect:
+projecting out non-participating variables destroys the coupling
+between instances in the reached set, causing the image to
+over-approximate (it reports deadlock in deadlock-free systems).
+The correct approach is to conjoin the full frontier with the
+(small) partition BDD and let the non-participating variables pass
+through.  The conjunction intermediate is still small because the
+partition BDD mentions only 4--8~variables.
+
+\texttt{BDD.ClearCaches} is called between iterations to reclaim
+operation cache memory from the many small intermediates.
+
+\subsection{Benchmark Results}
+
+$N = 8$ dining philosophers (16~instances, 32~BDD variables) on
+Apple~M2:
+
+\begin{center}
+\begin{tabular}{lrrr}
+\toprule
+& \textbf{Monolithic} & \textbf{Monolithic + GC} & \textbf{Partitioned} \\
+\midrule
+Transition BDDs    & 2,307 nodes       & 2,307 nodes       & 16--18 $\times$ 32 \\
+Peak RSS           & 2,702\,MB         & 2,749\,MB         & \textbf{217\,MB} \\
+Memory reduction   & 1$\times$         & 1$\times$         & \textbf{12.4$\times$} \\
+Iterations         & 8                 & 8                 & 8 \\
+Reached BDD        & 1,564 nodes       & 1,564 nodes       & 1,564 nodes \\
+Deadlock BDD       & 66 nodes          & 66 nodes          & 66 nodes \\
+Result             & DEADLOCK          & DEADLOCK          & DEADLOCK \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The 12.4$\times$ memory reduction exceeds the predicted 5--20$\times$
+range from Section~4.4.  The reachability results are identical
+(same iteration count, same BDD sizes, same deadlock detection).
+All 15~acceptance tests pass.
 
 %======================================================================
 \section{References}

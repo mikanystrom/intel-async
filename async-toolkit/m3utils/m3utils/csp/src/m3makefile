@@ -14,6 +14,7 @@ import ("cspsimlib")
 import ("mpfr")
 import ("bdd")
 import ("sop")
+import ("mdd")
 
 %SYSTEM_LIBS{"MPZ"} = [ "-lgmp" ]
 %SYSTEM_LIBORDER += [ "MPZ" ] % need this, too
@@ -97,6 +98,9 @@ SchemeStubs ("RegEx")
 SchemeStubs ("TextSeq")
 SchemeStubs ("RefSeq")
 SchemeStubs ("BDD")
+SchemeStubs ("MDD")
+SchemeStubs ("MDDEvent")
+SchemeStubs ("MDDSaturation")
 SchemeStubs ("Time")
 SchemeStubs ("Fingerprint")
 SchemeStubs ("Mpfr")
