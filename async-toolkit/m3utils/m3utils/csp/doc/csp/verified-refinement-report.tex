@@ -76,7 +76,7 @@ challenge of the field.
 
 The standard approach to this challenge is \emph{post-hoc model
 checking}: design the circuit, then feed it to a state-space explorer
-that exhaustively checks for deadlock.  FDR4~\cite{fdr4}, the
+that exhaustively checks for deadlock.  FDR3~\cite{fdr4}, the
 canonical tool for CSP refinement checking, works this way.  So does
 the MDD-based deadlock checker we built for the Fulcrum CSP toolchain,
 which scales to over a thousand dining philosophers using symbolic
@@ -189,14 +189,14 @@ Key language features include:
   channel readiness (\emph{probes}) or data conditions:
 \begin{Verbatim}[samepage=true]
 *[[ #L -> L?x ; R!x
-  :  #S -> S?y ; T!y
+  [] #S -> S?y ; T!y
 ]]
 \end{Verbatim}
 
 \item[Nondeterministic selection.]
-  The \texttt{:[\,]:} construct provides internal (nondeterministic)
-  choice, used when the environment cannot observe which branch is
-  taken.
+  When the guard separator is \texttt{:} instead of \texttt{[\,]},
+  the selection is nondeterministic: multiple guards may be
+  simultaneously true, and the implementation chooses arbitrarily.
 
 \item[Repetition.]
   The \texttt{*[\,]} construct is an infinite loop---the normal
@@ -779,6 +779,19 @@ the simple buffer above; for more complex pipeline templates with
 handshake reshuffling, the proof involves showing that the template's
 internal protocol matches the declared channel protocols.
 
+\paragraph{Repeated channel access.}
+The simple buffer insertion above assumes each channel is accessed at
+most once per loop iteration.  When a process accesses the same
+channel multiple times per iteration (e.g., two reads from a shared
+function unit), straightforward buffer insertion does not apply.
+Wen, Li, and Manohar~\cite{wen2025} address this by introducing
+\emph{channel replicas}---one per access site---and a
+structurally-inductive control circuit that dynamically routes tokens
+between the replicas and the original channel.  Because the
+construction uses only deterministic dataflow elements, the result is
+guaranteed slack elastic and can be verified by the same protocol
+conformance framework.
+
 %----------------------------------------------------------------------
 \subsection{Separation of Optimization from Correctness}
 \label{sec:separation}
@@ -885,6 +898,16 @@ microcontroller are both L-deterministic.
 Not all systems qualify: a system that guards on probe negation
 (``\texttt{\~{}\#L}'') to distinguish empty from non-empty channels
 is not L-deterministic and may not be slack elastic.
+
+The original slack elasticity theorem requires that each channel be
+accessed at most once per loop iteration---a restriction that excludes
+programs where a shared resource (e.g., a floating-point unit) is
+accessed from multiple program points.  Wen, Li, and
+Manohar~\cite{wen2025} remove this restriction by introducing channel
+replicas and deterministic control circuits, extending slack
+elasticity to all L-deterministic CHP programs regardless of access
+multiplicity.  This extends the domain of our pipeline insertion step
+(Section~\ref{sec:refinement-steps}) to the general case.
 
 Prakash~\cite{prakash2008} showed that the slack
 matching problem (optimally assigning buffer depths to channels in a
@@ -1589,7 +1612,11 @@ PCHB, PCFB, or simple FIFO) on a channel preserves the protocol.
 verifier checks that the template's LTS, composed with the channel
 protocol automaton, admits exactly the same external behavior (modulo
 buffering delay).  Since the templates are fixed and small, this
-check can be done once per template type and cached.
+check can be done once per template type and cached.  For channels
+with repeated access per iteration, the verifier must additionally
+handle the channel-replica and control-circuit construction
+of~\cite{wen2025}, checking that the replica network preserves the
+original channel's protocol.
 
 \textbf{Effort: Medium.}  Estimated: 2--4 weeks.  The main work is
 formalizing the pipeline templates as LTSs and implementing the
@@ -1999,7 +2026,7 @@ Generating SystemVerilog:
 \textbf{Step} & \textbf{Check} & \textbf{Method} & \textbf{Result} \\
 \midrule
 1. Specification & Protocol conformance & Local per-process & PASS \\
-2. Protocol annotation & Duality & Syntactic & PASS \\
+2. Protocol annotation & Matching & Syntactic & PASS \\
 3. Decomposition & Conformance + acyclicity & Local + graph & PASS* \\
   & Cyclic subgraph & MDD model check & PASS \\
 4. Data refinement & Width analysis & Abstract interp. & PASS \\
@@ -2033,8 +2060,9 @@ Session types, introduced by Honda, Vasconcelos, and
 Kubo~\cite{honda1998}, assign types to communication channels that
 describe the sequence of messages exchanged.  The type system
 guarantees progress (no deadlock) and session fidelity (no protocol
-violation).  Yoshida and Carbone~\cite{yoshida2012} extended session
-types to multiparty protocols.
+violation).  Deni\'elou and Yoshida~\cite{yoshida2012} showed
+how multiparty session types correspond to communicating automata,
+enabling automated verification of multiparty protocols.
 
 Our protocol types are a specialization of binary session types to the
 hardware domain: point-to-point channels with fixed-width data and
@@ -2154,11 +2182,53 @@ as a whole.
 Wong's data-driven decomposition (DDD)~\cite{wong2004} automates the
 most labor-intensive step in Martin's methodology: decomposing a
 sequential CHP program into a network of fine-grained concurrent
-processes, each implementable as a single PCHB pipeline stage.  DDD
-analyzes data dependencies in the sequential program and partitions it
-into concurrent modules, preserving trace equivalence with the
-original.  The method was validated on the instruction-fetch unit of
-the Lutonium asynchronous 8051 microcontroller~\cite{martin2003}.
+processes, each directly implementable as a precharged half-buffer
+(PCHB) pipeline stage.  DDD proceeds in three phases:
+\begin{enumerate}
+\item \textbf{DSA transformation.}  The sequential program is
+  converted to \emph{dynamic single-assignment} form, where each
+  variable is assigned at most once per loop iteration.  Nested loops
+  are eliminated by early decomposition, and selection statements and
+  straightline code are rewritten.  This removes false syntactic
+  dependencies (analogous to WAW and WAR hazards in compiler
+  terminology), exposing the true data parallelism.
+\item \textbf{Projection.}  Variable dependency sets are
+  computed: for each variable~$v$, the set $\mathit{DS}(v)$ contains
+  all variables whose values are needed to compute~$v$.  When a
+  variable appears in multiple dependency sets, copy variables and
+  internal channels are inserted.  The DSA program is then
+  syntactically partitioned so that each resulting process computes
+  exactly one variable, communicating intermediate values over newly
+  inserted channels.  The correctness of projection relies crucially
+  on \emph{slack elasticity}: all deterministic CHP programs are
+  locally slack elastic~\cite{manohar2001}, so adding channel buffers
+  (slack) between projected processes cannot change the sequence of
+  values communicated on any channel (Theorem~5 in~\cite{wong2004}).
+\item \textbf{Clustering.}  The fine-grained system produced by
+  projection typically contains many small processes with high
+  communication overhead.  \emph{Distillation} makes certain
+  communications conditional, allowing processes to go idle and
+  consume no dynamic energy.  \emph{Elimination} removes
+  trivial left--right buffer processes.  Finally,
+  \emph{recomposition} merges selected processes to reduce channel
+  count and energy, while \emph{slack matching} (using a
+  forward-backward interval delay model and simulated annealing)
+  inserts pipeline buffers to meet throughput targets.
+\end{enumerate}
+Wong proves that all processes generated by the DSA and projection
+phases satisfy the strict CHP requirements for direct implementation
+as asynchronous pipeline stages (no nested loops, at most one use of
+each channel per iteration, all inputs precede all outputs).  DDD
+applies only to deterministic CHP programs---connecting directly to
+Papadantonakis's D-CHP restriction (Section~\ref{sec:dchp}).
+
+The method was validated on the instruction-fetch unit of the
+Lutonium asynchronous 8051 microcontroller~\cite{martin2003}: DDD
+decomposed the sequential specification into 88~processes, reduced to
+27~after distillation, elimination, and clustering.  The resulting
+system matched the throughput of the manual decomposition (which had
+required weeks of expert effort) at roughly $2{\times}$ the energy
+cost---the price of full automation versus hand-tuned optimization.
 
 DDD operates at exactly the boundary addressed by our ``process
 decomposition'' refinement step (Section~\ref{sec:refinement-steps}):
@@ -2172,8 +2242,15 @@ with the protocol type checker verifying the result.  Conversely, the
 protocol type system could provide the correctness certificate that
 DDD's decomposition algorithm currently establishes by construction.
 
+The explicit dependence of DDD's projection on slack elasticity
+underscores a recurring theme: the correctness of process
+decomposition in asynchronous systems fundamentally requires that
+adding buffering does not alter observable behavior.  Our protocol
+types formalize exactly this invariant.
+
 %----------------------------------------------------------------------
 \subsection{Deterministic CHP and Value Sequence Systems}
+\label{sec:dchp}
 %----------------------------------------------------------------------
 
 Papadantonakis~\cite{papadantonakis2002} introduced two concepts
@@ -2253,6 +2330,78 @@ protocol type system, which enables pipeline insertion to be verified
 \emph{within} the same framework as all other design steps, rather
 than as a separate correctness argument.
 
+%----------------------------------------------------------------------
+\subsection{General Slack Elasticity and Dataflow Translation}
+%----------------------------------------------------------------------
+
+Wen, Li, and Manohar~\cite{wen2025} extend the original slack
+elasticity result~\cite{manohar2001} to handle CHP processes where a
+channel is accessed \emph{multiple times per loop iteration}---a
+common pattern when a shared hardware unit (e.g., a floating-point
+multiply-accumulate) is accessed from multiple program points, or when
+variable-length packet protocols require repeated reads on the same
+channel.  Previous dataflow translation methods (DDD~\cite{wong2004}
+and static token form) could not handle such programs without ad-hoc
+manual rewriting.
+
+The key idea is to introduce \emph{channel replicas}---one per access
+site---and a structurally-inductive \emph{control circuit} (built from
+sequential, conditional, and loop combinators) that dynamically
+generates the merge/split control tokens needed to recombine the
+replicas into the single original channel.  Because the construction
+uses only the eight deterministic dataflow elements (never the
+nondeterministic MIXER), the result is guaranteed to be slack elastic
+by Corollary~2 of~\cite{manohar2001}, and is therefore amenable to
+all standard pipeline optimizations (buffer insertion, slack matching,
+retiming).
+
+This work is directly relevant to our framework in two ways.  First,
+it extends the domain of the ``pipeline insertion'' refinement step
+(Section~\ref{sec:refinement-steps}) to processes with repeated
+channel actions, which our current protocol types can describe but
+which the original projection theorem could not decompose.  Second,
+the determinism-preservation argument---that the construction
+maintains program-order access to shared state, unlike MIXER-based
+alternatives that can reorder accesses and produce erroneous
+results---is precisely the kind of correctness property that our
+protocol type checker should verify.
+
+%----------------------------------------------------------------------
+\subsection{Certified CHP Semantics}
+%----------------------------------------------------------------------
+
+Nkounkou~\cite{nkounkou2020} provides the first mechanically verified
+formalization of CHP semantics, implemented in the Coq proof
+assistant.  The formalization defines the behavior of a CHP program as
+a set of possibly-infinite traces of event bags (multisets of atomic
+events: assignments, channel send/receive phases, waits, and
+determinism-violation markers).  A certified simulator, also
+implemented and verified in Coq, is proved sound and complete with
+respect to this trace semantics: every trace the simulator produces is
+a valid feasible trace of the program, and every feasible trace can be
+produced by some input sequence.
+
+The formalization covers core CHP including sequential and parallel
+composition, deterministic and nondeterministic selection, repetition,
+channel send/receive with data, probes, and---notably---shared
+variables across concurrent processes, which prior formalizations
+excluded.  The simulator has been extracted to OCaml and demonstrated
+on Martin's first asynchronous MIPS microprocessor (computing
+Fibonacci numbers).
+
+Nkounkou's work does not address deadlock-freedom, slack elasticity,
+or refinement checking (all noted as future work), but it provides the
+foundational semantic infrastructure on which such properties could be
+mechanically verified.  For our framework, the most relevant
+connection is the prospect of \emph{certified refinement checking}:
+given a mechanically verified CHP semantics, one could in principle
+prove that a decomposition step preserves trace equivalence with
+machine-checked certainty, rather than relying on tool-checked
+heuristics.  The gap between Nkounkou's current formalization and a
+practical certified refinement checker is substantial (requiring
+formalization of deadlock, fairness, and trace comparison), but the
+semantic foundation is now in place.
+
 %======================================================================
 \section{Conclusion}
 \label{sec:conclusion}
@@ -2264,7 +2413,7 @@ design in the Fulcrum CSP toolchain.  The key ideas are:
 \begin{enumerate}
 \item \textbf{Protocol types on channels.}  Each channel carries an
   annotation specifying the permitted sequence of communications.
-  Protocol types are regular expressions over send/receive actions,
+  Protocol types are regular expressions over value sequences,
   simple enough for fully automatic checking yet expressive enough to
   capture the communication patterns in real hardware designs.
 
@@ -2386,13 +2535,14 @@ Wiley, 2001.
 \bibitem{manohar2001}
 R.\ Manohar and A.J.\ Martin,
 ``Slack Elasticity in Concurrent Computing,''
-\textit{Proc.\ Mathematics of Program Construction}, Springer LNCS
-2386, pp.\ 272--285, 2001.
+\textit{Proc.\ 4th International Conference on the Mathematics of
+Program Construction}, Springer LNCS 1422, pp.\ 272--285, 1998.
 
 \bibitem{lines1998}
 A.\ Lines,
 ``Pipelined Asynchronous Circuits,''
-\textit{Caltech CS Technical Report CS-TR-95-21}, revised 1998.
+M.S.\ thesis, California Institute of Technology, 1995
+(Caltech CS-TR-95-21, revised 1998).
 
 \bibitem{peled1993}
 D.\ Peled,
@@ -2407,7 +2557,7 @@ and L.\ Voisin,
 vol.\ 12, no.\ 6, pp.\ 447--466, 2010.
 
 \bibitem{yoshida2012}
-N.\ Yoshida and L.\ Gheri,
+P.-M.\ Deni\'elou and N.\ Yoshida,
 ``Multiparty Session Types Meet Communicating Automata,''
 \textit{Proc.\ ESOP}, Springer LNCS 7211, pp.\ 194--213, 2012.
 
@@ -2415,17 +2565,6 @@ N.\ Yoshida and L.\ Gheri,
 M.\ Nystr\"om,
 ``The Fulcrum CSP Language Reference Manual,''
 Intel Corporation, 2025.
-
-\bibitem{cardi2011}
-C.\ Cardi,
-\textit{Slack Elasticity and Performance Analysis of Timed Asynchronous
-Circuits},
-Ph.D.\ thesis, University of Southern California, 2011.
-
-\bibitem{beerel2010}
-P.A.\ Beerel, R.O.\ Ozdag, and M.\ Ferretti,
-\textit{A Designer's Guide to Asynchronous VLSI},
-Cambridge University Press, 2010.
 
 \bibitem{papadantonakis2002}
 K.\ Papadantonakis,
@@ -2451,11 +2590,16 @@ A.J.\ Martin, M.\ Nystr\"om, and C.G.\ Wong,
 \textit{IEEE Design \& Test of Computers}, vol.\ 20, no.\ 6,
 pp.\ 9--17, 2003.
 
-\bibitem{cortadella2002}
-J.\ Cortadella, M.\ Kishinevsky, A.\ Kondratyev, L.\ Lavagno,
-and A.\ Yakovlev,
-\textit{Logic Synthesis of Asynchronous Controllers and Interfaces},
-Springer, 2002.
+\bibitem{wen2025}
+X.\ Wen, R.\ Li, and R.\ Manohar,
+``Translating General Slack Elastic Programs into Dataflow Circuits,''
+\textit{Proc.\ 29th IEEE International Symposium on Asynchronous
+Circuits and Systems (ASYNC)}, pp.\ 80--88, 2025.
+
+\bibitem{nkounkou2020}
+B.R.\ Nkounkou,
+\textit{Certified Software for Designing Asynchronous Circuits},
+Ph.D.\ thesis, Cornell University, 2020.
 
 \end{thebibliography}
 
