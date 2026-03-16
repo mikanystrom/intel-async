@@ -158,7 +158,9 @@ exist, and what needs to be built.
 
 The Fulcrum CSP dialect (sometimes called CAST) is a hardware-oriented
 process description language in the tradition of Hoare's
-CSP~\cite{hoare1985} and Martin's CHP~\cite{martin1990}.  A process
+CSP~\cite{hoare1985} and Martin's CHP~\cite{martin1990}; see the
+language reference manual~\cite{nystrom2025csp} for the complete
+syntax and semantics.  A process
 is a sequential program that communicates with its environment via
 directional channels:
 
@@ -388,7 +390,7 @@ refinement-based design.  The core idea is that each channel in a
 system carries a \emph{protocol type} that specifies the sequence of
 communications permitted on that channel.  If every process conforms
 to its channel protocols, and the protocols at each channel's two
-endpoints are dual, then the composed system is deadlock-free
+endpoints match, then the composed system is deadlock-free
 \emph{by construction}.  Design proceeds by a sequence of
 refinement steps, each of which preserves protocol conformance and is
 checked locally.
@@ -399,70 +401,83 @@ checked locally.
 %----------------------------------------------------------------------
 
 A \emph{protocol type} describes the permitted sequence of
-communications on a channel from the perspective of one endpoint.
-Protocol types are regular expressions over send and receive actions,
-with data constraints.
+values communicated on a channel.  Since FSCP channels are
+\emph{unidirectional}---each channel has exactly one sender and one
+receiver---a protocol on a single channel describes only the sequence
+of values transferred, not a mix of sends and receives.  Multi-step
+interactions such as request-response are implemented with multiple
+channels (one per direction), and their coordination is captured by
+the channel dependency graph (Section~\ref{sec:deadlock-freedom}),
+not by the protocol type of any single channel.
 
 \begin{definition}[Protocol Type]
 \label{def:protocol}
 A protocol type $\pi$ is defined by the grammar:
 \[
-\pi ::= \texttt{!}\tau \mid \texttt{?}\tau \mid
+\pi ::= \tau \mid
         \pi_1 \mathbin{;} \pi_2 \mid
         \pi_1 \mid \pi_2 \mid
         \pi^{*} \mid \texttt{end}
 \]
-where $\tau$ is a data type (possibly with constraints), $\mathbin{;}$
-is sequencing, $\mid$ is choice, ${}^{*}$ is repetition, and
-\texttt{end} is the terminated protocol.
+where $\tau$ is a data type (possibly with value constraints),
+$\mathbin{;}$ is sequencing, $\mid$ is choice, ${}^{*}$ is
+repetition, and \texttt{end} is the terminated protocol (no further
+communication).  Each element $\tau$ in the protocol represents one
+handshake---one value transferred from sender to receiver.
 \end{definition}
 
 We propose the following concrete syntax for protocol annotations in
 \texttt{.sys} files:
 
 \begin{Verbatim}[samepage=true]
-var c : channel(32) protocol { !x ; ?ack }*;
+var c : channel(32) protocol { v }*;
 \end{Verbatim}
 
-This declares a channel where the sender repeatedly sends a 32-bit
-value and then receives an acknowledgment.  The protocol is from the
-sender's perspective; the receiver sees the dual protocol
-\texttt{\{ ?x ; !ack \}*}.
+This declares a channel that repeatedly transfers a 32-bit value---one
+value per handshake cycle.  The protocol is the same from both
+endpoints' perspective (the sender sends $v$, the receiver receives
+$v$; the direction is already fixed by the channel's
+\keyword{port}~\keyword{in}/\keyword{out} declaration).
 
 More examples:
 
 \begin{Verbatim}[samepage=true]
-// Simple data channel: sender sends one value per handshake
-var data : channel(32) protocol { !v }*;
+// Simple data channel: one value per handshake
+var data : channel(32) protocol { v }*;
 
-// Request-response: sender sends request, receives response
-var rr : channel(32) protocol { !req ; ?resp }*;
+// Alternating values with a constraint
+var tagged : channel(33) protocol { v : v[32]=0 ; v : v[32]=1 }*;
 
-// Conditional: branch on data value
-var ctrl : channel(1) protocol { !b ;
-    [ b=0 -> !payload32 ; ?ack
-    | b=1 -> end ] }*;
+// Finite protocol: exactly N values, then done
+var init : channel(32) protocol { v }^N ; end;
 \end{Verbatim}
 
-\subsubsection{Protocol duality}
+For most channels in typical FSCP designs, the protocol is simply
+\texttt{\{ v \}*}---an infinite stream of values, one per handshake.
+Richer protocols arise when there are value constraints (e.g., a
+tag bit that alternates) or when the channel carries a finite
+sequence (e.g., an initialization channel).
 
-The dual of a protocol $\pi$, written $\overline{\pi}$, is obtained by
-swapping every send with a receive and vice versa:
+\subsubsection{Multi-channel protocols and dependency}
 
-\begin{align*}
-\overline{\texttt{!}\tau} &= \texttt{?}\tau \\
-\overline{\texttt{?}\tau} &= \texttt{!}\tau \\
-\overline{\pi_1 \mathbin{;} \pi_2} &=
-  \overline{\pi_1} \mathbin{;} \overline{\pi_2} \\
-\overline{\pi_1 \mid \pi_2} &=
-  \overline{\pi_1} \mid \overline{\pi_2} \\
-\overline{\pi^{*}} &= (\overline{\pi})^{*} \\
-\overline{\texttt{end}} &= \texttt{end}
-\end{align*}
+Request-response patterns---such as the RegFile's read port---use
+\emph{two} channels: one for the request, one for the response.
+Each channel individually has the simple protocol \texttt{\{ v \}*}.
+The constraint that a request must precede its response is not a
+property of any single channel's protocol; it is a \emph{dependency}
+between channels, captured in the channel dependency graph
+(Definition~\ref{def:cdg}).  This clean separation is a direct
+consequence of FSCP's unidirectional channel model.
 
-Every channel must have dual protocols at its two endpoints: if the
-sender's protocol is $\pi$, the receiver's protocol must be
-$\overline{\pi}$.
+\subsubsection{Protocol matching}
+
+Since both endpoints of a channel see the same sequence of values (the
+sender produces them, the receiver consumes them), the protocol is
+shared, not dualized.  The tool checks that both the sender and the
+receiver agree on the channel's protocol type---that is, the sequence
+of values the sender produces must match the sequence the receiver
+expects.  This replaces the duality condition found in session type
+systems, which is needed only for bidirectional channels.
 
 \subsubsection{Protocol conformance}
 
@@ -485,30 +500,40 @@ the system.  This is the key to scalability.
 
 \subsubsection{Relationship to session types}
 
-Protocol types as defined here are closely related to \emph{binary
-session types}~\cite{honda1998}.  The key correspondences are:
+Protocol types as defined here are a radical simplification of
+\emph{binary session types}~\cite{honda1998}.  Session types assign
+dual types to the two endpoints of a bidirectional channel ($!\tau$
+for send, $?\tau$ for receive).  Our protocol types describe only
+the value sequence on a unidirectional channel; the direction is
+fixed by the port declaration, not encoded in the type.
 
 \begin{center}
 \begin{tabular}{ll}
 \toprule
-\textbf{Session types} & \textbf{Protocol types} \\
+\textbf{Session types} & \textbf{FSCP protocol types} \\
 \midrule
-Output type $!\tau.\sigma$ & $\texttt{!}\tau \mathbin{;} \pi$ \\
-Input type $?\tau.\sigma$ & $\texttt{?}\tau \mathbin{;} \pi$ \\
+Output type $!\tau.\sigma$ / Input type $?\tau.\sigma$
+  & Value transfer $\tau \mathbin{;} \pi$ \\
+  & (direction fixed by port decl.) \\
 Selection $\oplus\{l_i: \sigma_i\}$ & Choice $\pi_1 \mid \pi_2$ \\
-Branching $\&\{l_i: \sigma_i\}$ & Dual choice \\
+Branching $\&\{l_i: \sigma_i\}$ & Choice (same; no duality) \\
 Recursion $\mu X.\sigma$ & Repetition $\pi^{*}$ \\
 End & \texttt{end} \\
+Duality $!\tau \leftrightarrow ?\tau$ & Not needed (unidirectional) \\
+Delegation (channel passing) & Not needed (static topology) \\
 \bottomrule
 \end{tabular}
 \end{center}
 
-The simplification relative to full session types is that our channels
-are point-to-point and carry fixed-width data, which eliminates the
-need for delegation (channel passing) and polymorphism.  This
-simplification is precisely what makes the checking problem decidable
-and efficient---protocol conformance reduces to language inclusion over
-regular languages.
+The key simplifications relative to full session types are:
+(1)~channels are unidirectional, eliminating duality from the type
+system entirely; (2)~channels are point-to-point with fixed-width
+data, eliminating delegation and polymorphism; (3)~multi-channel
+coordination (e.g., request before response) is handled by the
+channel dependency graph rather than by nesting send/receive in a
+single type.  These simplifications make the checking problem
+decidable by finite automaton inclusion rather than the more complex
+type-checking algorithms needed for general session types.
 
 %----------------------------------------------------------------------
 \subsection{Compositional Deadlock-Freedom}
@@ -534,7 +559,9 @@ communicating on channels $c_1, \ldots, c_m$.  If:
 \begin{enumerate}
 \item[(a)] Every process $P_i$ conforms to its port protocols
   (Definition~\ref{def:conformance}).
-\item[(b)] Every channel $c_j$ has dual protocols at its two endpoints.
+\item[(b)] Every channel $c_j$ has matching protocols at its two
+  endpoints (the sender's value sequence matches what the receiver
+  expects).
 \item[(c)] The channel dependency graph $G$ (Definition~\ref{def:cdg})
   is acyclic.
 \end{enumerate}
@@ -549,9 +576,10 @@ Consider the channel $c_{i_1}$ that is first in this ordering.
 The process $P$ that is blocked waiting on $c_{i_1}$ has no prior
 dependency (by the topological ordering), so it is ready to
 communicate on $c_{i_1}$.  By protocol conformance~(a), $P$'s next
-action on $c_{i_1}$ matches the protocol.  By duality~(b), the other
-endpoint's process $Q$ expects the dual action.  By protocol
-conformance of $Q$, $Q$ is ready for this action (since $Q$'s prior
+action on $c_{i_1}$ matches the protocol.  By protocol matching~(b),
+the other endpoint's process $Q$ expects the same value sequence.
+By protocol conformance of $Q$, $Q$ is ready for this action (since
+$Q$'s prior
 dependencies are all on channels later in the ordering, which
 contradicts $c_{i_1}$ being first).  But then $P$ and $Q$ can
 communicate on $c_{i_1}$, contradicting the assumption that $s$ is
@@ -633,7 +661,7 @@ $P_1 \| P_2$ with:
 \item $P_2$ has ports $\{p_{k+1}, \ldots, p_n\} \cup \{\bar{q}_1,
   \ldots, \bar{q}_r\}$
 \item $q_1, \ldots, q_r$ are new internal channels connecting $P_1$
-  to $P_2$, with $\bar{q}_i$ being the dual endpoint of $q_i$.
+  to $P_2$, with $\bar{q}_i$ being the other endpoint of $q_i$.
 \end{itemize}
 \end{definition}
 
@@ -647,8 +675,9 @@ P =_{\mathcal{T}} (P_1 \| P_2) \setminus \{q_1, \ldots, q_r\}
 
 In practice, we check a weaker condition that is sufficient for
 correctness: $P_1$ and $P_2$ each conform to their port protocols
-(including the new internal channels), the internal channels have dual
-protocols, and the augmented channel dependency graph remains acyclic
+(including the new internal channels), the internal channels have
+matching protocols at both endpoints, and the augmented channel
+dependency graph remains acyclic
 (or any new cycles are handled by slack or localized checking).
 
 \textbf{Example.} Consider a monolithic pipeline process that reads
@@ -675,8 +704,8 @@ int(32) x;
 
 The proof obligation is that \texttt{partial\_transform} composed with
 \texttt{remaining\_transform} equals \texttt{transform} for all
-inputs, and that the internal channel~$M$ has matching dual protocols
-at its endpoints.
+inputs, and that the internal channel~$M$ has matching protocols
+at its two endpoints.
 
 \subsubsection{Data refinement}
 
@@ -712,12 +741,12 @@ decomposed into its constituent fields.
 
 \begin{Verbatim}[samepage=true]
 // Before: single 107-bit structure channel
-var em_data : channel(107) protocol { !em }*;
+var em_data : channel(107) protocol {em }*;
 
 // After: three separate channels
-var em_result : channel(32) protocol { !result }*;
-var em_dest   : channel(5)  protocol { !dest   }*;
-var em_rw     : channel(1)  protocol { !rw     }*;
+var em_result : channel(32) protocol {result }*;
+var em_dest   : channel(5)  protocol {dest   }*;
+var em_rw     : channel(1)  protocol {rw     }*;
 \end{Verbatim}
 
 The proof obligation is protocol equivalence: the sequence of
@@ -733,11 +762,11 @@ specific handshake template (WCHB, PCHB, PCFB, etc.).
 
 \begin{Verbatim}[samepage=true]
 // Before: direct connection
-var c : channel(32) protocol { !v }*;
+var c : channel(32) protocol {v }*;
 
 // After: c split into c1 -> buffer -> c2
-var c1 : channel(32) protocol { !v }*;
-var c2 : channel(32) protocol { !v }*;
+var c1 : channel(32) protocol {v }*;
+var c2 : channel(32) protocol {v }*;
 process Buffer = begin int(32) x; *[ c1?x ; c2!x ] end
     port in c1 : channel(32)
     port out c2 : channel(32);
@@ -764,14 +793,52 @@ Adding buffers to a channel (increasing its slack from $d$ to $d+k$)
 is a transformation that preserves protocol conformance.  A buffer
 process with slack~$k$ on a channel with protocol~$\pi$ simply relays
 values according to $\pi$ with up to $k$ values in flight.  The proof
-obligation is that the buffer conforms to both $\pi$ (on its input
-port) and $\overline{\pi}$ (on its output port)---which is trivially
-the case for a FIFO buffer.
+obligation is that the buffer conforms to~$\pi$ on both its input
+and output ports---which is trivially the case for a FIFO buffer.
 
 The \texttt{slacker} tool already computes optimal slack assignments
 via linear programming.  In the verified framework, each slack
 assignment is a pipeline insertion step with a trivial proof
 obligation.
+
+\subsubsection{Slack elasticity}
+
+A system is \emph{slack elastic} if its functional behavior (the
+sequence of values produced on each output channel) is independent
+of the amount of buffering on its internal
+channels~\cite{manohar2001,cardi2011}.  Slack elasticity is a
+critical property for the verified refinement framework because it
+means that slack insertion and removal are \emph{semantics-preserving
+transformations}---the designer (or the \texttt{slacker} tool) can
+adjust buffering for performance without affecting correctness.
+
+Not all systems are slack elastic.  A system with data-dependent
+control flow that observes buffer occupancy (e.g., through probes
+that distinguish empty from non-empty channels) may change behavior
+when slack changes.  The sufficient condition for slack elasticity
+is that no process uses the \emph{absence} of data on a channel
+as a control signal---that is, guards depend only on the
+\emph{presence} of data (\texttt{\#L} probes that test whether a
+channel has data ready) or on data values, never on whether a
+channel is empty.
+
+In the protocol type framework, slack elasticity can be verified as
+follows:
+\begin{enumerate}
+\item For each channel, check that no process guards on the
+  \emph{negation} of a probe on that channel (i.e., no
+  ``\texttt{\~{}\#L}'' guards that would distinguish slack~0 from
+  slack~$>0$).
+\item Verify that the channel dependency graph is preserved under
+  slack changes (adding buffers does not introduce new dependencies).
+\end{enumerate}
+If these conditions hold, the system is slack elastic and any slack
+assignment computed by \texttt{slacker} preserves the functional
+behavior verified at the CSP level.  This provides a clean separation:
+the protocol type system verifies functional correctness, slack
+elasticity guarantees that performance optimization does not
+invalidate the proof, and \texttt{slacker} optimizes throughput within
+the verified-correct design.
 
 \subsubsection{Action reordering}
 
@@ -832,8 +899,8 @@ as the reference against which all subsequent refinements are checked.
 int(32) buf[4];
 int(3)  head, tail, count;
 
-*[[ count < 4 -> L?buf[tail] ; tail = (tail+1) % 4 ; count = count+1
-  : count > 0 -> R!buf[head] ; head = (head+1) % 4 ; count = count-1
+*[[ count < 4 && #L -> L?buf[tail] ; tail = (tail+1) % 4 ; count = count+1
+  : count > 0 && #R -> R!buf[head] ; head = (head+1) % 4 ; count = count-1
 ]]
 \end{Verbatim}
 
@@ -854,13 +921,13 @@ protocol type.  For the producer-consumer example:
 
 \begin{Verbatim}[samepage=true]
 system ProdCons;
-  var c : channel(32) protocol { !v }*;
+  var c : channel(32) protocol {v }*;
 
   process Producer = "producer.csp"
-    port out R : channel(32) conforms { !v }*;
+    port out R : channel(32) conforms { v }*;
 
   process Consumer = "consumer.csp"
-    port in L : channel(32) conforms { ?v }*;
+    port in L : channel(32) conforms { v }*;
 begin
   var p : Producer(R => c);
   var q : Consumer(L => c);
@@ -873,19 +940,19 @@ on each port declaration specifies the protocol that the process
 guarantees on that port.  The tool checks:
 \begin{enumerate}
 \item Each port's \keyword{conforms} protocol matches the channel's
-  \keyword{protocol} (or its dual, depending on direction).
+  \keyword{protocol} (the same value sequence, regardless of direction).
 \item Each process's code actually conforms to its declared port
   protocols.
 \end{enumerate}
 
 For simple data channels (one send per handshake cycle), the protocol
-is \texttt{\{ !v \}*} and the annotation is straightforward.  For
+is \texttt{\{ v \}*} and the annotation is straightforward.  For
 request-response protocols like the RegFile's read port:
 
 \begin{Verbatim}[samepage=true]
 // RegFile read protocol: requester sends address, gets data back
-var rs_req  : channel(5)  protocol { !addr }*;
-var rs_resp : channel(32) protocol { !data }*;
+var rs_req  : channel(5)  protocol {addr }*;
+var rs_resp : channel(32) protocol {data }*;
 \end{Verbatim}
 
 Here the two channels together implement a request-response protocol.
@@ -901,8 +968,8 @@ At this stage, the tool performs three checks:
 \begin{enumerate}
 \item \textbf{Protocol conformance.} Each process's code conforms to
   its declared port protocols.
-\item \textbf{Protocol duality.} Each channel's sender protocol is the
-  dual of its receiver protocol.
+\item \textbf{Protocol matching.} Each channel's sender and receiver
+  agree on the protocol (same value sequence).
 \item \textbf{Dependency acyclicity.} The channel dependency graph is
   acyclic (or cycles are annotated as requiring special treatment).
 \end{enumerate}
@@ -947,21 +1014,21 @@ internal channels.  The \texttt{.sys} file records the decomposition:
 \begin{Verbatim}[samepage=true]
 system MiniMIPS;
   // New internal channels (from decomposition)
-  var fd_pc    : channel(32) protocol { !v }*;
-  var fd_instr : channel(32) protocol { !v }*;
-  var de_pc    : channel(32) protocol { !v }*;
+  var fd_pc    : channel(32) protocol {v }*;
+  var fd_instr : channel(32) protocol {v }*;
+  var de_pc    : channel(32) protocol {v }*;
   // ...
 
   process Fetch = "fetch.csp"
-    port out fd_pc    : channel(32) conforms { !v }*
-    port out fd_instr : channel(32) conforms { !v }*
-    port in  wb_taken : channel(1)  conforms { ?v }*
-    port in  wb_target: channel(32) conforms { ?v }*;
+    port out fd_pc    : channel(32) conforms { v }*
+    port out fd_instr : channel(32) conforms { v }*
+    port in  wb_taken : channel(1)  conforms { v }*
+    port in  wb_target: channel(32) conforms { v }*;
 
   process Decode = "decode.csp"
-    port in  fd_pc     : channel(32) conforms { ?v }*
-    port in  fd_instr  : channel(32) conforms { ?v }*
-    port out de_pc     : channel(32) conforms { !v }*
+    port in  fd_pc     : channel(32) conforms { v }*
+    port in  fd_instr  : channel(32) conforms { v }*
+    port out de_pc     : channel(32) conforms { v }*
     // ...
 \end{Verbatim}
 
@@ -975,9 +1042,10 @@ For each decomposition step, the tool checks:
   conforms to its declared port protocols.  This is a local check on
   each process individually.
 
-\item \textbf{Duality of new internal channels.}
-  The \texttt{fd\_pc} channel has protocol \texttt{\{ !v \}*} at the
-  Fetch end and \texttt{\{ ?v \}*} at the Decode end---these are dual.
+\item \textbf{Matching protocols on new internal channels.}
+  The \texttt{fd\_pc} channel has protocol \texttt{\{ v \}*}; both
+  the Fetch end (sender) and the Decode end (receiver) agree on this
+  value sequence.
 
 \item \textbf{Dependency acyclicity.}
   The tool constructs the channel dependency graph for the decomposed
@@ -1040,7 +1108,7 @@ The tool checks:
 
 \item \textbf{Protocol preservation.}  The protocol on each channel
   is preserved under the width change.  For simple
-  \texttt{\{ !v \}*} protocols this is automatic (the sequence of
+  \texttt{\{ v \}*} protocols this is automatic (the sequence of
   communications is unchanged, only the value domain narrows).
   For protocols with data constraints, the tool must verify that the
   constraints are still satisfiable at the narrower width.
@@ -1342,7 +1410,7 @@ decomposition $P_1 \| P_2$, verify that the decomposition is correct
 \textbf{Approach.} There are two levels of checking:
 \begin{enumerate}
 \item \textbf{Lightweight:} Check that $P_1$ and $P_2$ each conform
-  to their port protocols, that internal channels have dual
+  to their port protocols, that internal channels have matching
   protocols, and that the dependency graph is acyclic.  This is
   sufficient for deadlock-freedom but does not guarantee trace
   equivalence.
@@ -1531,12 +1599,12 @@ The system description with protocol annotations:
 
 \begin{Verbatim}[samepage=true]
 system SimplePipe;
-  var in_ch  : channel(32) protocol { !instr }*;
-  var out_ch : channel(32) protocol { !result }*;
+  var in_ch  : channel(32) protocol {instr }*;
+  var out_ch : channel(32) protocol {result }*;
 
   process Spec = "spec.csp"
-    port in  IN  : channel(32) conforms { ?instr }*
-    port out OUT : channel(32) conforms { !result }*;
+    port in  IN  : channel(32) conforms { instr }*
+    port out OUT : channel(32) conforms { result }*;
 begin
   var cpu : Spec(IN => in_ch, OUT => out_ch);
 end.
@@ -1546,11 +1614,11 @@ end.
 \begin{Verbatim}[samepage=true]
 $ check-protocols SimplePipe
 Protocol conformance:
-  Spec.IN:  PASS (conforms to { ?instr }*)
-  Spec.OUT: PASS (conforms to { !result }*)
-Protocol duality:
-  in_ch:  PASS (sender { !instr }* dual of receiver { ?instr }*)
-  out_ch: PASS (sender { !result }* dual of receiver { ?result }*)
+  Spec.IN:  PASS (conforms to { instr }*)
+  Spec.OUT: PASS (conforms to { result }*)
+Protocol matching:
+  in_ch:  PASS (sender and receiver agree on { v }*)
+  out_ch: PASS (sender and receiver agree on { v }*)
 Dependency graph: acyclic (1 node, 0 edges)
 Result: DEADLOCK-FREE (by compositional theorem)
 \end{Verbatim}
@@ -1559,35 +1627,35 @@ Result: DEADLOCK-FREE (by compositional theorem)
 \subsection{Step 2: Annotate Channel Protocols}
 %----------------------------------------------------------------------
 
-The specification has simple protocols (\texttt{\{ !v \}*} on each
+The specification has simple protocols (\texttt{\{ v \}*} on each
 channel).  As we decompose, we will introduce more channels, each
 needing its own protocol annotation.  For the 4-stage decomposition:
 
 \begin{Verbatim}[samepage=true]
 system SimplePipe4;
   // External channels
-  var in_ch  : channel(32) protocol { !instr }*;
-  var out_ch : channel(32) protocol { !result }*;
+  var in_ch  : channel(32) protocol {instr }*;
+  var out_ch : channel(32) protocol {result }*;
 
   // Internal pipeline channels
-  var fd_instr : channel(32) protocol { !instr }*;
-  var dc_rs    : channel(32) protocol { !rs_val }*;
-  var dc_rt    : channel(32) protocol { !rt_val }*;
-  var dc_rd    : channel(3)  protocol { !rd_addr }*;
-  var dc_wen   : channel(1)  protocol { !wen }*;
-  var ex_result: channel(32) protocol { !result }*;
-  var ex_rd    : channel(3)  protocol { !rd_addr }*;
-  var ex_wen   : channel(1)  protocol { !wen }*;
+  var fd_instr : channel(32) protocol {instr }*;
+  var dc_rs    : channel(32) protocol {rs_val }*;
+  var dc_rt    : channel(32) protocol {rt_val }*;
+  var dc_rd    : channel(3)  protocol {rd_addr }*;
+  var dc_wen   : channel(1)  protocol {wen }*;
+  var ex_result: channel(32) protocol {result }*;
+  var ex_rd    : channel(3)  protocol {rd_addr }*;
+  var ex_wen   : channel(1)  protocol {wen }*;
 
   // Feedback: Writeback -> Decode (register file)
-  var wb_wen   : channel(1)  protocol { !wen }*;
-  var wb_rd    : channel(3)  protocol { !rd_addr }*;
-  var wb_val   : channel(32) protocol { !val }*;
+  var wb_wen   : channel(1)  protocol {wen }*;
+  var wb_rd    : channel(3)  protocol {rd_addr }*;
+  var wb_val   : channel(32) protocol {val }*;
   // ...
 \end{Verbatim}
 
 Every channel in the decomposed system has an explicit protocol.
-The tool verifies duality at each channel endpoint.
+The tool verifies protocol matching at each channel endpoint.
 
 %----------------------------------------------------------------------
 \subsection{Step 3: Decompose into 4 Processes}
@@ -1686,7 +1754,7 @@ Protocol conformance:
   Writeback.ex_*:   PASS    Writeback.wb_*:    PASS
   Writeback.OUT:    PASS
   RegFile.rf_*:     PASS    RegFile.wb_*:      PASS
-Protocol duality: ALL PASS (14 channels checked)
+Protocol matching: ALL PASS (14 channels checked)
 Dependency graph:
   Cycle detected: Decode -> Execute -> Writeback -> RegFile -> Decode
   Annotation required: cycle broken by lockstep protocol
@@ -1707,12 +1775,12 @@ synthesis, we narrow to minimal widths:
 
 \begin{Verbatim}[samepage=true]
 // Width refinement
-var dc_rd    : channel(3)  protocol { !rd_addr }*;  // was 32
-var dc_wen   : channel(1)  protocol { !wen }*;      // was 32
-var ex_rd    : channel(3)  protocol { !rd_addr }*;  // was 32
-var ex_wen   : channel(1)  protocol { !wen }*;      // was 32
-var wb_wen   : channel(1)  protocol { !wen }*;      // was 32
-var wb_rd    : channel(3)  protocol { !rd_addr }*;  // was 32
+var dc_rd    : channel(3)  protocol {rd_addr }*;  // was 32
+var dc_wen   : channel(1)  protocol {wen }*;      // was 32
+var ex_rd    : channel(3)  protocol {rd_addr }*;  // was 32
+var ex_wen   : channel(1)  protocol {wen }*;      // was 32
+var wb_wen   : channel(1)  protocol {wen }*;      // was 32
+var wb_rd    : channel(3)  protocol {rd_addr }*;  // was 32
 // Data channels remain 32-bit
 \end{Verbatim}
 
@@ -1727,7 +1795,7 @@ Width analysis:
   wb_wen: 1-bit sufficient (passthrough)
   wb_rd:  3-bit sufficient (passthrough)
 Protocol preservation: ALL PASS
-  (all protocols are { !v }*, width narrowing preserves protocol)
+  (all protocols are { v }*, width narrowing preserves protocol)
 Result: DATA REFINEMENT VALID
 \end{Verbatim}
 
@@ -1760,7 +1828,7 @@ Each slack insertion is a verified transformation:
 $ verify-slack-insertion SimplePipe4
 Slack insertion verification:
   dc_rd (slack 1 -> 2): PASS
-    Buffer conforms to { ?v ; !v }* on both ports
+    Buffer conforms to { v }* on both ports
     Protocol preserved (output sequence = input sequence, delayed)
   dc_wen (slack 1 -> 2): PASS
   All other channels: slack 1 (no change, trivially valid)
@@ -1892,7 +1960,7 @@ against its rely and guarantee.
 
 Protocol types serve an analogous role in our framework: a process's
 port protocol is its guarantee (the communication pattern it promises),
-and the dual protocol on the other endpoint is its rely (the
+and the matching protocol on the other endpoint is its rely (the
 communication pattern it expects from the environment).  Protocol
 conformance is the local verification step that ensures the guarantee
 is met.
@@ -2001,7 +2069,7 @@ design in the Fulcrum CSP toolchain.  The key ideas are:
   capture the communication patterns in real hardware designs.
 
 \item \textbf{Compositional deadlock-freedom.}  If every process
-  conforms to its port protocols, every channel has dual protocols at
+  conforms to its port protocols, every channel has matching protocols at
   its endpoints, and the channel dependency graph is acyclic, then the
   system is deadlock-free by construction---no state-space exploration
   needed.  Cycles in the dependency graph are handled by localized
@@ -2142,6 +2210,28 @@ vol.\ 12, no.\ 6, pp.\ 447--466, 2010.
 N.\ Yoshida and L.\ Gheri,
 ``Multiparty Session Types Meet Communicating Automata,''
 \textit{Proc.\ ESOP}, Springer LNCS 7211, pp.\ 194--213, 2012.
+
+\bibitem{nystrom2025csp}
+M.\ Nystr\"om,
+``The Fulcrum CSP Language Reference Manual,''
+Intel Corporation, 2025.
+
+\bibitem{cardi2011}
+C.\ Cardi,
+\textit{Slack Elasticity and Performance Analysis of Timed Asynchronous
+Circuits},
+Ph.D.\ thesis, University of Southern California, 2011.
+
+\bibitem{beerel2010}
+P.A.\ Beerel, R.O.\ Ozdag, and M.\ Ferretti,
+\textit{A Designer's Guide to Asynchronous VLSI},
+Cambridge University Press, 2010.
+
+\bibitem{cortadella2002}
+J.\ Cortadella, M.\ Kishinevsky, A.\ Kondratyev, L.\ Lavagno,
+and A.\ Yakovlev,
+\textit{Logic Synthesis of Asynchronous Controllers and Interfaces},
+Springer, 2002.
 
 \end{thebibliography}
 
