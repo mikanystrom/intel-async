@@ -1,0 +1,998 @@
+% Copyright (c) 2025 Intel Corporation.  All rights reserved.
+% SPDX-License-Identifier: Apache-2.0
+%
+% photopic-manual.tex -- User Manual for the Photopic Luminous Efficacy Optimizer
+
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{microtype}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!60!black,
+  urlcolor=blue!60!black,
+  citecolor=blue!60!black,
+}
+
+\lstdefinestyle{shell}{
+  language=bash,
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{gray!10},
+  frame=single,
+  framerule=0.4pt,
+  rulecolor=\color{gray!50},
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  xleftmargin=2em,
+  framexleftmargin=1.5em,
+  numbers=none,
+  morekeywords={photopic,cm3,python3,cd,make},
+}
+
+\lstdefinestyle{scheme}{
+  language=Lisp,
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{blue!3},
+  frame=single,
+  framerule=0.4pt,
+  rulecolor=\color{blue!30},
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  xleftmargin=2em,
+  framexleftmargin=1.5em,
+  numbers=none,
+  keywordstyle=\color{blue!70!black}\bfseries,
+  commentstyle=\color{green!50!black}\itshape,
+  stringstyle=\color{red!60!black},
+  morekeywords={define,lambda,let,let*,begin,if,cond,set!,and,or},
+}
+
+\lstdefinestyle{output}{
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{yellow!5},
+  frame=single,
+  framerule=0.4pt,
+  rulecolor=\color{yellow!50!black},
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false,
+  xleftmargin=2em,
+  framexleftmargin=1.5em,
+  numbers=none,
+}
+
+\newcommand{\photopic}{\texttt{photopic}}
+\newcommand{\cmd}[1]{\texttt{#1}}
+\newcommand{\file}[1]{\texttt{#1}}
+
+\title{\textbf{Photopic} \\[0.3em]
+  \large A Luminous Efficacy Optimizer for Spectral Power Distributions}
+\author{User Manual}
+\date{March 2026}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+\newpage
+
+%======================================================================
+\section{Introduction}
+\label{sec:introduction}
+
+\photopic{} is a constrained optimization tool that finds spectral power
+distributions (SPDs) maximizing the \emph{luminous efficacy of radiation}
+(LER) or the $R_9$ color rendering index, subject to constraints on CRI
+(Color Rendering Index), CCT (Correlated Color Temperature), $D_{uv}$
+(distance from the Planckian locus), and individual color rendering
+components $R_i$.
+
+The tool answers questions of the form: ``What is the theoretical maximum
+luminous efficacy achievable at 2700\,K with CRI $\geq$ 80?'' and,
+conversely, ``What is the best $R_9$ (saturated red rendering) achievable
+at 2700\,K with CRI $\geq$ 80 and efficacy $\geq$ 350\,lm/W?''
+
+\subsection{Background}
+
+The luminous efficacy of radiation (LER) measures how efficiently a
+spectrum produces visible light, in lumens per watt of radiated power.
+The theoretical maximum is 683\,lm/W, achieved by monochromatic light at
+555\,nm---which has a CRI of zero.  Real light sources must balance
+efficacy against color quality: broader spectra render colors more
+faithfully but waste energy in wavelength regions where the eye is less
+sensitive.
+
+\photopic{} explores this trade-off computationally, using the COBYLA
+derivative-free constrained optimizer to search a parametric space of
+spectral shapes.  Color rendering is evaluated via the CIE~13.3 test
+color method with 14 test color samples (TCS).
+
+\subsection{How it works}
+
+\photopic{} starts from a blackbody spectrum at the target CCT and applies
+a multiplicative modifier of the form $\exp(f(\lambda))$, where
+$f(\lambda)$ is a piecewise-linear function defined by a parameter vector.
+The optimizer adjusts these parameters to minimize (or maximize) the
+objective while satisfying the constraints.
+
+To avoid poor local minima in the high-dimensional space, the optimization
+uses \emph{hierarchical subdivision}: it begins with 2 parameters (a
+single linear slope across the visible spectrum), optimizes, then doubles
+the resolution to 3, 5, 9, 17, 33, 65, and finally 129 parameters
+(approximately 3\,nm spacing across 380--770\,nm).  At each level, the
+COBYLA step size is halved.
+
+%======================================================================
+\section{Mathematical Foundations}
+\label{sec:math}
+
+This section summarizes the physics and colorimetry underlying the
+optimization.  For a full treatment and computational results, see the
+companion report~\cite{nystrom2026}.
+
+\subsection{Planck's law and the blackbody reference}
+
+The spectral radiance of a blackbody at temperature $T$ is
+\begin{equation}
+  B(\lambda, T) = \frac{2hc^2}{\lambda^5}
+    \cdot \frac{1}{\exp\!\bigl(hc / \lambda k T\bigr) - 1}
+  \label{eq:planck}
+\end{equation}
+where $h$ is Planck's constant, $c$ the speed of light, and $k$
+Boltzmann's constant.  This serves as the starting point for the
+optimization: the parametric spectrum is a multiplicative perturbation
+of $B(\lambda, T)$.
+
+\subsection{Luminous efficacy of radiation}
+
+The luminous efficacy of radiation (LER) measures how effectively a
+spectral power distribution $S(\lambda)$ produces the sensation of
+brightness:
+\begin{equation}
+  \eta = K_m \,
+    \frac{\displaystyle\int_{\lambda_0}^{\lambda_1}
+      S(\lambda)\, V(\lambda)\, d\lambda}
+    {\displaystyle\int_{\lambda_0}^{\lambda_1}
+      S(\lambda)\, d\lambda}
+  \label{eq:ler}
+\end{equation}
+where $V(\lambda)$ is the CIE photopic luminous efficiency function
+(peaking at unity at 555\,nm), $K_m = 683$\,lm/W is the maximum
+luminous efficacy, and $[\lambda_0, \lambda_1] = [380, 770]$\,nm
+spans the visible spectrum.  For monochromatic light at 555\,nm,
+$\eta = 683$\,lm/W; for a broadband source, $\eta$ is necessarily
+lower.  \emph{This is the primary quantity that \photopic{} maximizes.}
+
+\subsection{Tristimulus values and chromaticity}
+
+The CIE 1931 tristimulus values of a spectrum $S(\lambda)$ are
+\begin{equation}
+  X = \int_{\lambda_0}^{\lambda_1} S(\lambda)\, \bar{x}(\lambda)\, d\lambda, \quad
+  Y = \int_{\lambda_0}^{\lambda_1} S(\lambda)\, \bar{y}(\lambda)\, d\lambda, \quad
+  Z = \int_{\lambda_0}^{\lambda_1} S(\lambda)\, \bar{z}(\lambda)\, d\lambda
+  \label{eq:tristimulus}
+\end{equation}
+where $\bar{x}$, $\bar{y}$, $\bar{z}$ are the CIE 1931 $2^\circ$
+standard observer color matching functions, tabulated at 1\,nm
+resolution in \file{CieXyz.i3}.  The chromaticity coordinates are
+\begin{equation}
+  x = \frac{X}{X+Y+Z}, \qquad y = \frac{Y}{X+Y+Z}
+\end{equation}
+and the CIE 1960 UCS coordinates used for CCT determination are
+\begin{equation}
+  u = \frac{4X}{X + 15Y + 3Z}, \qquad
+  v = \frac{6Y}{X + 15Y + 3Z}.
+  \label{eq:ucs}
+\end{equation}
+
+\subsection{Correlated color temperature}
+
+The correlated color temperature (CCT) of a source is the temperature
+$T$ of the Planckian radiator whose chromaticity is nearest in
+$(u,v)$ space:
+\begin{equation}
+  \text{CCT} = \operatorname*{arg\,min}_{T} \;
+    \bigl\lVert (u_{\text{source}}, v_{\text{source}})
+    - (u_{\text{Planck}}(T), v_{\text{Planck}}(T)) \bigr\rVert
+  \label{eq:cct}
+\end{equation}
+The signed distance from the Planckian locus is $D_{uv}$, constrained
+to $D_{uv} \leq 0.012$ to ensure the source chromaticity lies
+acceptably close to the blackbody locus.  \photopic{} determines the
+CCT by Brent's method search over a precomputed temperature-to-$uv$
+lookup table (\file{TempUv.m3}).
+
+\subsection{Color Rendering Index}
+
+The CIE General Color Rendering Index $R_a$ quantifies how faithfully
+a test illuminant renders colors compared to a reference illuminant
+(a blackbody at the same CCT).  For each of 14~test color samples
+(TCS) with reflectance $\rho_i(\lambda)$, the reflected spectrum
+under the test illuminant is
+\begin{equation}
+  S_i^{\text{test}}(\lambda) =
+    \hat{S}(\lambda) \cdot \rho_i(\lambda)
+  \label{eq:reflected}
+\end{equation}
+where $\hat{S}$ is the Y-normalized test spectrum ($Y = 100$).
+The reflected spectrum is converted to CIE 1964 $U^*V^*W^*$
+coordinates with von~Kries chromatic adaptation:
+\begin{align}
+  W^* &= 25\, Y^{1/3} - 17 \\
+  U^* &= 13\, W^* \cdot (u' - u_0) \\
+  V^* &= 13\, W^* \cdot (v' - v_0)
+  \label{eq:uvw}
+\end{align}
+where $(u_0, v_0)$ is the adapted white point.  The color difference
+between test and reference renderings is
+\begin{equation}
+  \Delta E_i = \sqrt{
+    (\Delta U^*_i)^2 + (\Delta V^*_i)^2 + (\Delta W^*_i)^2
+  }
+\end{equation}
+and the special color rendering index for sample $i$ is
+\begin{equation}
+  R_i = 100 - 4.6 \, \Delta E_i.
+  \label{eq:ri}
+\end{equation}
+The general index averages the first eight (unsaturated pastel) samples:
+\begin{equation}
+  R_a = \frac{1}{8} \sum_{i=1}^{8} R_i.
+  \label{eq:cri}
+\end{equation}
+Notably, $R_9$ (saturated red) through $R_{14}$ are \emph{not}
+included in $R_a$.  This is the well-known ``CRI loophole'': a
+spectrum can score $R_a \geq 80$ while rendering saturated reds
+poorly ($R_9 < 0$), which is precisely the scenario explored by the
+inverse problem mode of \photopic{}.
+
+\subsection{The optimization problem}
+
+In the forward mode (\cmd{-run}), \photopic{} solves:
+\begin{equation}
+\fboxsep=8pt
+\boxed{\;
+  \max_{\mathbf{p}} \; \eta\bigl(S(\lambda; \mathbf{p})\bigr)
+  \quad \text{subject to} \quad
+  \begin{cases}
+    R_a \geq R_a^{\min} \\[3pt]
+    \min_{i \in 1..8} R_i \geq R_a^{\min} - 10 \\[3pt]
+    R_9 \geq R_9^{\min} \\[3pt]
+    |\text{CCT} - T_{\text{target}}| \leq 50\,\text{K} \\[3pt]
+    D_{uv} \leq 0.012
+  \end{cases}
+\;}
+  \label{eq:forward}
+\end{equation}
+
+\medskip\noindent
+In the inverse mode (\cmd{-run-maxr9}):
+\begin{equation}
+\fboxsep=8pt
+\boxed{\;
+  \max_{\mathbf{p}} \; R_9\bigl(S(\lambda; \mathbf{p})\bigr)
+  \quad \text{subject to} \quad
+  \begin{cases}
+    R_a \geq R_a^{\min} \\[3pt]
+    \min_{i \in 1..8} R_i \geq R_a^{\min} - 10 \\[3pt]
+    \eta \geq \eta_{\min} \\[3pt]
+    |\text{CCT} - T_{\text{target}}| \leq 50\,\text{K} \\[3pt]
+    D_{uv} \leq 0.012
+  \end{cases}
+\;}
+  \label{eq:inverse}
+\end{equation}
+Both are solved by COBYLA, Powell's derivative-free constrained
+optimizer~\cite{powell1994}, which constructs linear approximations
+to the objective and constraint functions within a shrinking
+trust region.
+
+\subsection{Parametric spectrum}
+
+The spectrum is parameterized as
+\begin{equation}
+  S(\lambda; \mathbf{p}) =
+    B(\lambda, T) \cdot
+    \exp\!\biggl(\,
+      \sum_{j} p_j \, \phi_j(\lambda)
+    \biggr)
+  \label{eq:parametric}
+\end{equation}
+where $\phi_j(\lambda)$ are hat functions (piecewise-linear basis
+functions) centered at uniformly spaced nodes
+$\lambda_j = \lambda_0 + j \cdot \Delta\lambda$ with
+$\Delta\lambda = (\lambda_1 - \lambda_0) / (n-1)$.  The exponent
+$f(\lambda) = \sum_j p_j \phi_j(\lambda)$ is the linear interpolant
+of the parameter values $p_j$ at the nodes.  At $\mathbf{p} = \mathbf{0}$,
+$S = B$: the unperturbed blackbody.  The exponential ensures
+$S(\lambda) > 0$ for all $\mathbf{p}$.
+
+The hierarchical subdivision doubles the number of nodes at each stage,
+interpolating the coarse solution onto the fine grid:
+\begin{align}
+  n &\in \{2,\; 3,\; 5,\; 9,\; 17,\; 33,\; 65,\; 129\} \\[4pt]
+  \Delta\lambda &\in \{390,\; 195,\; 97.5,\; \ldots,\; 3.05\} \;\text{nm}.
+\end{align}
+
+\begin{thebibliography}{9}
+
+\bibitem{nystrom2026}
+M.~Nystr\"om,
+\emph{Theoretical Limits of Luminous Efficacy under Color Rendering
+Constraints: A Computational Study},
+Technical Report, 2026.
+Available at \url{https://github.com/IntelLabs/async-toolkit}, branch
+\texttt{claude\_edits}.
+
+\bibitem{powell1994}
+M.\,J.\,D.~Powell,
+``A direct search optimization method that models the objective and
+constraint functions by linear interpolation,''
+in \emph{Advances in Optimization and Numerical Analysis},
+S.~Gomez and J.-P.~Hennart, eds., pp.~51--67, Kluwer, 1994.
+
+\bibitem{thornton1971}
+W.\,A.~Thornton,
+``Luminosity and color-rendering capability of white light,''
+\emph{J.\ Opt.\ Soc.\ Am.}, vol.~61, no.~9, pp.~1155--1163, 1971.
+
+\bibitem{walter1978}
+W.~Walter,
+``An optimization approach to the computation of luminous efficacy
+bounds for sources with color rendering constraints,''
+\emph{Color Res.\ Appl.}, vol.~3, no.~2, pp.~83--90, 1978.
+
+\end{thebibliography}
+
+%======================================================================
+\section{Building}
+\label{sec:building}
+
+\subsection{Prerequisites}
+
+\begin{itemize}
+  \item A working CM3 (Critical Mass Modula-3) compiler, installed and
+    in your \cmd{PATH} (or referenced by absolute path).
+  \item The \cmd{m3utils} tree built---\photopic{} depends on several
+    libraries within the tree including \cmd{mscheme},
+    \cmd{modula3scheme}, \cmd{parseparams}, \cmd{integrate},
+    \cmd{cobyla}, \cmd{minimize}, \cmd{mpfr}, and \cmd{cit\_util}.
+  \item The \cmd{sstubgen} tool must also be available, since the build
+    generates Scheme stubs for the Modula-3 interfaces.
+\end{itemize}
+
+\subsection{Build procedure}
+
+Build the entire \cmd{m3utils} tree first (if not already done), then
+build \photopic{}:
+
+\begin{lstlisting}[style=shell]
+# Build the full m3utils tree (from the m3utils root)
+cd m3utils
+export CM3=yes
+gmake
+
+# Or build just photopic (after dependencies are built)
+cd photopic/src
+cm3 -override
+\end{lstlisting}
+
+The binary is placed in a target-specific directory alongside the source,
+e.g., \file{photopic/\allowbreak{}ARM64\_DARWIN/\allowbreak{}photopic}
+on Apple Silicon macOS or
+\file{photopic/\allowbreak{}AMD64\_LINUX/\allowbreak{}photopic}
+on x86-64 Linux.
+
+If \cmd{sstubgen} is not in your default \cmd{PATH}, prefix the build
+command:
+
+\begin{lstlisting}[style=shell]
+env PATH="/path/to/cm3/install/bin:${PATH}" cm3 -override
+\end{lstlisting}
+
+%======================================================================
+\section{Command-Line Interface}
+\label{sec:cli}
+
+\photopic{} is a Modula-3 program that embeds MScheme, a Scheme
+interpreter.  The main optimization logic lives in
+\file{photopic.scm}, which is loaded at startup via the \cmd{-scmfile}
+flag.  All command-line invocations require the Scheme mode flags:
+
+\begin{lstlisting}[style=shell]
+photopic <mode> <args...> -scm -scmfile photopic.scm
+\end{lstlisting}
+
+The \cmd{-scm} flag activates the embedded Scheme interpreter.
+The \cmd{-scmfile} flag specifies a Scheme source file to load (the path
+to \file{photopic.scm} relative to the working directory or as an
+absolute path).
+
+\subsection{\texttt{-run}: Maximize efficacy}
+
+\begin{lstlisting}[style=shell]
+photopic -run <cct> <min-cri> <min-r9> -scm -scmfile photopic.scm
+\end{lstlisting}
+
+Maximizes luminous efficacy of radiation (LER, in lm/W) subject to:
+\begin{itemize}
+  \item CRI (Ra) $\geq$ \cmd{<min-cri>}
+  \item $R_9$ $\geq$ \cmd{<min-r9>}
+  \item Worst individual $R_i$ ($i \in 1..8$) $\geq$ \cmd{<min-cri>}$-10$
+  \item CCT within $\pm50$\,K of \cmd{<cct>}
+  \item $D_{uv} \leq 0.012$
+\end{itemize}
+
+The optimizer runs 8 hierarchical levels (2 to 129 parameters).
+Set \cmd{<min-r9>} to \cmd{-100} to leave $R_9$ effectively unconstrained.
+
+\subsection{\texttt{-run-maxr9}: Maximize \texorpdfstring{$R_9$}{R9} (inverse problem)}
+
+\begin{lstlisting}[style=shell]
+photopic -run-maxr9 <cct> <min-cri> <min-efficacy> \
+         -scm -scmfile photopic.scm
+\end{lstlisting}
+
+Maximizes the $R_9$ color rendering index subject to:
+\begin{itemize}
+  \item CRI (Ra) $\geq$ \cmd{<min-cri>}
+  \item Worst individual $R_i$ $\geq$ \cmd{<min-cri>}$-10$
+  \item Efficacy $\geq$ \cmd{<min-efficacy>} lm/W
+  \item CCT within $\pm50$\,K of \cmd{<cct>}
+  \item $D_{uv} \leq 0.012$
+\end{itemize}
+
+This is the inverse of \cmd{-run}: instead of finding how efficient a
+spectrum can be, it finds how well saturated reds can be rendered at a
+given efficiency floor.
+
+\subsection{\texttt{-run-drop}: Multi-run with TCS axis dropping}
+
+\begin{lstlisting}[style=shell]
+photopic -run-drop <cct> <min-cri> -scm -scmfile photopic.scm
+\end{lstlisting}
+
+Performs multiple rounds of efficacy maximization.  After each round, the
+test color sample axis with the worst $R_i$ is removed from the CRI
+average, and the optimizer re-runs against the remaining axes.  This
+explores how much additional efficacy can be gained by sacrificing
+individual color rendering dimensions.
+
+%======================================================================
+\section{Worked Examples}
+\label{sec:examples}
+
+All examples assume you are in the \file{report-runs/} directory with
+the \photopic{} binary at \file{../ARM64\_DARWIN/\allowbreak{}photopic}
+(adjust the path for your platform) and \file{photopic.scm} at
+\file{../src/\allowbreak{}photopic.scm}.
+
+For brevity, we define:
+\begin{lstlisting}[style=shell]
+PHOTOPIC=../ARM64_DARWIN/photopic
+SCMFILE=../src/photopic.scm
+\end{lstlisting}
+
+\subsection{Example 1: Basic run at CRI $\geq$ 80}
+
+\begin{lstlisting}[style=shell]
+$PHOTOPIC -run 2700 80 -100 -scm -scmfile $SCMFILE
+\end{lstlisting}
+
+This maximizes efficacy for a 2700\,K source with CRI $\geq$ 80 and no
+$R_9$ constraint.  Expect the optimizer to produce a spectrum with
+efficacy around 400--420\,lm/W, achieved by concentrating power in
+spectral regions where the eye is most sensitive while maintaining
+adequate color rendering.  Output files are written to the current
+directory (see Section~\ref{sec:output}).
+
+\subsection{Example 2: High CRI at CRI $\geq$ 95}
+
+\begin{lstlisting}[style=shell]
+$PHOTOPIC -run 2700 95 -100 -scm -scmfile $SCMFILE
+\end{lstlisting}
+
+With a tighter CRI constraint, the optimizer has less freedom to reshape
+the spectrum.  Expect efficacy around 350--370\,lm/W---a significant
+penalty compared to CRI $\geq$ 80, because the spectrum must remain closer
+to a blackbody shape to render all 8 primary test colors faithfully.
+
+\subsection{Example 3: Moderate CRI with \texorpdfstring{$R_9$}{R9} constraint}
+
+\begin{lstlisting}[style=shell]
+$PHOTOPIC -run 2700 82 50 -scm -scmfile $SCMFILE
+\end{lstlisting}
+
+This adds an $R_9 \geq 50$ constraint, requiring decent saturated red
+rendering.  Without this constraint, the optimizer often sacrifices deep
+red content (which the eye is insensitive to) for higher efficacy.  The
+$R_9$ floor forces retention of spectral power near 630\,nm, reducing
+achievable efficacy.
+
+\subsection{Example 4: Inverse problem---maximize \texorpdfstring{$R_9$}{R9} at efficacy \texorpdfstring{$\geq$}{>=} 350}
+
+\begin{lstlisting}[style=shell]
+$PHOTOPIC -run-maxr9 2700 80 350 -scm -scmfile $SCMFILE
+\end{lstlisting}
+
+Asks: given a 2700\,K source that must achieve CRI $\geq$ 80 and
+efficacy $\geq$ 350\,lm/W, what is the best $R_9$ possible?  This
+traces the Pareto frontier between efficacy and red rendering quality.
+
+\subsection{Example 5: Running the full CRI sweep}
+
+The script \file{run-optimizations.sh} automates running at multiple CRI
+levels:
+
+\begin{lstlisting}[style=shell]
+./run-optimizations.sh            # all levels: 60 70 80 82 85 90 95 98
+./run-optimizations.sh 90         # only CRI >= 90
+./run-optimizations.sh 80 85 90   # specific levels
+\end{lstlisting}
+
+\subsection{Example 6: Sweeping the efficacy--\texorpdfstring{$R_9$}{R9} frontier}
+
+The script \file{run-maxr9-sweep.sh} sweeps efficacy from 300 to
+430\,lm/W in steps of 10, maximizing $R_9$ at each level:
+
+\begin{lstlisting}[style=shell]
+./run-maxr9-sweep.sh
+\end{lstlisting}
+
+\subsection{Example 7: Plotting results}
+
+After running optimizations, generate publication-quality figures:
+
+\begin{lstlisting}[style=shell]
+python3 plot_spectra.py
+\end{lstlisting}
+
+This produces PDF and PNG files for:
+\begin{itemize}
+  \item Blackbody vs.\ optimized spectrum comparison
+  \item Multi-panel CRI comparison
+  \item Convergence across resolution levels
+  \item Overlay of all CRI-constrained spectra
+  \item Efficacy vs.\ CRI trade-off curve
+  \item $R_9$ vs.\ efficacy scatter plot
+\end{itemize}
+
+%======================================================================
+\section{Output Files}
+\label{sec:output}
+
+All output is written to the current working directory.
+
+\subsection{File naming convention}
+
+Output files follow the pattern:
+\begin{center}
+\cmd{<cct>\_CRI<min-cri>\_<suffix>\_<dims>.<ext>}
+\end{center}
+where:
+\begin{itemize}
+  \item \cmd{<cct>} is the target CCT (e.g., \cmd{2700})
+  \item \cmd{<min-cri>} is the minimum CRI constraint (e.g., \cmd{82})
+  \item \cmd{<suffix>} encodes run parameters (\cmd{R9=-100} for
+    unconstrained $R_9$; \cmd{\_maxR9\_eff350} for the inverse problem)
+  \item \cmd{<dims>} is the parameter count at the subdivision level
+    (2, 3, 5, 9, 17, 33, 65, or 129)
+\end{itemize}
+
+One file is produced \emph{at each subdivision level}, so a complete run
+at 8 levels generates 8 \file{.res} and 8 \file{.dat} files.
+
+\subsection{\texttt{.res} files: Optimization results}
+
+Each \file{.res} file is an S-expression on two lines.
+
+\paragraph{Line 1: Computed specifications.}  A flat list with the
+following fields:
+\begin{center}
+\begin{tabular}{@{}rll@{}}
+\toprule
+Position & Field & Description \\
+\midrule
+1  & CRI (Ra)    & Average of $R_1 \ldots R_8$ \\
+2  & Worst $R_i$ & Minimum of $R_1 \ldots R_8$ \\
+3  & Efficacy    & Luminous efficacy of radiation (lm/W) \\
+4  & CCT         & Correlated color temperature (K) \\
+5  & $D_{uv}$    & Distance from Planckian locus \\
+6--19  & $R_1 \ldots R_{14}$ & Individual color rendering indices \\
+20 & CRI-14      & Average of all 14 $R_i$ values \\
+21 & Worst-14    & Minimum of all 14 $R_i$ values \\
+22 & Sel-CRI     & CRI over selected TCS subset \\
+23 & Sel-worst   & Worst $R_i$ over selected subset \\
+24 & Worst axis  & Index of the worst TCS axis \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Example (from \file{2700\_CRI82\_R9=-100\_129.res}):
+
+\begin{lstlisting}[style=output]
+(83.22 72.01 408.61 (2650.00 0.012) (93.16 87.51
+ 72.01 92.19 80.80 75.68 92.36 72.02 28.67 57.20
+ 83.54 16.30 90.87 80.46) 73.06 16.30 73.06 16.30 12)
+\end{lstlisting}
+
+This result achieves 408.6\,lm/W at CRI\,=\,83.2 with CCT\,=\,2650\,K
+and $R_9 = 28.7$.
+
+\paragraph{Line 2: Parameter vector.}  The optimized parameter values
+for the piecewise-linear log-modifier.  These can be used to reconstruct
+the spectrum or as a warm-start for further optimization.
+
+\subsection{\texttt{.dat} files: Spectral data}
+
+Two types of \file{.dat} files are produced:
+
+\begin{itemize}
+  \item \file{w\_<name>\_<dims>.dat} --- the Y-normalized optimized
+    spectrum
+  \item \file{base\_<cct>.dat} --- the unmodified blackbody reference
+    at temperature \cmd{<cct>}
+\end{itemize}
+
+Both are two-column text files (wavelength in meters, spectral power
+density), with 391 data points at 1\,nm resolution spanning
+380--770\,nm:
+
+\begin{lstlisting}[style=output]
+3.8e-7 5.366289953705953e6
+3.8195e-7 5.7351389943960775e6
+3.839e-7 6.1250440250444e6
+...
+\end{lstlisting}
+
+To convert wavelengths to nanometers, multiply the first column by
+$10^9$.
+
+%======================================================================
+\section{Architecture}
+\label{sec:architecture}
+
+\subsection{Parametric spectrum model}
+
+The optimized spectrum is defined as:
+\[
+  S(\lambda) = B(\lambda, T) \cdot \exp\!\bigl(f(\lambda)\bigr)
+\]
+where $B(\lambda, T)$ is the Planck blackbody spectrum at the target CCT,
+and $f(\lambda)$ is a piecewise-linear function defined by a parameter
+vector $\mathbf{p} = (p_0, p_1, \ldots, p_{n-1})$.
+
+The parameter nodes are uniformly spaced across 380--770\,nm.  Between
+nodes, $f$ is linearly interpolated.  At $\mathbf{p} = \mathbf{0}$,
+the spectrum equals the unmodified blackbody.  The exponential ensures
+the spectrum remains strictly positive for all parameter values.
+
+This representation is implemented in \file{ParametricSpectrum.m3}.
+The function \cmd{GetFunc} returns an \cmd{LRFunction.T} that
+evaluates $S(\lambda)$ given a parameter vector; \cmd{EvalFunction}
+performs the interpolation lookup and exponential multiplication.
+
+\subsection{Hierarchical subdivision}
+
+Optimization begins at 2 parameters and proceeds through the sequence:
+\[
+  2 \to 3 \to 5 \to 9 \to 17 \to 33 \to 65 \to 129
+\]
+At each level, the number of parameters follows $n_{k+1} = 2n_k - 1$
+(inserting a midpoint between every adjacent pair).  The
+\cmd{Subdivide} procedure interpolates the old parameter vector into
+the new, higher-resolution grid.  The COBYLA initial step size
+(\cmd{rhobeg}) is halved at each level.
+
+This hierarchical approach is essential: starting directly at 129
+parameters would produce poor results because COBYLA would get trapped
+in a local minimum near the blackbody starting point.  The
+low-dimensional stages identify the dominant spectral features (which
+wavelength regions to emphasize or suppress), and the subsequent stages
+refine the details.
+
+At 129 parameters, the node spacing is $(770 - 380) / 128 \approx 3.05$\,nm,
+providing spectral features as narrow as approximately 6\,nm (two nodes
+per feature).
+
+\subsection{COBYLA optimizer}
+
+COBYLA (Constrained Optimization BY Linear Approximation) is a
+derivative-free optimizer by M.\,J.\,D.\ Powell.  It is well suited to
+this problem because:
+\begin{itemize}
+  \item The CRI computation involves color adaptation and nonlinear
+    coordinate transforms that are not easily differentiable.
+  \item The constraint functions are nonlinear and involve search
+    (CCT is found by minimizing distance in MacAdam $uv$ space).
+  \item The number of function evaluations per optimization step scales
+    linearly with the number of parameters.
+\end{itemize}
+
+The Modula-3 binding (\cmd{COBYLA\_M3.Minimize}) accepts the state
+vector, number of constraints, an objective/constraint evaluation
+function, \cmd{rhobeg} (initial trust-region radius), \cmd{rhoend}
+(convergence tolerance), and a maximum iteration count.
+
+\subsection{CRI calculation}
+
+Color rendering is evaluated following CIE~13.3:
+\begin{enumerate}
+  \item Normalize the test spectrum so $Y = 100$.
+  \item Determine the CCT by minimizing distance in MacAdam 1960 $uv$
+    space to the Planckian locus (Brent's method via \cmd{search-T}).
+  \item Generate the reference illuminant: a blackbody at the CCT.
+  \item For each of 14 test color samples (TCS), compute the reflected
+    spectrum under both the test and reference illuminants.
+  \item Convert to CIE 1964 $U^*V^*W^*$ coordinates with von Kries
+    chromatic adaptation.
+  \item $R_i = 100 - 4.6 \, \Delta E_i$ where $\Delta E_i$ is the
+    Euclidean distance between adapted and reference $U^*V^*W^*$ values.
+  \item $\text{CRI (Ra)} = \frac{1}{8}\sum_{i=1}^{8} R_i$.
+\end{enumerate}
+
+The test color sample reflectance spectra are tabulated at 1\,nm
+resolution in \file{Tcs.i3} (14 samples, covering pastels $R_1$--$R_8$
+and saturated colors $R_9$--$R_{14}$).  CIE $\bar{x}$, $\bar{y}$,
+$\bar{z}$ color matching functions are tabulated in \file{CieXyz.i3};
+the photopic luminous efficiency function (683\,lm/W peak) is in
+\file{CieSpectrum.i3}.
+
+\subsection{Constraint convention}
+
+In the objective/constraint function returned to COBYLA, the first
+element of the returned vector is the quantity to \emph{minimize} (e.g.,
+negative efficacy to maximize efficacy, or negative $R_9$ to maximize
+$R_9$).  Subsequent elements are constraint values where
+\textbf{positive means satisfied}:
+\[
+  c_i \geq 0 \quad \Longleftrightarrow \quad \text{constraint $i$ is met}
+\]
+
+For example, the CRI constraint returns $\text{CRI} - \text{min\_cri}$,
+and the CCT constraint returns two values: $\text{CCT} - (\text{target} - 50)$
+and $(\text{target} + 50) - \text{CCT}$.
+
+%======================================================================
+\section{Interactive Use}
+\label{sec:interactive}
+
+When invoked with \cmd{-scm -scmfile photopic.scm} but \emph{without}
+a \cmd{-run}, \cmd{-run-maxr9}, or \cmd{-run-drop} flag, \photopic{}
+drops into an interactive MScheme read-eval-print loop (REPL).
+This is useful for exploration, debugging, and prototyping new objective
+functions.
+
+\begin{lstlisting}[style=shell]
+$PHOTOPIC -scm -scmfile ../src/photopic.scm
+\end{lstlisting}
+
+\subsection{Useful interactive commands}
+
+\paragraph{Setting up a problem.}
+
+\begin{lstlisting}[style=scheme]
+;; Create a parametric spectrum problem at 3000K with 5 parameters
+(setup-problem!
+  (ParametricSpectrum.MakeBlackbodyInWavelength 3000 l0 l1)
+  5)
+\end{lstlisting}
+
+\paragraph{Inspecting the current spectrum.}
+
+\begin{lstlisting}[style=scheme]
+;; Compute full specs of the current spectrum
+(calc-specs w)
+;; => (cri-ra worst-ri efficacy (cct duv) (R1..R14) ...)
+
+;; Get just the efficacy
+(total-lumens-per-watt w)
+\end{lstlisting}
+
+\paragraph{Running one optimization pass.}
+
+\begin{lstlisting}[style=scheme]
+;; Run COBYLA with rhobeg=2 using the efficacy target
+(run 2 specs->target)
+
+;; Subdivide and run again at finer resolution
+(subdivide-problem!)
+(run 1 specs->target)
+\end{lstlisting}
+
+\paragraph{Evaluating a specific spectrum.}
+
+\begin{lstlisting}[style=scheme]
+;; CRI of a 4000K blackbody
+(calc-cri (make-Bl 4000))
+
+;; Efficacy of a fluorescent illuminant
+(total-lumens-per-watt (FL 4))
+\end{lstlisting}
+
+\paragraph{Plotting.}
+
+\begin{lstlisting}[style=scheme]
+;; Write the current optimized spectrum to a gnuplot-compatible file
+(plot (normalize-spectrum w) l0 l1 "my_spectrum.dat" 391)
+
+;; Write the 14 TCS reflectance spectra
+(plot-the-samples)
+\end{lstlisting}
+
+\paragraph{Modifying optimization parameters.}
+
+\begin{lstlisting}[style=scheme]
+;; Change target CCT
+(set! *target-cct* 4000)
+
+;; Change minimum CRI
+(set! *min-cri-ra* 90)
+
+;; Change minimum R9
+(set! *min-r9* 50)
+
+;; Change minimum efficacy (for -run-maxr9 mode)
+(set! *min-efficacy* 350)
+\end{lstlisting}
+
+\paragraph{Reloading after edits.}
+
+\begin{lstlisting}[style=scheme]
+;; Reload photopic.scm after editing it
+(reload)
+\end{lstlisting}
+
+%======================================================================
+\section{Customization}
+\label{sec:customization}
+
+\subsection{Writing new objective functions}
+
+The optimizer calls a \emph{spec-evaluator} function that takes the
+output of \cmd{calc-specs} and returns a vector for COBYLA.
+The existing evaluators follow this pattern:
+
+\begin{lstlisting}[style=scheme]
+(define (specs->my-target specs)
+  (let ((lpm    (caddr specs))        ;; efficacy (lm/W)
+        (r9     (nth (car (cddddr specs)) 8))  ;; R9
+        (cri    (car specs))          ;; CRI (Ra)
+        (crmin  (cadr specs))         ;; worst Ri (i in 1..8)
+        (cct    (caar (cdddr specs))) ;; CCT (K)
+        (Duv    (cadar (cdddr specs)));; Duv
+        )
+    (list <objective>        ;; minimize this (negate to maximize)
+          <constraint-1>     ;; positive = satisfied
+          <constraint-2>
+          ...
+          )))
+\end{lstlisting}
+
+The return value is a list whose first element is the objective to
+minimize and whose remaining elements are constraint values (positive
+means feasible).  Update \cmd{*num-constraints*} if you change the
+number of constraints from the default~6.
+
+\subsection{What \texorpdfstring{\texttt{calc-specs}}{calc-specs} returns}
+
+The \cmd{calc-specs} function evaluates a spectrum and returns a list
+with the following structure:
+
+\begin{lstlisting}[style=scheme]
+(cri-ra              ;; (car specs)      -- CRI average R1..R8
+ worst-ri            ;; (cadr specs)     -- min of R1..R8
+ efficacy            ;; (caddr specs)    -- lm/W
+ ((cct duv)          ;; (cadddr specs)   -- CCT and Duv
+  (R1 R2 ... R14))   ;; individual Ri values
+ cri-14              ;; average of all 14 Ri
+ worst-14            ;; min of all 14 Ri
+ sel-cri             ;; CRI over selected subset
+ sel-worst           ;; worst over selected subset
+ worst-axis)         ;; index of worst TCS axis
+\end{lstlisting}
+
+\subsection{Accessing individual fields}
+
+\begin{lstlisting}[style=scheme]
+;; Given: (define s (calc-specs w))
+(car s)                           ;; CRI (Ra)
+(cadr s)                          ;; worst Ri
+(caddr s)                         ;; efficacy
+(caar (cdddr s))                  ;; CCT
+(cadar (cdddr s))                 ;; Duv
+(nth (car (cddddr s)) 8)          ;; R9 (9th of 14, 0-indexed)
+(nth (car (cddddr s)) 0)          ;; R1
+\end{lstlisting}
+
+\subsection{Example: maximize efficacy subject to \texorpdfstring{$R_9 \geq 50$}{R9 >= 50}}
+
+\begin{lstlisting}[style=scheme]
+(define (specs->eff-r9floor specs)
+  (let ((lpm  (caddr specs))
+        (r9   (nth (car (cddddr specs)) 8))
+        (cri  (car specs))
+        (cct  (caar (cdddr specs)))
+        (Duv  (cadar (cdddr specs))))
+    (list (- lpm)                        ;; maximize efficacy
+          (- cri 80)                     ;; CRI >= 80
+          (- r9 50)                      ;; R9  >= 50
+          (- cct (- *target-cct* 50))    ;; CCT in range
+          (- (+ *target-cct* 50) cct)
+          (* 1000 (- 0.012 Duv)))))      ;; Duv limit
+
+;; Run it:
+(set! *num-constraints* 5)
+(run-example-iters! 2700 80 50 7 specs->eff-r9floor "_custom")
+\end{lstlisting}
+
+%======================================================================
+\section{Reference}
+\label{sec:reference}
+
+\subsection{Global variables}
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Variable & Default & Purpose \\
+\midrule
+\cmd{*target-cct*}      & 2700  & Target correlated color temperature (K) \\
+\cmd{*min-cri-ra*}      & 82    & Minimum CRI (Ra) constraint \\
+\cmd{*min-r9*}          & $-100$ & Minimum $R_9$ constraint \\
+\cmd{*min-efficacy*}    & 300   & Minimum efficacy (lm/W, for \cmd{-run-maxr9}) \\
+\cmd{*num-constraints*} & 6     & Number of COBYLA constraints \\
+\cmd{l0}                & $380 \times 10^{-9}$ & Blue limit of visible spectrum (m) \\
+\cmd{l1}                & $770 \times 10^{-9}$ & Red limit of visible spectrum (m) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Key source files}
+
+\begin{center}
+\begin{tabular}{@{}ll@{}}
+\toprule
+File & Contents \\
+\midrule
+\file{src/photopic.scm}          & Main optimization logic (Scheme) \\
+\file{src/Main.m3}               & Program entry point; Scheme REPL setup \\
+\file{src/ParametricSpectrum.i3}  & Parametric spectrum interface \\
+\file{src/ParametricSpectrum.m3}  & Parametric spectrum implementation \\
+\file{src/CieSpectrum.i3}         & Photopic luminous efficiency data \\
+\file{src/CieXyz.i3}              & CIE $\bar{x}\bar{y}\bar{z}$ color matching functions \\
+\file{src/Tcs.i3}                 & Test color sample reflectance spectra (1--14) \\
+\file{src/TempUv.m3}              & Temperature-to-$uv$ lookup table \\
+\file{src/Blackbody.m3}           & Planck blackbody radiance \\
+\file{src/m3makefile}             & Build dependencies and Scheme stub generation \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Physical constants}
+
+\begin{center}
+\begin{tabular}{@{}lll@{}}
+\toprule
+Symbol & Value & Defined as \\
+\midrule
+$c$  & $299\,792\,458$ m/s           & Speed of light \\
+$h$  & $6.626\,070\,15 \times 10^{-34}$ J\,s & Planck's constant \\
+$k$  & $1.380\,649 \times 10^{-23}$ J/K       & Boltzmann's constant \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\end{document}

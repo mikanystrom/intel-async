@@ -643,6 +643,40 @@
         )
   )
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Inverse problem: maximize R9 subject to CRI >= 80 and efficacy >= X
+;;
+
+(define *min-efficacy* 300)
+
+(define (specs->max-r9 specs)
+  (let ((lpm    (caddr specs))
+        (r9     (nth (car (cddddr specs)) 8))
+        (cri    (car specs))
+        (crmin  (cadr specs))
+        (cct    (caar (cdddr specs)))
+        (Duv    (cadar (cdddr specs)))
+        )
+    (dis specs dnl)
+    (list (- r9)                         ;; target: maximize R9
+          (- cri   *min-cri-ra*)         ;; CRI(Ra) >= min-cri-ra
+          (- crmin (- *min-cri-ra* 10))  ;; worst Ri >= min-cri-ra - 10
+          (- cct (- *target-cct* 50))    ;; cct >= target - 50
+          (- (+ *target-cct* 50) cct)    ;; cct <= target + 50
+          (* 1000 (- 0.012 Duv))         ;; Duv <= 0.012
+          (- lpm *min-efficacy*)         ;; efficacy >= min-efficacy
+          )
+        )
+  )
+
+(define (run-max-r9! cct min-cri min-efficacy)
+  (set! *min-efficacy* min-efficacy)
+  (run-example-iters! cct min-cri -100 7 specs->max-r9
+                      (string-append "_maxR9_eff"
+                                     (stringify (round min-efficacy))))
+  )
+
 (define (m3-opt-r9 p)
   (ParametricSpectrum.Scheme2Vec
    (specs->target-r9 (specs-func p))))
@@ -669,7 +703,7 @@
     (plot (normalize-spectrum w)
           l0 l1
           (string-append "w_" nm ".dat")
-          200)))
+          391)))
 
 
 
@@ -701,7 +735,7 @@
   (plot (normalize-spectrum (unwrap-lrfunc *test-spectrum*))
         l0 l1
         (string-append "base_" (stringify cct) ".dat")
-        200)
+        391)
     
   (dis "setting up dims = " *start-dims* dnl)
   (setup-problem! *test-spectrum* *start-dims*)
@@ -721,7 +755,7 @@
     (if (> i *max-sample*)
         'ok
         (begin
-          (plot (R i) l0 l1 (string-append "R" (stringify i) ".dat") 200)
+          (plot (R i) l0 l1 (string-append "R" (stringify i) ".dat") 391)
           (loop (+ i 1))
           )
         )
@@ -796,4 +830,17 @@
       (exit)
       )
     )
-  
+
+;; Inverse problem: maximize R9 at given efficacy constraint
+;; Usage: photopic -run-maxr9 <cct> <min-cri> <min-efficacy>
+;;   e.g., photopic -run-maxr9 2700 80 350
+(if (pp 'keywordPresent "-run-maxr9")
+    (begin
+      (define run-cct     (pp 'getNextLongReal    0 1e6))
+      (define run-cri     (pp 'getNextLongReal -100 100))
+      (define run-eff     (pp 'getNextLongReal    0 700))
+      (run-max-r9! run-cct run-cri run-eff)
+      (exit)
+      )
+    )
+

@@ -1,0 +1,222 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\lstset{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{gray!10},
+  frame=single,
+  framerule=0pt,
+  breaklines=true,
+  columns=fullflexible
+}
+
+\title{Running Photopic Optimizations on AWS}
+\author{Mika Nystr\"om}
+\date{March 2026}
+
+\begin{document}
+\maketitle
+
+\section{Motivation}
+
+The photopic luminous efficacy optimizer uses COBYLA (a derivative-free
+constrained optimization algorithm) with hierarchical subdivision from
+2 to 129 spectral parameters.  Each run takes 10--30 minutes on an
+Apple M3 laptop.  The runs are embarrassingly parallel: each CRI
+constraint level is completely independent.  For large parameter
+sweeps (varying CCT, CRI, R9 constraints, or exploring finer spectral
+resolution at 257 or 513 parameters), cloud execution is attractive.
+
+\section{What Needs to Run}
+
+Each optimization requires:
+\begin{itemize}
+\item The \texttt{photopic} binary (Modula-3, statically linked against M3 libraries)
+\item The \texttt{photopic.scm} Scheme script (loaded at runtime)
+\item System library: \texttt{libgmp} (GNU Multiple Precision Arithmetic)
+\end{itemize}
+
+A typical invocation:
+\begin{lstlisting}
+./photopic -run 2700 90 -100 -scm -scmfile photopic.scm
+\end{lstlisting}
+This maximizes luminous efficacy for a 2700\,K spectrum subject to
+CRI\,$\geq$\,90 with R9 unconstrained.  Output files (\texttt{.res}
+and \texttt{.dat}) are written to the current directory.
+
+\section{One-Time Setup}
+
+\subsection{Build Environment}
+
+The CM3 compiler and m3utils tree must be built on Linux.  AMD64\_LINUX
+is the primary supported target.
+
+\begin{enumerate}
+\item Bootstrap CM3 from a release binary:
+\begin{lstlisting}
+wget <cm3-release-url>/cm3-boot-AMD64_LINUX.tar.gz
+cmake -S cm3-boot -B build -G Ninja \
+      -DCMAKE_INSTALL_PREFIX=$HOME/cm3-install
+cmake --build build && cmake --install build
+export PATH=$HOME/cm3-install/bin:$PATH
+\end{lstlisting}
+
+\item Build CM3 from source:
+\begin{lstlisting}
+cd cm3
+scripts/concierge.py full-upgrade --backend c all
+\end{lstlisting}
+
+\item Build m3utils:
+\begin{lstlisting}
+cd intel-async/async-toolkit/m3utils/m3utils
+export CM3=yes
+gmake
+\end{lstlisting}
+
+\item Verify:
+\begin{lstlisting}
+./photopic/AMD64_LINUX/photopic -run 2700 90 -100 \
+    -scm -scmfile photopic/src/photopic.scm
+\end{lstlisting}
+\end{enumerate}
+
+\subsection{AMI or Container}
+
+For repeated use, bake the build into an AMI or Docker image:
+\begin{lstlisting}
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y libgmp-dev
+COPY photopic /opt/photopic/
+COPY photopic.scm /opt/photopic/
+WORKDIR /opt/photopic
+ENTRYPOINT ["./photopic"]
+\end{lstlisting}
+
+Since the M3 binary is statically linked (via \texttt{build\_standalone()}
+in \texttt{m3overrides}), the container only needs \texttt{libgmp} as an
+external dependency.
+
+\section{Instance Selection}
+
+The optimizer is single-threaded and CPU-bound.  Each run benefits from
+high single-thread performance but does not use multiple cores.  The
+natural parallelism is across runs (one core per CRI level).
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}llrrr@{}}
+\toprule
+Instance & Architecture & vCPUs & \$/hr & \$/hr (spot) \\
+\midrule
+\texttt{c7g.medium}   & ARM64 (Graviton3) & 1  & 0.034 & $\sim$0.013 \\
+\texttt{c7g.2xlarge}   & ARM64 (Graviton3) & 8  & 0.272 & $\sim$0.108 \\
+\texttt{c7g.8xlarge}   & ARM64 (Graviton3) & 32 & 1.088 & $\sim$0.435 \\
+\texttt{c7a.2xlarge}   & AMD64 (EPYC)      & 8  & 0.308 & $\sim$0.123 \\
+\texttt{c7a.16xlarge}  & AMD64 (EPYC)      & 64 & 2.462 & $\sim$0.985 \\
+\bottomrule
+\end{tabular}
+\caption{Compute-optimized EC2 instances (US East, March 2026 pricing).
+  Spot prices are approximate and fluctuate.}
+\label{tab:instances}
+\end{table}
+
+ARM64 (Graviton) instances offer better price/performance and would
+use the same architecture as the development laptop (Apple M3), though
+a separate Linux build is still required.
+
+\section{Cost Estimates}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+Workload & CPU-hours & On-demand & Spot \\
+\midrule
+8 CRI levels, 129 params     & 2.7  & \$0.10 & \$0.04 \\
+8 CRI levels, 513 params     & $\sim$22  & \$0.75 & \$0.30 \\
+50 CRI/R9 combinations       & $\sim$17  & \$0.58 & \$0.23 \\
+Full sweep: 5 CCTs $\times$ 50 combos & $\sim$83 & \$2.85 & \$1.14 \\
+\bottomrule
+\end{tabular}
+\caption{Estimated costs on \texttt{c7g} instances.  Assumes 20 minutes
+  per run at 129 parameters, scaling quadratically with parameter count
+  for COBYLA.}
+\label{tab:costs}
+\end{table}
+
+Even aggressive parameter sweeps cost only a few dollars.  The
+dominant cost is engineering time for the one-time build setup.
+
+\section{Execution}
+
+\subsection{Simple: Single Instance}
+
+For moderate workloads (up to $\sim$50 runs), a single multi-core
+instance with GNU Parallel is sufficient:
+
+\begin{lstlisting}
+# Generate all combinations
+for cct in 2700 3000 3500 4000 5000; do
+  for cri in 60 70 80 82 85 90 95 98; do
+    echo "$cct $cri"
+  done
+done > jobs.txt
+
+# Run in parallel (one per core)
+parallel -j $(nproc) --colsep ' ' \
+  './photopic -run {1} {2} -100 -scm -scmfile photopic.scm' \
+  < jobs.txt
+\end{lstlisting}
+
+Results appear in the working directory.  Transfer them back with
+\texttt{scp} or \texttt{aws s3 cp}.
+
+\subsection{Scalable: AWS Batch}
+
+For larger sweeps or routine use, AWS Batch automates instance
+provisioning:
+
+\begin{enumerate}
+\item Push the Docker image to ECR
+\item Define a Batch compute environment (spot instances, \texttt{c7g} family)
+\item Define a job definition referencing the container
+\item Submit jobs programmatically:
+\begin{lstlisting}
+for cct in 2700 3000 3500 4000 5000; do
+  for cri in 60 70 80 82 85 90 95 98; do
+    aws batch submit-job \
+      --job-name "photopic-${cct}-${cri}" \
+      --job-queue photopic-queue \
+      --job-definition photopic-job \
+      --container-overrides \
+        "command=[\"-run\",\"$cct\",\"$cri\",\"-100\",\
+                  \"-scm\",\"-scmfile\",\"photopic.scm\"]"
+  done
+done
+\end{lstlisting}
+\item Collect results from S3 (add an upload step to the container entrypoint)
+\end{enumerate}
+
+This is more setup but handles hundreds of runs with automatic scaling
+and spot instance management.
+
+\section{Recommendations}
+
+\begin{enumerate}
+\item \textbf{Start simple.}  Build on a \texttt{c7g.2xlarge} spot instance
+  (\$0.11/hr).  Keep it as a development box for iterating.  Run the
+  shell script directly.
+\item \textbf{Bake an AMI} once the build works, so you can launch fresh
+  instances without rebuilding.
+\item \textbf{Move to Batch} only if you find yourself running hundreds of
+  combinations regularly.
+\item \textbf{Use spot instances} throughout---the workload is fault-tolerant
+  (just re-run interrupted jobs) and spot pricing is 60--70\% cheaper.
+\end{enumerate}
+
+\end{document}
