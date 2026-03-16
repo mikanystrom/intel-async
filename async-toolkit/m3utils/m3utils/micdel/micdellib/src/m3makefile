@@ -1,0 +1,13 @@
+import ("libm3")
+
+Module ("MicdelThermo")
+Module ("MicdelAlloy")
+Module ("MicdelPrecipitate")
+Module ("MicdelRecryst")
+Module ("MicdelGrainGrowth")
+Module ("MicdelTransform")
+Module ("MicdelStrength")
+Module ("MicdelState")
+Module ("MicdelSchedule")
+
+library ("micdellib")

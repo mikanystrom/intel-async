@@ -1,0 +1,11 @@
+# High-V steel — maximum precipitation strengthening
+# Demonstrate Orowan strengthening from dense VN precipitation
+COMPOSITION  C=0.06  N=0.020  V=0.15  Ti=0.01  Nb=0.0  Mn=1.5  Si=0.3
+REHEAT       T=1523  D_gamma=50e-6
+PASS  eps=0.3  rate=10  T=1373  t_inter=5  cool=2
+PASS  eps=0.3  rate=10  T=1343  t_inter=5  cool=2
+PASS  eps=0.25 rate=15  T=1313  t_inter=4  cool=2
+PASS  eps=0.25 rate=15  T=1283  t_inter=4  cool=2
+PASS  eps=0.2  rate=20  T=1253  t_inter=3  cool=2
+PASS  eps=0.2  rate=20  T=1223  t_inter=3  cool=2
+COOLING  rate=15  T_coil=873  t_coil=3600  coilRate=0.01

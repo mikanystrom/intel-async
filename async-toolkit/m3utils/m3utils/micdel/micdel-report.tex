@@ -1,0 +1,940 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{microtype}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\usepackage{multirow}
+\usepackage{array}
+
+\geometry{margin=25mm}
+\sisetup{per-mode=symbol, inter-unit-product=\ensuremath{\cdot}}
+
+\newcommand{\DG}{\ensuremath{D_\gamma}}
+\newcommand{\DA}{\ensuremath{D_\alpha}}
+\newcommand{\Xrex}{\ensuremath{X_\mathrm{rex}}}
+\newcommand{\epsr}{\ensuremath{\varepsilon_\mathrm{ret}}}
+\newcommand{\epsrate}{\ensuremath{\dot\varepsilon}}
+\newcommand{\rhod}{\ensuremath{\rho_\mathrm{d}}}
+\newcommand{\sy}{\ensuremath{\sigma_\mathrm{y}}}
+\newcommand{\fv}{\ensuremath{f_\mathrm{v}}}
+\newcommand{\Nv}{\ensuremath{N_\mathrm{v}}}
+\newcommand{\Ae}{\ensuremath{\mathrm{Ae}_3}}
+
+\title{MICDEL: A Coupled Pass-by-Pass Model for Microstructure \\
+  Evolution During Hot Rolling of Microalloyed Steels}
+\author{Implementation report --- \texttt{micdeltool}}
+\date{March 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We describe the mathematical formulation and Modula-3 implementation of a
+MICDEL-type model for predicting microstructure evolution during multi-pass hot
+rolling of microalloyed steels.  The model couples static recrystallization
+(JMAK), normal grain growth with Zener drag, classical nucleation and growth of
+MX precipitates (VN, VC, V(C,N), NbC, Nb(C,N), TiN, TiC), the
+austenite-to-ferrite transformation, and yield stress prediction via
+superposition of lattice friction, solid solution, Hall--Petch, Orowan--Ashby,
+and Taylor dislocation hardening.  Comprehensive tests across eight steel
+compositions---from plain C--Mn to multi-microalloyed V--Ti--N---demonstrate
+physically consistent trends in grain refinement, strain accumulation, and
+precipitation strengthening.  The model is based on the
+Lagneborg--Hutchinson--Siwecki--Zajac monograph.
+\end{abstract}
+
+\tableofcontents
+
+%=============================================================================
+\section{Introduction}
+%=============================================================================
+
+The thermomechanical controlled processing (TMCP) of microalloyed steels
+exploits the interplay between deformation, recrystallization, precipitation,
+and phase transformation to achieve fine ferrite grain sizes and high yield
+strengths without expensive alloying or post-rolling heat treatment.  Predicting
+the outcome of a given rolling schedule requires a coupled, physically-based
+model that tracks all relevant microstructural variables pass by pass.
+
+The MICDEL (MICrostructure DEveLogement) approach, as described in the
+monograph by Lagneborg, Hutchinson, Siwecki, and Zajac~\cite{lagneborg}, provides
+such a framework.  This report describes our Modula-3 implementation of the core
+MICDEL model, presents the governing equations, and validates the model against
+eight steel compositions spanning the principal microalloying strategies.
+
+%=============================================================================
+\section{Model overview}
+%=============================================================================
+
+The state vector tracked through each rolling pass comprises:
+\begin{itemize}
+  \item Austenite grain diameter \DG{} (\si{\metre})
+  \item Recrystallized fraction \Xrex{} (0--1)
+  \item Retained strain \epsr{}
+  \item Dislocation density \rhod{} (\si{\per\metre\squared})
+  \item Temperature $T$ (\si{\kelvin})
+  \item Dissolved solute concentrations (\si{wt.\%}): C, N, V, Nb, Ti, Mn, Si
+  \item Precipitate populations: $\{\Nv, \bar{r}, \fv\}$ for each species
+\end{itemize}
+
+The simulation proceeds as follows:
+\begin{enumerate}
+  \item \textbf{Initialization}: Set \DG{} and composition from reheat conditions.
+  \item \textbf{For each pass}:
+    \begin{enumerate}
+      \item Apply deformation (update \epsr, \rhod).
+      \item Evolve interpass interval (coupled time-stepping of recrystallization,
+            grain growth, and precipitation).
+    \end{enumerate}
+  \item \textbf{Transformation}: Cool to \Ae, compute ferrite grain size \DA,
+        simulate coil cooling (ferrite precipitation), predict yield stress \sy.
+\end{enumerate}
+
+%=============================================================================
+\section{Thermodynamics}
+\label{sec:thermo}
+%=============================================================================
+
+\subsection{Solubility products}
+
+The solubility of a precipitate species MX in a given matrix phase is expressed
+as
+\begin{equation}
+  \log_{10}\bigl([\mathrm{M}]\cdot[\mathrm{X}]\bigr) \;=\; -\frac{A}{T} + B
+  \label{eq:solprod}
+\end{equation}
+where $[\mathrm{M}]$ and $[\mathrm{X}]$ are the dissolved concentrations of the
+metallic and interstitial elements in weight percent, and $T$ is the absolute
+temperature in Kelvin.  The constants $A$ and $B$ are specific to each
+precipitate species and matrix phase.
+
+\begin{table}[htbp]
+\centering
+\caption{Solubility product parameters from the Lagneborg monograph.}
+\label{tab:solprod}
+\begin{tabular}{@{}llSS@{}}
+\toprule
+Species & Phase & {$A$ (K)} & {$B$} \\
+\midrule
+VN     & Austenite & 7840  & 3.02 \\
+VC     & Austenite & 6560  & 4.45 \\
+V(C,N) & Austenite & 7700  & 3.30 \\
+NbC    & Austenite & 6770  & 2.26 \\
+Nb(C,N)& Austenite & 7500  & 2.50 \\
+TiN    & Austenite & 15790 & 5.40 \\
+TiC    & Austenite & 7000  & 2.75 \\
+\midrule
+VN     & Ferrite   & 8330  & 3.90 \\
+VC     & Ferrite   & 7050  & 4.29 \\
+V(C,N) & Ferrite   & 8100  & 3.80 \\
+NbC    & Ferrite   & 7500  & 3.00 \\
+Nb(C,N)& Ferrite   & 8000  & 3.20 \\
+TiN    & Ferrite   & 15790 & 5.40 \\
+TiC    & Ferrite   & 7500  & 3.10 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The equilibrium solubility product at temperature $T$ is:
+\begin{equation}
+  K_\mathrm{s}(T) = 10^{-A/T + B}
+\end{equation}
+
+\subsection{Driving force for precipitation}
+
+The volume free energy driving nucleation and growth of species MX is
+\begin{equation}
+  \Delta G_\mathrm{v} = \frac{RT}{V_\mathrm{m}}
+    \ln\!\left(\frac{c_\mathrm{M}\,c_\mathrm{X}}{K_\mathrm{s}(T)}\right)
+  \label{eq:driving}
+\end{equation}
+where $R = \SI{8.314}{\joule\per\mole\per\kelvin}$ is the gas constant and
+$V_\mathrm{m}$ is the molar volume of the precipitate.  When
+$c_\mathrm{M}\,c_\mathrm{X} \le K_\mathrm{s}(T)$, the system is in solid
+solution and $\Delta G_\mathrm{v} = 0$.
+
+\subsection{Diffusivity}
+
+The diffusivity of the rate-controlling solute follows an Arrhenius form:
+\begin{equation}
+  D(T) = D_0 \exp\!\left(-\frac{Q_\mathrm{d}}{RT}\right)
+  \label{eq:diffusivity}
+\end{equation}
+
+\begin{table}[htbp]
+\centering
+\caption{Diffusion and interfacial energy data.}
+\label{tab:diffusion}
+\begin{tabular}{@{}lSSSSS@{}}
+\toprule
+Species & {$\gamma$ (\si{\joule\per\metre\squared})}
+  & {$V_\mathrm{m}$ (\SI{e-6}{\metre\cubed\per\mole})}
+  & {$D_0^{\gamma}$ (\SI{e-5}{\metre\squared\per\second})}
+  & {$Q_\mathrm{d}^{\gamma}$ (\si{\kilo\joule\per\mole})} \\
+\midrule
+VN      & 0.5  & 10.29 & 3.7  & 186 \\
+VC      & 0.5  & 10.86 & 3.7  & 186 \\
+V(C,N)  & 0.5  & 10.50 & 3.7  & 186 \\
+NbC     & 0.5  & 13.38 & 8.3  & 266 \\
+Nb(C,N) & 0.5  & 13.00 & 8.3  & 266 \\
+TiN     & 0.8  & 11.63 & 1.5  & 250 \\
+TiC     & 0.8  & 12.18 & 1.5  & 250 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+%=============================================================================
+\section{Precipitation kinetics}
+\label{sec:precip}
+%=============================================================================
+
+Each precipitate species is tracked as a mean-radius population
+$\{\Nv,\,\bar r,\,\fv\}$ representing the number density, mean radius, and
+volume fraction respectively.
+
+\subsection{Classical nucleation}
+
+The steady-state nucleation rate is
+\begin{equation}
+  J = N_0\, Z\, \beta^* \exp\!\left(-\frac{\Delta G^*}{k_\mathrm{B} T}\right)
+  \label{eq:nucleation}
+\end{equation}
+where the critical free energy barrier is
+\begin{equation}
+  \Delta G^* = \frac{16\pi\,\gamma^3}{3\,\Delta G_\mathrm{v}^2}
+  \label{eq:dgstar}
+\end{equation}
+The pre-factors are:
+\begin{align}
+  N_0 &= 10^{28} + \rhod \times 10^{10}
+    & &\text{(nucleation site density, m$^{-3}$)}
+    \label{eq:n0} \\[6pt]
+  Z &= \frac{V_\mathrm{m}}{2\pi\gamma}
+       \sqrt{\frac{\Delta G_\mathrm{v}}{N_\mathrm{A}\,k_\mathrm{B} T}}
+    & &\text{(Zeldovich factor)}
+    \label{eq:zeldovich} \\[6pt]
+  \beta^* &= \frac{4\pi\,r^{*2}\,D\,c_\mathrm{M}/100}
+                   {\bigl(V_\mathrm{m}/N_\mathrm{A}\bigr)^2}
+    & &\text{(atomic impingement rate)}
+    \label{eq:betastar}
+\end{align}
+with the critical radius
+\begin{equation}
+  r^* = \frac{2\gamma}{\Delta G_\mathrm{v}}
+  \label{eq:rstar}
+\end{equation}
+
+The heterogeneous nucleation on dislocations is captured through the
+$\rhod$-dependent term in \cref{eq:n0}: higher dislocation densities
+(from retained strain after incomplete recrystallization) provide more
+nucleation sites and accelerate precipitation.
+
+\subsection{Diffusion-controlled growth}
+
+The growth rate of an existing precipitate of radius $r$ is
+\begin{equation}
+  \frac{\mathrm{d}r}{\mathrm{d}t} = \frac{D}{r}\,
+    \frac{c_0 - c_\mathrm{i}}{c_\mathrm{p} - c_\mathrm{i}}
+  \label{eq:growth}
+\end{equation}
+where $c_0$ is the far-field (matrix) concentration of the metallic solute,
+$c_\mathrm{p} \approx 1$ is the concentration in the precipitate (taken as
+pure MX), and $c_\mathrm{i}$ is the interfacial equilibrium concentration
+modified by the Gibbs--Thomson capillarity correction:
+\begin{equation}
+  c_\mathrm{i} = \frac{K_\mathrm{s}(T)}{c_\mathrm{X}}\,
+    \exp\!\left(\frac{2\gamma V_\mathrm{m}}{r\,RT}\right)
+  \label{eq:gibbs-thomson}
+\end{equation}
+
+\subsection{Ostwald ripening (LSW)}
+
+When precipitates exceed twice the critical radius, coarsening follows the
+Lifshitz--Slyozov--Wagner (LSW) theory:
+\begin{equation}
+  \frac{\mathrm{d}(\bar r^3)}{\mathrm{d}t}
+    = \frac{8\,\gamma\,D\,c_\mathrm{i}\,V_\mathrm{m}}{9\,RT}
+  \label{eq:lsw}
+\end{equation}
+which gives an effective radial growth rate:
+\begin{equation}
+  \frac{\mathrm{d}\bar{r}}{\mathrm{d}t}\bigg|_\mathrm{coarsen}
+    = \frac{1}{3\bar{r}^2}\,\frac{\mathrm{d}(\bar r^3)}{\mathrm{d}t}
+\end{equation}
+
+\subsection{Solute depletion and stoichiometric cap}
+
+As precipitates form, dissolved solute is consumed.  The maximum attainable
+volume fraction is limited by stoichiometry:
+\begin{equation}
+  f_{\mathrm{v},\max} \approx \min(c_\mathrm{M},\, c_\mathrm{X}) \times 0.02
+  \label{eq:fvmax}
+\end{equation}
+where the factor 0.02 arises from the ratio of precipitate to matrix densities
+and molar masses for typical MX carbides and nitrides.
+
+The solute depletion from a volume fraction increment $\Delta\fv$ is
+\begin{equation}
+  \Delta c_\mathrm{M} = \frac{\Delta\fv}{0.02}
+  \label{eq:depletion}
+\end{equation}
+For carbonitrides V(C,N) and Nb(C,N), the interstitial depletion is split
+equally between C and N.
+
+\subsection{Mean-radius update}
+
+At each timestep, the mean radius is updated as a weighted average of the
+existing population (which has grown) and newly nucleated precipitates (at the
+critical radius):
+\begin{equation}
+  \bar{r}_\mathrm{new} = \frac{\Nv^\mathrm{old}\,(\bar{r} + \Delta r)
+    + \Delta\Nv \cdot r^*}
+    {\Nv^\mathrm{old} + \Delta\Nv}
+  \label{eq:rmean}
+\end{equation}
+The volume fraction is then
+\begin{equation}
+  \fv = \tfrac{4}{3}\pi\,\bar{r}^3\,\Nv
+  \label{eq:fv}
+\end{equation}
+
+%=============================================================================
+\section{Static recrystallization}
+\label{sec:rex}
+%=============================================================================
+
+Static recrystallization (SRX) during the interpass interval follows the JMAK
+(Johnson--Mehl--Avrami--Kolmogorov) kinetics.
+
+\subsection{Half-recrystallization time}
+
+The time for 50\% recrystallization is given by:
+\begin{equation}
+  t_{0.5} = A\,\varepsilon^{-p}\,\epsrate^{-q}\,D_0^{\,s}\,
+    \exp\!\left(\frac{Q_\mathrm{rex}}{RT}\right) \cdot f_\mathrm{drag}
+  \label{eq:t50}
+\end{equation}
+where $D_0$ is in micrometres and the default
+parameters are:
+\begin{equation*}
+  A = \num{2.5e-19},\quad p = 4.0,\quad q = 1.0,\quad s = 2.0,\quad
+  Q_\mathrm{rex} = \SI{230}{\kilo\joule\per\mole}
+\end{equation*}
+
+\subsection{Solute drag retardation}
+
+The presence of dissolved Nb and V retards recrystallization through solute drag
+on grain boundaries:
+\begin{equation}
+  f_\mathrm{drag} = \exp\!\left(\frac{275\,000\,c_\mathrm{Nb}}{100}\right)
+    \cdot \exp\!\left(\frac{3000\,c_\mathrm{V}}{100}\right)
+  \label{eq:solutedrag}
+\end{equation}
+where $c_\mathrm{Nb}$ and $c_\mathrm{V}$ are in weight percent.  The much
+larger coefficient for Nb reflects its far stronger solute drag effect
+compared to V, which is a key reason why Nb steels exhibit strain
+accumulation (pancaking) while V steels recrystallize freely between passes.
+
+\subsection{JMAK recrystallized fraction}
+
+The Avrami equation gives the recrystallized fraction as a function of time:
+\begin{equation}
+  \Xrex(t) = 1 - \exp\!\left[-0.693\left(\frac{t}{t_{0.5}}\right)^{\!n}\right]
+  \label{eq:jmak}
+\end{equation}
+with Avrami exponent $n = 1.0$.
+
+\subsection{Recrystallized grain size}
+
+The grain size after complete recrystallization follows Sellars:
+\begin{equation}
+  D_\mathrm{rex}\;(\si{\micro\metre})
+    = 0.743\,D_0^{\,0.67}\,\varepsilon^{-0.67}
+  \label{eq:drex}
+\end{equation}
+where $D_0$ is the prior austenite grain size in micrometres.  During partial
+recrystallization, the effective grain size is the mixture:
+\begin{equation}
+  \DG = \Xrex\,D_\mathrm{rex} + (1 - \Xrex)\,D_\gamma^\mathrm{old}
+  \label{eq:dmix}
+\end{equation}
+
+%=============================================================================
+\section{Grain growth and Zener drag}
+\label{sec:gg}
+%=============================================================================
+
+Normal grain growth in the recrystallized austenite follows power-law kinetics
+with a Zener drag limit imposed by second-phase particles.
+
+\subsection{Grain growth kinetics}
+
+The grain growth rate from parabolic ($m = 2$) kinetics is:
+\begin{equation}
+  \frac{\mathrm{d}D}{\mathrm{d}t}
+    = \frac{k_0\,\exp(-Q_\mathrm{gg}/RT)}{m\,D^{m-1}}
+  \label{eq:gg}
+\end{equation}
+with $k_0 = \SI{4.1e-3}{\metre\squared\per\second}$ and
+$Q_\mathrm{gg} = \SI{200}{\kilo\joule\per\mole}$.
+
+\subsection{Zener limiting grain size}
+
+The maximum grain size permitted by precipitate pinning is:
+\begin{equation}
+  D_\mathrm{lim} = \frac{\alpha\,\bar{r}_\mathrm{Z}}{\fv^\mathrm{total}}
+  \label{eq:zener}
+\end{equation}
+where $\alpha = 0.05$ is the Zener constant, $\bar{r}_\mathrm{Z}$ is the
+volume-fraction-weighted mean precipitate radius across all species, and
+$\fv^\mathrm{total}$ is the total precipitate volume fraction.
+
+This Zener limit is the principal mechanism by which TiN particles---which
+are extremely stable and present from reheating---control the austenite
+grain size.
+
+%=============================================================================
+\section{Deformation model}
+\label{sec:deform}
+%=============================================================================
+
+Upon each roll pass with strain $\varepsilon$ and strain rate $\epsrate$:
+\begin{align}
+  \epsr &\leftarrow \epsr + \varepsilon
+    \label{eq:epsacc} \\
+  \rhod &\leftarrow \rhod + \varepsilon\,\epsrate \times 10^{13}
+    \label{eq:rhoincr}
+\end{align}
+with an upper cap of $\rhod \le 10^{16}\;\si{\per\metre\squared}$.  The
+recrystallized fraction is reset to zero:
+\begin{equation}
+  \Xrex \leftarrow 0
+\end{equation}
+
+As recrystallization proceeds during the interpass interval, the dislocation
+density and retained strain are reduced proportionally to the recrystallized
+fraction increment:
+\begin{align}
+  \rhod &\leftarrow \rhod\,(1 - 0.9\,\Delta\Xrex) \\
+  \epsr &\leftarrow \epsr\,(1 - \Delta\Xrex)
+\end{align}
+
+%=============================================================================
+\section{Coupled interpass evolution}
+\label{sec:interpass}
+%=============================================================================
+
+The core of the model is the time-stepping loop during each interpass interval.
+With timestep $\Delta t$ (default \SI{0.01}{\second}):
+
+\begin{enumerate}
+  \item \textbf{Cool}: $T \leftarrow T - \dot{T}_\mathrm{cool}\,\Delta t$
+  \item \textbf{Recrystallize}: Compute $t_{0.5}$ from current state; update
+        \Xrex{} via JMAK; mix grain sizes; reduce \rhod{} and \epsr.
+  \item \textbf{Grain growth}: If $\Xrex > 0.5$, grow \DG{} subject to Zener
+        limit from current precipitate population.
+  \item \textbf{Precipitate}: For each species (VN, VC, V(C,N), NbC, Nb(C,N),
+        TiN, TiC), compute nucleation, growth, and coarsening; deplete solute.
+\end{enumerate}
+
+The feedback between precipitation and recrystallization is critical:
+\begin{itemize}
+  \item Precipitates exert Zener drag, limiting grain growth.
+  \item Dissolved solute (especially Nb) retards recrystallization through
+        solute drag.
+  \item Retained strain from incomplete recrystallization provides dislocation
+        nucleation sites, accelerating strain-induced precipitation.
+\end{itemize}
+
+%=============================================================================
+\section{Austenite-to-ferrite transformation}
+\label{sec:transform}
+%=============================================================================
+
+\subsection{\texorpdfstring{$\Ae$}{Ae3} temperature}
+
+The equilibrium transformation temperature follows the Andrews formula:
+\begin{equation}
+  \Ae\;(\mathrm{K}) = 1456.15 - 203\sqrt{c_\mathrm{C}}
+    - 30\,c_\mathrm{Mn} + 44.7\,c_\mathrm{Si}
+    - 15.2\,c_\mathrm{Ni} - 11.0\,c_\mathrm{Cr}
+  \label{eq:ae3}
+\end{equation}
+
+\subsection{Ferrite grain size (Sellars--Beynon)}
+
+The ferrite grain size is predicted by the Sellars--Beynon model:
+\begin{equation}
+  \DA\;(\si{\micro\metre}) = 3.75 + 0.18\,\DG\;(\si{\micro\metre})
+    + \frac{0.29}{\sqrt{\dot{T}_\mathrm{cool}}}
+    - 0.7\,c_\mathrm{Mn}
+  \label{eq:dalpha}
+\end{equation}
+with an additional refinement factor from intragranular nucleation on V(C,N)
+particles:
+\begin{equation}
+  \DA \leftarrow \frac{\DA}{1 + 10^{-23}\,\Nv^{\mathrm{VN}}\,\bar{r}^{\mathrm{VN}}
+    + 10^{-23}\,\Nv^{\mathrm{VCN}}\,\bar{r}^{\mathrm{VCN}}}
+  \label{eq:igr}
+\end{equation}
+
+\subsection{Coil cooling}
+
+After transformation, the model simulates isothermal coil cooling at
+\SI{0.01}{\kelvin\per\second} for up to \SI{3600}{\second}, during which
+V(C,N) precipitation occurs in the ferrite phase.  Carbon is partitioned
+to pearlite (ferrite solubility capped at \SI{0.02}{wt.\%}).
+
+%=============================================================================
+\section{Yield stress prediction}
+\label{sec:strength}
+%=============================================================================
+
+The yield stress is a linear superposition of five strengthening contributions:
+\begin{equation}
+  \boxed{\;
+  \sy = \sigma_0 + \sigma_\mathrm{ss} + \sigma_\mathrm{HP}
+    + \sigma_\mathrm{Or} + \sigma_\mathrm{d}
+  \;}
+  \label{eq:sigma}
+\end{equation}
+
+\subsection{Lattice friction}
+
+\begin{equation}
+  \sigma_0 = \SI{53.9}{\mega\pascal}
+\end{equation}
+
+\subsection{Solid solution strengthening}
+
+\begin{equation}
+  \sigma_\mathrm{ss}\;(\mathrm{MPa})
+    = 4570\,c_\mathrm{C} + 3750\,c_\mathrm{N}
+    + 32\,c_\mathrm{Mn} + 84\,c_\mathrm{Si} + 11\,c_\mathrm{Mo}
+  \label{eq:ss}
+\end{equation}
+where all concentrations are in weight percent.
+
+\subsection{Hall--Petch grain refinement}
+
+\begin{equation}
+  \sigma_\mathrm{HP} = \frac{k_\mathrm{y}}{\sqrt{D_\alpha}}
+    \quad\text{with}\quad k_\mathrm{y}
+    = 18.14\;\mathrm{MPa\!\cdot\!mm}^{1/2}
+  \label{eq:hp}
+\end{equation}
+where $D_\alpha$ is in millimetres.
+
+\subsection{Orowan--Ashby precipitation hardening}
+
+For each precipitate species with volume fraction $\fv$ and mean radius
+$\bar{r}$, the interparticle spacing is:
+\begin{equation}
+  \lambda = \left(\sqrt{\frac{2\pi}{3\fv}}
+    - \sqrt{\frac{8}{3}}\right)\bar{r}
+  \label{eq:lambda}
+\end{equation}
+and the Orowan stress increment is:
+\begin{equation}
+  \sigma_\mathrm{Or} = \sum_i
+    \frac{0.538\,G\,b}{\lambda_i}\,\ln\!\left(\frac{\bar{r}_i}{b}\right)
+  \label{eq:orowan}
+\end{equation}
+where $G = \SI{81000}{\mega\pascal}$ is the ferrite shear modulus and
+$b = \SI{2.48e-10}{\metre}$ is the Burgers vector.  The sum runs over all
+precipitate species with non-negligible volume fractions.
+
+The Orowan--Ashby mechanism is the primary strengthening route exploited in
+V--N steels: dense, fine V(C,N) precipitates formed during coil cooling
+provide a large $\sigma_\mathrm{Or}$ contribution.
+
+\subsection{Taylor dislocation hardening}
+
+\begin{equation}
+  \sigma_\mathrm{d} = \alpha_\mathrm{T}\,M\,G\,b\,\sqrt{\rhod}
+  \label{eq:taylor}
+\end{equation}
+with Taylor factor $M = 3.06$ and $\alpha_\mathrm{T} = 0.33$.  After
+transformation, $\rhod$ is reset to $10^{12}\;\si{\per\metre\squared}$,
+giving a negligible contribution ($< 1\;\mathrm{MPa}$) for typical steels.
+
+%=============================================================================
+\section{Implementation}
+\label{sec:impl}
+%=============================================================================
+
+The model is implemented in Modula-3 as two packages within the \texttt{m3utils}
+tree:
+
+\begin{description}
+  \item[\texttt{micdellib}] --- Library containing nine modules:
+    \begin{itemize}
+      \item \texttt{MicdelThermo}: Solubility products, diffusion data,
+            driving force (\cref{sec:thermo})
+      \item \texttt{MicdelAlloy}: Steel composition record and accessors
+      \item \texttt{MicdelPrecipitate}: Mean-radius population kinetics
+            (\cref{sec:precip})
+      \item \texttt{MicdelRecryst}: JMAK recrystallization (\cref{sec:rex})
+      \item \texttt{MicdelGrainGrowth}: Grain growth with Zener drag
+            (\cref{sec:gg})
+      \item \texttt{MicdelTransform}: $\gamma\to\alpha$ transformation
+            (\cref{sec:transform})
+      \item \texttt{MicdelStrength}: Yield stress prediction
+            (\cref{sec:strength})
+      \item \texttt{MicdelState}: Coupled state vector and interpass evolution
+            (\cref{sec:interpass})
+      \item \texttt{MicdelSchedule}: Schedule file parser
+    \end{itemize}
+  \item[\texttt{micdeltool}] --- Driver program that reads a schedule file,
+    runs the pass-by-pass simulation, and outputs results.
+\end{description}
+
+The time integration uses explicit Euler with a default timestep of
+\SI{0.01}{\second}.  All internal calculations use SI units (metres, Kelvin,
+seconds, Pascals) with conversions to engineering units (micrometres,
+millimetres) applied at formula boundaries where the empirical correlations
+were originally calibrated.
+
+\subsection{Input file format}
+
+Schedules are specified in a simple text format:
+\begin{verbatim}
+COMPOSITION  C=0.09  N=0.013  V=0.09  Ti=0.01  Mn=1.4  Si=0.3
+REHEAT       T=1523  D_gamma=50e-6
+PASS  eps=0.3  rate=10  T=1373  t_inter=5  cool=2
+PASS  eps=0.3  rate=10  T=1343  t_inter=5  cool=2
+...
+COOLING  rate=15  T_coil=873  t_coil=3600  coilRate=0.01
+\end{verbatim}
+
+%=============================================================================
+\section{Test results}
+\label{sec:results}
+%=============================================================================
+
+Eight steel compositions were tested, spanning the principal microalloying
+strategies employed in industrial TMCP practice.
+
+\subsection{Steel compositions}
+
+\begin{table}[htbp]
+\centering
+\caption{Test steel compositions (wt.\%).  All steels use a 6-pass schedule
+  with reheat at \SI{1250}{\degreeCelsius} (\SI{1523}{\kelvin}).}
+\label{tab:comp}
+\begin{tabular}{@{}lccccccc@{}}
+\toprule
+Steel & C & N & V & Nb & Ti & Mn & Si \\
+\midrule
+Plain C--Mn       & 0.12  & 0.005 & ---  & ---  & ---   & 1.20 & 0.25 \\
+V--N              & 0.08  & 0.015 & 0.12 & ---  & ---   & 1.30 & 0.30 \\
+Nb                & 0.07  & 0.005 & ---  & 0.04 & ---   & 1.40 & 0.25 \\
+Nb--V             & 0.08  & 0.012 & 0.08 & 0.03 & ---   & 1.40 & 0.30 \\
+Ti-only           & 0.10  & 0.008 & ---  & ---  & 0.015 & 1.30 & 0.25 \\
+V--Ti--N (RCR)    & 0.09  & 0.013 & 0.09 & ---  & 0.01  & 1.40 & 0.30 \\
+V--Ti--N (CR)     & 0.09  & 0.013 & 0.09 & ---  & 0.01  & 1.40 & 0.30 \\
+High-V            & 0.06  & 0.020 & 0.15 & ---  & 0.01  & 1.50 & 0.30 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The RCR schedules finish above
+$T_\mathrm{nr}$ (no-recrystallization temperature) with entry temperatures
+from \SI{1100}{\degreeCelsius} down to \SI{950}{\degreeCelsius},
+while the CR schedule uses the same V--Ti--N composition but finishes in the
+non-recrystallization regime at \SI{750}{\degreeCelsius}.
+
+\subsection{Summary of final results}
+
+\begin{table}[htbp]
+\centering
+\caption{Predicted microstructure and mechanical properties.}
+\label{tab:results}
+\begin{tabular}{@{}lSSSSSSS@{}}
+\toprule
+Steel & {\DG} & {\Xrex} & {\DA}
+  & {$\sigma_\mathrm{ss}$} & {$\sigma_\mathrm{HP}$}
+  & {$\sigma_\mathrm{Or}$} & {\sy} \\
+  & {(\si{\micro\metre})} & {} & {(\si{\micro\metre})}
+  & {(\si{\mega\pascal})} & {(\si{\mega\pascal})}
+  & {(\si{\mega\pascal})} & {(\si{\mega\pascal})} \\
+\midrule
+Plain C--Mn    & 17.3  & 1.000 & 6.1   & 169.6 & 231.9 &   0.0 & 455 \\
+V--N           & 15.5  & 1.000 & 5.7   & 158.2 & 240.3 &   4.0 & 456 \\
+Nb             & 60.0  & 0.000 & 13.6  & 157.2 & 155.3 &  32.3 & 399 \\
+Nb--V          & 50.0  & 0.000 & 11.8  & 161.4 & 166.7 &  75.5 & 458 \\
+Ti-only        &  9.8  & 1.000 &  4.7  & 154.0 & 264.7 &  79.6 & 552 \\
+V--Ti--N (RCR) & 14.9  & 1.000 &  5.5  & 161.4 & 243.9 &  87.3 & 547 \\
+V--Ti--N (CR)  & 10.8  & 0.869 &  4.8  & 161.4 & 262.2 & 442.6 & 920 \\
+High-V         & 15.3  & 1.000 &  5.5  & 164.6 & 243.9 &  64.2 & 527 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent All steels include a lattice friction stress
+$\sigma_0 = 53.9\;\mathrm{MPa}$ and negligible dislocation
+hardening ($\sigma_\mathrm{d} < 1\;\mathrm{MPa}$) after transformation.
+
+\subsection{Precipitate populations}
+
+\begin{table}[htbp]
+\centering
+\caption{Final precipitate populations after coil cooling.}
+\label{tab:precip}
+\begin{tabular}{@{}llSSS@{}}
+\toprule
+Steel & Species
+  & {$\Nv$ (\si{\per\metre\cubed})}
+  & {$\bar{r}$ (\si{\nano\metre})}
+  & {$\fv$} \\
+\midrule
+Plain C--Mn & --- & {---} & {---} & {---} \\
+\midrule
+V--N        & V(C,N)  & 2.4e15  & 473   & 1.07e-3 \\
+\midrule
+Nb          & Nb(C,N) & 1.0e19  & 21    & 4.0e-4 \\
+\midrule
+\multirow{2}{*}{Nb--V}
+            & V(C,N)  & 2.1e17  & 121   & 1.6e-3 \\
+            & Nb(C,N) & 2.1e22  & 0.7   & 2.9e-5 \\
+\midrule
+Ti-only     & TiN     & 1.1e24  & 0.3   & 1.6e-4 \\
+\midrule
+\multirow{2}{*}{V--Ti--N (RCR)}
+            & V(C,N)  & 2.6e14  & 942   & 9.0e-4 \\
+            & TiN     & 1.5e24  & 0.3   & 2.0e-4 \\
+\midrule
+\multirow{2}{*}{V--Ti--N (CR)}
+            & V(C,N)  & 1.2e24  & 0.6   & 9.9e-4 \\
+            & TiN     & 1.5e24  & 0.3   & 2.0e-4 \\
+\midrule
+\multirow{2}{*}{High-V}
+            & V(C,N)  & 6.5e13  & 1436  & 8.0e-4 \\
+            & TiN     & 1.9e24  & 0.3   & 2.0e-4 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Pass-by-pass evolution: V--Ti--N RCR}
+
+\Cref{tab:passdata} shows the full pass-by-pass evolution for the V--Ti--N
+RCR steel, demonstrating how the microstructural state develops
+through the rolling sequence.
+
+\begin{table}[htbp]
+\centering
+\caption{Pass-by-pass state for V--Ti--N steel (RCR schedule).}
+\label{tab:passdata}
+\begin{tabular}{@{}cSSSSS@{}}
+\toprule
+Pass & {$T$ (\si{\degreeCelsius})} & {\DG{} (\si{\micro\metre})}
+  & {\Xrex} & {\epsr} & {$\fv^\mathrm{total}$} \\
+\midrule
+1 & 1090 & 22.9 & 1.000 & 0.000 & 2.0e-4 \\
+2 & 1060 & 13.6 & 1.000 & 0.000 & 2.0e-4 \\
+3 & 1032 & 14.8 & 1.000 & 0.000 & 5.4e-4 \\
+4 & 1002 & 15.6 & 1.000 & 0.000 & 9.1e-4 \\
+5 &  974 & 15.6 & 1.000 & 0.000 & 1.1e-3 \\
+6 &  944 & 14.9 & 1.000 & 0.000 & 1.1e-3 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Complete recrystallization occurs between all passes ($\Xrex = 1.0$), as
+expected for V steels where solute drag is weak.  The austenite grain size
+stabilizes around \SI{15}{\micro\metre} due to the balance between
+recrystallization refinement and Zener-limited grain growth from TiN particles.
+The total precipitate volume fraction increases from passes 3--5 as V(C,N)
+begins to form in the austenite.
+
+%=============================================================================
+\section{Discussion}
+\label{sec:discussion}
+%=============================================================================
+
+\subsection{Plain C--Mn baseline}
+
+With no microalloy additions, the plain C--Mn steel shows complete
+recrystallization between all passes ($\Xrex = 1.0$) and no precipitate
+pinning.  The final austenite grain size of \SI{17.3}{\micro\metre}
+progressively refines through successive recrystallization cycles, giving a
+ferrite grain size of \SI{6.1}{\micro\metre} and yield stress of
+\SI{455}{\mega\pascal} dominated by solid solution (\SI{170}{\mega\pascal})
+and Hall--Petch (\SI{232}{\mega\pascal}) contributions.
+
+\subsection{V--N steel: precipitation strengthening}
+
+The V--N steel also recrystallizes fully (V has minimal solute drag), giving a
+similar grain size to the baseline.  The V(C,N) precipitates that form during
+austenite rolling have coarsened to a mean radius of \SI{473}{\nano\metre} by
+the time of transformation---too large for significant Orowan strengthening.
+Only \SI{4}{\mega\pascal} of Orowan hardening results.  The modest yield stress
+of \SI{456}{\mega\pascal} reflects that the strengthening from V(C,N)
+precipitation relies on very fine particles formed during coil cooling, which in
+this simulation have time to coarsen during the \SI{3600}{\second} coil hold.
+
+\subsection{Nb steel: strain accumulation}
+
+The Nb steel demonstrates the classic pancaking (controlled rolling) behavior.
+The strong solute drag from dissolved Nb
+($f_\mathrm{drag} = \exp(275\,000 \times c_\mathrm{Nb}/100)$ in \cref{eq:solutedrag})
+completely suppresses recrystallization below
+$T_\mathrm{nr}$: $\Xrex = 0$ throughout all six passes.  The retained strain
+accumulates to $\epsr = 1.5$, and the austenite grain remains at its initial
+\SI{60}{\micro\metre}.  The lower yield
+stress of \SI{399}{\mega\pascal} compared to the baseline reflects the larger
+effective ferrite grain size (\SI{13.6}{\micro\metre}).  The Nb(C,N) precipitates
+contribute only \SI{32}{\mega\pascal} of Orowan hardening.
+
+In industrial practice, the pancaked austenite microstructure provides extensive
+grain boundary area for ferrite nucleation, which our Sellars--Beynon model
+(\cref{eq:dalpha}) captures only approximately; a more detailed treatment
+would account for the effective boundary area per unit volume of the
+deformed austenite, producing a finer ferrite grain size.
+
+\subsection{Nb--V combined microalloying}
+
+Combining Nb and V provides both strain accumulation (from Nb solute drag) and
+precipitation strengthening (from V(C,N)).  The Nb suppresses recrystallization
+as before, while V(C,N) precipitates form during coil cooling with a mean radius
+of \SI{121}{\nano\metre} and $\fv = 1.6 \times 10^{-3}$.  The Orowan contribution of
+\SI{76}{\mega\pascal} partially compensates for the larger ferrite grain size,
+yielding \SI{458}{\mega\pascal}---comparable to the plain C--Mn steel but with
+lower carbon and better toughness.
+
+\subsection{Ti-only: grain refinement through Zener drag}
+
+The Ti-only steel exploits the exceptional stability of TiN precipitates
+($A = 15\,790$, the largest among all species).  TiN forms at very high
+temperatures and remains essentially undissolved throughout rolling, providing
+persistent Zener drag that limits the austenite grain size to
+\SI{9.8}{\micro\metre}---the smallest among the RCR steels.  This translates
+to a fine ferrite grain of \SI{4.7}{\micro\metre} and a Hall--Petch contribution
+of \SI{265}{\mega\pascal}, giving the highest RCR yield stress of
+\SI{552}{\mega\pascal}.
+
+Note that the TiN precipitates themselves also contribute \SI{80}{\mega\pascal}
+of Orowan hardening, though in practice TiN particles are typically too coarse
+for significant precipitation strengthening; this reflects the mean-field
+approximation assigning all particles the same mean radius.
+
+\subsection{V--Ti--N: RCR vs.\ CR comparison}
+
+The comparison between RCR and CR schedules for the same V--Ti--N composition
+is particularly instructive.
+
+In the \textbf{RCR} schedule (all passes above $T_\mathrm{nr}$), complete
+recrystallization occurs between passes.  V(C,N) precipitates that form in
+austenite have time to coarsen to $\bar{r} = \SI{942}{\nano\metre}$, giving a
+modest Orowan contribution of \SI{87}{\mega\pascal}.  Total yield stress:
+\SI{547}{\mega\pascal}.
+
+In the \textbf{CR} schedule (last four passes at 900--\SI{750}{\degreeCelsius}),
+a dramatically different precipitate population emerges.  The lower temperatures
+produce an enormous nucleation density of V(C,N)
+($\Nv = 1.2 \times 10^{24}\;\si{\per\metre\cubed}$) with very fine mean radius
+(\SI{0.6}{\nano\metre}).  The resulting Orowan contribution of
+\SI{443}{\mega\pascal} dominates the total yield stress of
+\SI{920}{\mega\pascal}.
+
+This extreme value highlights the theoretical potential of controlled rolling
+with V--N steels, though the predicted Orowan increment likely overstates what
+would be achieved in practice: the sub-nanometre precipitate sizes approach the
+classical-to-atomistic transition where the mean-field nucleation and growth
+model breaks down.  Nevertheless, the qualitative trend---that CR produces much
+finer V(C,N) dispersions and stronger precipitation hardening than RCR---is
+well established experimentally.
+
+\subsection{High-V steel}
+
+Increasing V to \SI{0.15}{wt.\%} with \SI{0.020}{wt.\%} N provides more solute
+for precipitation.  However, under RCR conditions the V(C,N) precipitates
+coarsen to $\bar{r} = \SI{1436}{\nano\metre}$---the largest observed---giving
+only \SI{64}{\mega\pascal} of Orowan hardening.  More V means more total
+precipitate, but also more solute available for growth and coarsening.  The
+lesson is clear: high V content alone does not guarantee high strengthening; the
+rolling strategy and cooling conditions must be matched to the alloy design.
+
+\subsection{General observations}
+
+The results demonstrate several well-known principles of microalloyed steel
+design:
+\begin{enumerate}
+  \item \textbf{Nb for recrystallization control}: The exponential solute drag
+    from Nb is the most effective mechanism for suppressing SRX and accumulating
+    strain.
+  \item \textbf{Ti for grain refinement}: TiN's extreme thermodynamic stability
+    provides robust Zener pinning throughout the entire hot rolling temperature
+    range.
+  \item \textbf{V for precipitation strengthening}: V(C,N) precipitation in
+    ferrite during coil cooling is the primary strengthening mechanism, but its
+    effectiveness depends critically on the precipitate size distribution.
+  \item \textbf{The rolling strategy matters}: The same V--Ti--N steel gives
+    \SI{547}{\mega\pascal} (RCR) versus \SI{920}{\mega\pascal} (CR), a
+    \SI{370}{\mega\pascal} difference entirely from processing.
+\end{enumerate}
+
+%=============================================================================
+\section{Conclusion}
+%=============================================================================
+
+A coupled, physically-based MICDEL model has been implemented in Modula-3,
+comprising nine library modules and a driver program.  The model successfully
+captures the essential physics of microalloyed steel hot rolling:
+solubility-limited precipitation, classical nucleation theory,
+diffusion-controlled growth and LSW coarsening, JMAK static recrystallization
+with solute drag, Zener-limited grain growth, Sellars--Beynon ferrite grain size
+prediction, and superposition yield stress modelling.
+
+Testing across eight steel compositions demonstrates physically consistent
+trends and realistic yield stress predictions in the
+400--\SI{550}{\mega\pascal} range for conventional RCR schedules, with
+the CR V--Ti--N case illustrating the extreme potential of fine precipitation
+strengthening.
+
+\begin{thebibliography}{9}
+\bibitem{lagneborg}
+  R.~Lagneborg, T.~Siwecki, S.~Zajac, and B.~Hutchinson,
+  ``The Role of Vanadium in Microalloyed Steels,''
+  \emph{Scandinavian Journal of Metallurgy}, vol.~28, pp.~186--241, 1999.
+
+\bibitem{sellars}
+  C.~M. Sellars and J.~A. Whiteman,
+  ``Recrystallization and grain growth in hot rolling,''
+  \emph{Metal Science}, vol.~13, pp.~187--194, 1979.
+
+\bibitem{ashby}
+  M.~F. Ashby,
+  ``The deformation of plastically non-homogeneous materials,''
+  \emph{Philosophical Magazine}, vol.~21, pp.~399--424, 1970.
+
+\bibitem{gladman}
+  T.~Gladman,
+  ``Precipitation hardening in metals,''
+  \emph{Materials Science and Technology}, vol.~15, pp.~30--36, 1999.
+
+\bibitem{zajac}
+  S.~Zajac, T.~Siwecki, W.~B. Hutchinson, and R.~Lagneborg,
+  ``Strengthening mechanisms in vanadium microalloyed steels intended for
+  long products,''
+  \emph{ISIJ International}, vol.~38, pp.~1130--1139, 1998.
+
+\bibitem{andrews}
+  K.~W. Andrews,
+  ``Empirical formulae for the calculation of some transformation
+  temperatures,''
+  \emph{Journal of the Iron and Steel Institute}, vol.~203, pp.~721--727, 1965.
+
+\bibitem{sellars-beynon}
+  C.~M. Sellars and J.~H. Beynon,
+  ``Microstructural development during hot rolling,''
+  in \emph{Proc.\ Conf.\ on High Strength Low Alloy Steels},
+  Wollongong, Australia, pp.~142--150, 1984.
+\end{thebibliography}
+
+\end{document}

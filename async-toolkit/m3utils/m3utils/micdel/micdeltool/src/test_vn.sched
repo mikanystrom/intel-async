@@ -1,0 +1,11 @@
+# V-N microalloyed steel — precipitation strengthening from VN in ferrite
+# After Lagneborg & Zajac typical composition
+COMPOSITION  C=0.08  N=0.015  V=0.12  Ti=0.0  Nb=0.0  Mn=1.3  Si=0.3
+REHEAT       T=1523  D_gamma=60e-6
+PASS  eps=0.3  rate=10  T=1373  t_inter=5  cool=2
+PASS  eps=0.3  rate=10  T=1343  t_inter=5  cool=2
+PASS  eps=0.25 rate=15  T=1313  t_inter=4  cool=2
+PASS  eps=0.25 rate=15  T=1283  t_inter=4  cool=2
+PASS  eps=0.2  rate=20  T=1253  t_inter=3  cool=2
+PASS  eps=0.2  rate=20  T=1223  t_inter=3  cool=2
+COOLING  rate=15  T_coil=873  t_coil=3600  coilRate=0.01

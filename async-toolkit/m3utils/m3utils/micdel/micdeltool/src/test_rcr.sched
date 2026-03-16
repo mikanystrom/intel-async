@@ -1,0 +1,11 @@
+# Zajac 1991 V-Ti-N steel, recrystallization-controlled rolling (RCR)
+# 6-pass reversing mill schedule
+COMPOSITION  C=0.09  N=0.013  V=0.09  Ti=0.01  Mn=1.4  Si=0.3
+REHEAT       T=1523  D_gamma=50e-6
+PASS  eps=0.3  rate=10  T=1373  t_inter=5  cool=2
+PASS  eps=0.3  rate=10  T=1343  t_inter=5  cool=2
+PASS  eps=0.25 rate=15  T=1313  t_inter=4  cool=2
+PASS  eps=0.25 rate=15  T=1283  t_inter=4  cool=2
+PASS  eps=0.2  rate=20  T=1253  t_inter=3  cool=2
+PASS  eps=0.2  rate=20  T=1223  t_inter=3  cool=2
+COOLING  rate=15  T_coil=873  t_coil=3600  coilRate=0.01

@@ -222,6 +222,8 @@ override("mdd", TOP & "/csp")
 
 override("mpz", TOP & "/gmp")
 
+override("micdellib", TOP & "/micdel")
+
 override("globelib", TOP & "/globe")
 override("geodata", TOP & "/globe")
 override("airports", TOP & "/globe")

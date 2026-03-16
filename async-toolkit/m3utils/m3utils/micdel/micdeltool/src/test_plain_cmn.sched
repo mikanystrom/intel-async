@@ -1,0 +1,11 @@
+# Plain C-Mn steel — no microalloy additions
+# Baseline: should show rapid grain growth, low yield stress
+COMPOSITION  C=0.12  N=0.005  V=0.0  Ti=0.0  Nb=0.0  Mn=1.2  Si=0.25
+REHEAT       T=1523  D_gamma=80e-6
+PASS  eps=0.3  rate=10  T=1373  t_inter=8  cool=2
+PASS  eps=0.3  rate=10  T=1343  t_inter=8  cool=2
+PASS  eps=0.25 rate=15  T=1313  t_inter=6  cool=2
+PASS  eps=0.25 rate=15  T=1283  t_inter=6  cool=2
+PASS  eps=0.2  rate=20  T=1253  t_inter=5  cool=2
+PASS  eps=0.2  rate=20  T=1223  t_inter=5  cool=2
+COOLING  rate=10  T_coil=873  t_coil=3600  coilRate=0.01

@@ -1,0 +1,12 @@
+# V-Ti-N steel — Controlled Rolling (CR) variant
+# Lower finishing temps to demonstrate strain accumulation / pancaking
+# Compare with test_rcr.sched which finishes above T_nr
+COMPOSITION  C=0.09  N=0.013  V=0.09  Ti=0.01  Mn=1.4  Si=0.3
+REHEAT       T=1523  D_gamma=50e-6
+PASS  eps=0.3  rate=10  T=1373  t_inter=10  cool=3
+PASS  eps=0.3  rate=10  T=1323  t_inter=10  cool=3
+PASS  eps=0.25 rate=15  T=1173  t_inter=8   cool=3
+PASS  eps=0.25 rate=15  T=1123  t_inter=8   cool=3
+PASS  eps=0.2  rate=20  T=1073  t_inter=6   cool=3
+PASS  eps=0.2  rate=20  T=1023  t_inter=6   cool=3
+COOLING  rate=15  T_coil=873  t_coil=3600  coilRate=0.01
