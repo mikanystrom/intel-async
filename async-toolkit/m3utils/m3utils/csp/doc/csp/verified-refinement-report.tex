@@ -802,41 +802,103 @@ assignment is a pipeline insertion step with a trivial proof
 obligation.
 
 \subsubsection{Slack elasticity}
+\label{sec:slack-elasticity}
 
 A system is \emph{slack elastic} if its functional behavior (the
 sequence of values produced on each output channel) is independent
 of the amount of buffering on its internal
-channels~\cite{manohar2001}.  This property has been studied
-extensively: Papadantonakis~\cite{papadantonakis2002} examined the
-precise conditions under which deterministic CHP programs are slack
-elastic, and Prakash~\cite{prakash2008} showed that the slack
+channels~\cite{manohar2001}.  Slack elasticity is critical for the
+verified refinement framework because it means that slack insertion
+and removal are \emph{semantics-preserving transformations}---the
+designer (or the \texttt{slacker} tool) can adjust buffering for
+performance without affecting correctness.
+
+Papadantonakis~\cite{papadantonakis2002} provides the most thorough
+analysis of slack elasticity and its limitations.  He defines
+\emph{D-CHP} (Deterministic CHP), a restricted subset of CHP that
+excludes probes and the comma operator (undirected parallel
+composition), and establishes a hierarchy of determinism conditions:
+\begin{description}
+\item[L-deterministic:] The local state of each process determines
+  its next action (direction and channel) without consulting the
+  environment.
+\item[SS-deterministic:] The system's behavior is deterministic at
+  the \emph{system state} level (the global state determines all
+  future behavior).
+\item[IO-deterministic:] The system maps input sequences to output
+  sequences deterministically.
+\end{description}
+These conditions form a strict hierarchy:
+L-deterministic $\implies$ SS-deterministic $\implies$ IO-deterministic,
+with none of the reverse implications holding.
+
+The key theorem is: \emph{every L-deterministic system is slack elastic.}
+The proof works because, in an L-deterministic system, each process
+knows its next action from its local state alone, so additional
+buffering on channels cannot change the sequence of values produced.
+However, SS-determinism---despite implying deterministic
+behavior---is \emph{not} sufficient for slack elasticity.
+Papadantonakis gives a counterexample: a system of two processes with
+a cycle where the order of operations depends on the relative
+scheduling, which in turn depends on buffer depths.
+
+\paragraph{Beyond slack elasticity: value sequence systems.}
+The most significant finding of~\cite{papadantonakis2002} is that
+slack elasticity alone is \emph{insufficient} for the design
+transformations that matter in practice.  Slack elasticity preserves
+functional behavior when \emph{only slack changes}, but process
+decomposition (splitting one process into two communicating
+sub-processes) is not a slack change---it introduces new processes
+and channels.  A system can be slack elastic yet decomposing one
+of its processes may produce a system that is \emph{not} equivalent
+to the original.
+
+To address this, Papadantonakis introduces \emph{value sequence
+systems}: an abstract framework where each channel carries a
+deterministic sequence of values, and the system's behavior is
+fully characterized by these sequences.  He then defines
+\emph{domain weakening}---relaxing the domain of a value-sequence
+function while preserving its behavior on the original domain---as
+the formal justification for decomposition transformations.  A
+process $P$ can be decomposed into $P_1 \| P_2$ with new internal
+channels if the resulting system is a domain weakening of the
+original value-sequence system.
+
+This framework is directly relevant to our protocol types.  Our
+protocol annotations on channels (Section~\ref{sec:protocol-types})
+capture exactly the information that value-sequence systems abstract:
+the deterministic sequence of values on each channel.  Our
+compositional deadlock-freedom theorem
+(Theorem~\ref{thm:deadlock-free}) ensures that the composed system
+is well-defined, and the protocol conformance check ensures that
+each process produces the correct value sequence.  The domain
+weakening condition corresponds to our requirement that a
+process decomposition step must preserve the external protocols
+(Section~\ref{sec:refinement-steps}).
+
+In practice, most well-designed CSP systems are L-deterministic:
+each process's control flow determines which channel it next
+communicates on without observing the state of other
+channels~\cite{papadantonakis2002}.
+The MiniMIPS (Section~\ref{sec:minimips}) and the Caltech 80C51
+microcontroller are both L-deterministic.
+Not all systems qualify: a system that guards on probe negation
+(``\texttt{\~{}\#L}'') to distinguish empty from non-empty channels
+is not L-deterministic and may not be slack elastic.
+
+Prakash~\cite{prakash2008} showed that the slack
 matching problem (optimally assigning buffer depths to channels in a
 slack-elastic system) is NP-complete, formulating it as a mixed
 integer linear program.
 
-Slack elasticity is a
-critical property for the verified refinement framework because it
-means that slack insertion and removal are \emph{semantics-preserving
-transformations}---the designer (or the \texttt{slacker} tool) can
-adjust buffering for performance without affecting correctness.
-
-Not all systems are slack elastic.  A system with data-dependent
-control flow that observes buffer occupancy (e.g., through probes
-that distinguish empty from non-empty channels) may change behavior
-when slack changes.  The sufficient condition for slack elasticity
-is that no process uses the \emph{absence} of data on a channel
-as a control signal---that is, guards depend only on the
-\emph{presence} of data (\texttt{\#L} probes that test whether a
-channel has data ready) or on data values, never on whether a
-channel is empty.
-
 In the protocol type framework, slack elasticity can be verified as
 follows:
 \begin{enumerate}
-\item For each channel, check that no process guards on the
-  \emph{negation} of a probe on that channel (i.e., no
-  ``\texttt{\~{}\#L}'' guards that would distinguish slack~0 from
-  slack~$>0$).
+\item Check that each process is L-deterministic: its control flow
+  uniquely determines the next channel action from the local state.
+  (Sufficient condition.  A syntactic check that excludes probe
+  negation and data-dependent channel selection suffices for common
+  cases.)
 \item Verify that the channel dependency graph is preserved under
   slack changes (adding buffers does not introduce new dependencies).
 \end{enumerate}
@@ -2111,6 +2173,43 @@ protocol type system could provide the correctness certificate that
 DDD's decomposition algorithm currently establishes by construction.
 
 %----------------------------------------------------------------------
+\subsection{Deterministic CHP and Value Sequence Systems}
+%----------------------------------------------------------------------
+
+Papadantonakis~\cite{papadantonakis2002} introduced two concepts
+that are foundational to our protocol type framework.
+
+First, D-CHP (Deterministic CHP) restricts CHP by excluding probes
+and the comma operator, yielding a language where all nondeterminism
+is resolved by the environment (channel data values), never by
+scheduling.  Within D-CHP, the hierarchy of determinism conditions
+(L-deterministic, SS-deterministic, IO-deterministic) precisely
+characterizes which systems are slack elastic: L-determinism is
+sufficient, SS-determinism is not.  This gives our framework a
+concrete syntactic criterion for identifying systems that tolerate
+arbitrary slack assignment.
+
+Second, and more fundamentally, Papadantonakis shows that slack
+elasticity alone does not justify process decomposition.  He
+introduces \emph{value sequence systems}---an abstraction where each
+channel is characterized by the deterministic sequence of values it
+carries---and defines \emph{domain weakening} as the formal basis for
+decomposition transformations.  Our protocol types
+(Section~\ref{sec:protocol-types}) are the syntactic realization of
+value-sequence characterizations: each protocol annotation describes
+the sequence of values on a channel, and protocol conformance ensures
+that the process produces that sequence.  The channel dependency graph
+(Definition~\ref{def:cdg}) captures exactly the inter-channel
+dependencies that Papadantonakis's value-sequence functions express.
+Domain weakening corresponds to our requirement that decomposition
+preserves external protocols while introducing new internal channels
+with their own value-sequence specifications.
+
+Papadantonakis also developed m3-3, a Modula-3 message-passing
+library for testing concurrent CHP systems, which is a precursor
+to the simulation approach taken by \texttt{cspc}.
+
+%----------------------------------------------------------------------
 \subsection{CHP Verification}
 %----------------------------------------------------------------------
 
@@ -2329,7 +2428,7 @@ P.A.\ Beerel, R.O.\ Ozdag, and M.\ Ferretti,
 Cambridge University Press, 2010.
 
 \bibitem{papadantonakis2002}
-K.S.\ Papadantonakis,
+K.\ Papadantonakis,
 ``What is `Deterministic CHP', and is `Slack Elasticity' That
 Useful?''
 M.S.\ thesis, California Institute of Technology, 2002.
