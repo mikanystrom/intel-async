@@ -319,7 +319,7 @@ The time for 50\% recrystallization is given by:
     \exp\!\left(\frac{Q_\mathrm{rex}}{RT}\right) \cdot f_\mathrm{drag}
   \label{eq:t50}
 \end{equation}
-where $D_0$ is in micrometres and the default
+where $D_0$ is in micrometers and the default
 parameters are:
 \begin{equation*}
   A = \num{2.5e-19},\quad p = 4.0,\quad q = 1.0,\quad s = 2.0,\quad
@@ -357,7 +357,7 @@ The grain size after complete recrystallization follows Sellars:
     = 0.743\,D_0^{\,0.67}\,\varepsilon^{-0.67}
   \label{eq:drex}
 \end{equation}
-where $D_0$ is the prior austenite grain size in micrometres.  During partial
+where $D_0$ is the prior austenite grain size in micrometers.  During partial
 recrystallization, the effective grain size is the mixture:
 \begin{equation}
   \DG = \Xrex\,D_\mathrm{rex} + (1 - \Xrex)\,D_\gamma^\mathrm{old}
@@ -528,7 +528,7 @@ where all concentrations are in weight percent.
     = 18.14\;\mathrm{MPa\!\cdot\!mm}^{1/2}
   \label{eq:hp}
 \end{equation}
-where $D_\alpha$ is in millimetres.
+where $D_\alpha$ is in mm.
 
 \subsection{Orowan--Ashby precipitation hardening}
 
@@ -568,8 +568,8 @@ giving a negligible contribution ($< 1\;\mathrm{MPa}$) for typical steels.
 \label{sec:impl}
 %=============================================================================
 
-The model is implemented in Modula-3 as two packages within the \texttt{m3utils}
-tree:
+The model is implemented in Modula-3 \cite{m3} as two packages within the
+\texttt{m3utils} tree:
 
 \begin{description}
   \item[\texttt{micdellib}] --- Library containing nine modules:
@@ -594,11 +594,135 @@ tree:
     runs the pass-by-pass simulation, and outputs results.
 \end{description}
 
-The time integration uses explicit Euler with a default timestep of
-\SI{0.01}{\second}.  All internal calculations use SI units (metres, Kelvin,
-seconds, Pascals) with conversions to engineering units (micrometres,
-millimetres) applied at formula boundaries where the empirical correlations
-were originally calibrated.
+\subsection{Units and dimensional conventions}
+
+All internal calculations use SI units (meters, Kelvin,
+seconds, Pascals).  Many empirical correlations in the metallurgical
+literature are calibrated in engineering units (micrometers for grain size,
+millimeters for Hall--Petch).  Unit conversions are applied at the boundaries
+of each empirical formula:
+\begin{itemize}
+  \item \textbf{Recrystallization} (\cref{eq:t50,eq:drex}):
+    $D_0\,(\mathrm{m}) \to D_0\,(\mathrm{\mu m})$ via
+    $D_0^{\mu\mathrm{m}} = D_0 \times 10^6$ on entry;
+    $D_\mathrm{rex}\,(\mathrm{\mu m}) \to D_\mathrm{rex}\,(\mathrm{m})$
+    via $\times 10^{-6}$ on exit.
+  \item \textbf{Ferrite grain size} (\cref{eq:dalpha}):
+    same $\mathrm{m} \leftrightarrow \mathrm{\mu m}$ conversion.
+  \item \textbf{Hall--Petch} (\cref{eq:hp}):
+    $D_\alpha\,(\mathrm{m}) \to D_\alpha\,(\mathrm{mm})$ via $\times 10^3$.
+  \item \textbf{Solute concentrations}: uniformly in wt.\%\ throughout.
+\end{itemize}
+
+\subsection{Explicit Euler time integration}
+\label{sec:euler}
+
+The interpass evolution (\cref{sec:interpass}) is integrated using the
+explicit (forward) Euler method.  Given the state vector
+$\mathbf{u}^{(n)}$ at time $t_n$, the update is:
+\begin{equation}
+  \mathbf{u}^{(n+1)} = \mathbf{u}^{(n)}
+    + \Delta t\;\mathbf{f}\!\left(\mathbf{u}^{(n)},\, t_n\right)
+  \label{eq:euler}
+\end{equation}
+where $\mathbf{f}$ encapsulates the coupled right-hand sides (temperature
+cooling, recrystallization kinetics, grain growth, and precipitation for all
+seven species).  The default timestep is $\Delta t = \SI{0.01}{\second}$.
+
+Concretely, at each Euler step the following sub-updates are applied
+sequentially:
+
+\paragraph{Step 1: Temperature.}
+\begin{equation}
+  T^{(n+1)} = T^{(n)} - \dot{T}_\mathrm{cool}\,\Delta t
+\end{equation}
+
+\paragraph{Step 2: Recrystallization.}
+Compute $t_{0.5}$ from the current $\epsr$, $\DG$, $T$, and solute state
+using \cref{eq:t50}.  Evaluate the JMAK fraction (\cref{eq:jmak}) at elapsed
+time $t_\mathrm{elapsed} + \Delta t$.  If $\Xrex$ increased by
+$\Delta \Xrex > 0$:
+\begin{align}
+  D_\mathrm{rex} &= 0.743\,D_\gamma^{\,0.67}\,\varepsilon_\mathrm{ret}^{-0.67}
+    \quad\text{(\cref{eq:drex}, in $\mu$m)} \\
+  \DG^{(n+1)} &= \Xrex^{(n+1)}\,D_\mathrm{rex}
+    + (1 - \Xrex^{(n+1)})\,\DG^{(n)} \\
+  \rhod^{(n+1)} &= \rhod^{(n)}\,(1 - 0.9\,\Delta\Xrex) \\
+  \epsr^{(n+1)} &= \epsr^{(n)}\,(1 - \Delta\Xrex)
+\end{align}
+The factor 0.9 in the dislocation reduction reflects that recrystallization
+does not fully annihilate all dislocations; a residual density of
+$10^{10}\;\mathrm{m}^{-2}$ is enforced as a floor.
+
+\paragraph{Step 3: Grain growth.}
+Applied only when $\Xrex > 0.5$ (i.e., the material is predominantly
+recrystallized).  The grain size increment from \cref{eq:gg} is:
+\begin{equation}
+  \Delta D = \frac{k_0\,e^{-Q_\mathrm{gg}/RT}}{m\,D^{m-1}}\,\Delta t
+\end{equation}
+subject to the Zener ceiling $D \le D_\mathrm{lim}$ from \cref{eq:zener}.
+The update is monotonic: grain size never decreases from grain growth alone.
+
+\paragraph{Step 4: Precipitation (for each of the 7 species).}
+For species $s$ with current population $\{\Nv,\,\bar{r},\,\fv\}$:
+\begin{enumerate}
+  \item Check if solute is available and $\fv < f_{\mathrm{v},\max}$.
+  \item Compute the nucleation rate $J$ from \cref{eq:nucleation}:
+    $\Delta\Nv = J\,\Delta t$.
+  \item Compute the growth rate $\mathrm{d}r/\mathrm{d}t$ from \cref{eq:growth}
+    and the coarsening rate from \cref{eq:lsw}:
+    $\Delta r = (\mathrm{d}r/\mathrm{d}t|_\mathrm{grow}
+    + \mathrm{d}r/\mathrm{d}t|_\mathrm{coarsen})\,\Delta t$.
+  \item Update the mean radius via the weighted average (\cref{eq:rmean}).
+  \item Compute the new volume fraction $\fv = \frac{4}{3}\pi\bar{r}^3\Nv$.
+  \item If $\fv > f_{\mathrm{v},\max}$, cap $\fv$ and adjust $\Nv$ to be
+    consistent: $\Nv = \fv / (\frac{4}{3}\pi\bar{r}^3)$.
+  \item Deplete solute: $c_\mathrm{M} \leftarrow c_\mathrm{M}
+    - \Delta\fv / 0.02$.
+\end{enumerate}
+
+\noindent This operator-splitting approach (temperature $\to$ recrystallization
+$\to$ grain growth $\to$ precipitation) introduces a first-order splitting
+error of $O(\Delta t)$, consistent with the Euler integration order.  The
+default $\Delta t = 0.01\;\mathrm{s}$ is small relative to typical interpass
+intervals (3--10\,s), giving $\sim$300--1000 steps per interpass and adequate
+resolution of the kinetics.
+
+\subsection{Transformation and coil cooling}
+\label{sec:impl-transform}
+
+The post-rolling transformation is handled in three stages:
+
+\begin{enumerate}
+  \item \textbf{Cool to $\Ae$}: If the current temperature exceeds the
+    equilibrium $\Ae$ (\cref{eq:ae3}), advance time by
+    $\Delta t_\mathrm{cool} = (T - \Ae)/\dot{T}_\mathrm{cool}$ and set
+    $T = \Ae$.
+
+  \item \textbf{Compute ferrite grain size}: Apply the Sellars--Beynon
+    formula (\cref{eq:dalpha}) with the Mn correction and intragranular
+    refinement factor (\cref{eq:igr}).  Partition carbon to pearlite by
+    capping ferrite $c_\mathrm{C}$ at 0.02\,wt.\%.  Reset $\rhod$ to
+    $10^{12}\;\mathrm{m}^{-2}$ (transformation-annealed state).
+
+  \item \textbf{Coil cooling loop}: Iterate for up to 3600 steps of
+    $\Delta t = 1\;\mathrm{s}$, cooling at the coil rate
+    (\SI{0.01}{\kelvin\per\second}).  At each step, run the precipitation
+    sub-update (Step~4 above) for all species in the \emph{ferrite} phase,
+    using ferrite solubility products and diffusion data.  Exit if
+    $T < \SI{300}{\degreeCelsius}$.
+\end{enumerate}
+
+\noindent Finally, the yield stress is computed from \cref{eq:sigma} using the
+post-coil-cooling state.
+
+\subsection{Nucleation rate capping}
+
+The classical nucleation rate (\cref{eq:nucleation}) involves the exponential
+$\exp(-\Delta G^*/k_\mathrm{B}T)$, which can produce extremely large or
+extremely small values depending on supersaturation.  The implementation
+applies a hard cap of $J \le 10^{30}\;\mathrm{m}^{-3}\mathrm{s}^{-1}$ to
+prevent numerical overflow, and floors $J$ at zero (no negative nucleation).
 
 \subsection{Input file format}
 
@@ -611,6 +735,154 @@ PASS  eps=0.3  rate=10  T=1343  t_inter=5  cool=2
 ...
 COOLING  rate=15  T_coil=873  t_coil=3600  coilRate=0.01
 \end{verbatim}
+The parser reads key\texttt{=}value pairs from each line.  Temperatures are
+in Kelvin, grain sizes in meters, times in seconds, and cooling rates in
+K/s.  Lines beginning with \texttt{\#} are comments.  The parser collects
+\texttt{PASS} lines into a dynamically-sized array using a linked list
+during parsing, then converts to a contiguous array for the simulation loop.
+
+\subsection{Software architecture}
+\label{sec:architecture}
+
+The complete implementation comprises approximately 1620 lines of Modula-3
+source code, organized as a library (\texttt{micdellib}, 9~modules, 1367~LOC)
+and a driver program (\texttt{micdeltool}, 1~module, 146~LOC), plus
+88~lines across eight test schedule files.  \Cref{tab:loc} shows the
+breakdown by module.
+
+\begin{table}[htbp]
+\centering
+\caption{Lines of code by module (interfaces + implementations).}
+\label{tab:loc}
+\begin{tabular}{@{}llr@{}}
+\toprule
+Module & Role & LOC \\
+\midrule
+\texttt{MicdelThermo}       & Solubility products, diffusion data        & 145 \\
+\texttt{MicdelAlloy}        & Composition record, element access          &  66 \\
+\texttt{MicdelPrecipitate}  & Nucleation, growth, coarsening, depletion  & 296 \\
+\texttt{MicdelRecryst}      & JMAK kinetics, solute drag, rex'd grain size & 96 \\
+\texttt{MicdelGrainGrowth}  & Parabolic growth, Zener limit              &  81 \\
+\texttt{MicdelTransform}    & Ae3, Sellars--Beynon, coil cooling         & 128 \\
+\texttt{MicdelStrength}     & 5-component yield stress                   &  89 \\
+\texttt{MicdelState}        & State vector, interpass coupling, transform & 198 \\
+\texttt{MicdelSchedule}     & Text file parser                           & 268 \\
+\midrule
+\texttt{Main}               & Driver program                             & 146 \\
+\midrule
+\multicolumn{2}{@{}l}{Total (library + driver)} & 1513 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The module dependency graph reflects the physical layering of the model.
+At the bottom sit the ``leaf'' modules with no intra-library dependencies:
+
+\begin{itemize}
+  \item \texttt{MicdelThermo} --- pure data (solubility products, diffusion
+    coefficients, interfacial energies) and stateless query functions.
+    No mutable state.
+  \item \texttt{MicdelAlloy} --- a record type holding the steel composition
+    in wt.\%, with element accessors.
+\end{itemize}
+
+\noindent The kinetics modules form the middle tier, each importing
+\texttt{Thermo} and \texttt{Alloy}:
+
+\begin{itemize}
+  \item \texttt{MicdelPrecipitate} imports \texttt{Thermo} and \texttt{Alloy}.
+    Its \texttt{Step} procedure advances one species' population by one
+    timestep, depleting solute from the \texttt{Alloy.T} record passed by
+    \texttt{VAR} reference.  This is the largest module (296~LOC) because it
+    handles all three kinetic regimes (nucleation, growth, coarsening) plus
+    the stoichiometric cap and solute depletion bookkeeping.
+  \item \texttt{MicdelRecryst} imports \texttt{Thermo} and \texttt{Alloy}.
+    Stateless: computes $t_{0.5}$, $X$, and $D_\mathrm{rex}$ from the current
+    state without side effects.
+  \item \texttt{MicdelGrainGrowth} imports \texttt{Precipitate} (for the
+    Zener limit, which requires the full precipitate population array).
+  \item \texttt{MicdelTransform} imports \texttt{Alloy} and
+    \texttt{Precipitate} (for intragranular refinement from VN particles).
+  \item \texttt{MicdelStrength} imports \texttt{Alloy} and
+    \texttt{Precipitate}.
+\end{itemize}
+
+\noindent The coupling module \texttt{MicdelState} sits at the top of the
+library.  It imports all five kinetics modules plus \texttt{Thermo} and
+\texttt{Alloy}, and provides the three entry points that implement the
+simulation loop:
+
+\begin{enumerate}
+  \item \texttt{ApplyDeformation} --- accumulates strain and updates
+    dislocation density after a roll pass (no time integration).
+  \item \texttt{EvolveInterpass} --- the Euler time-stepping loop described
+    in \cref{sec:euler}, calling \texttt{Recryst}, \texttt{GrainGrowth}, and
+    \texttt{Precipitate.Step} (for each of 7~species) at every timestep.
+  \item \texttt{Transform} --- invokes \texttt{MicdelTransform} for the
+    $\gamma\to\alpha$ conversion and \texttt{MicdelStrength} for the final
+    yield stress, plus a coil cooling sub-loop that calls
+    \texttt{Precipitate.Step} in the ferrite phase.
+\end{enumerate}
+
+\noindent Finally, \texttt{MicdelSchedule} is an I/O module that parses the
+text schedule format into structured records; it imports \texttt{Alloy} (for
+the composition record) but is otherwise independent of the physics modules.
+
+The driver program (\texttt{Main.m3}) imports only \texttt{MicdelState} and
+\texttt{MicdelSchedule}.  Its logic is a straightforward loop:
+\begin{verbatim}
+  state := MicdelState.Init(sched.comp, sched.D_gamma_0, sched.T_reheat);
+  FOR i := 0 TO LAST(sched.passes^) DO
+    MicdelState.ApplyDeformation(state, pass.strain, pass.strainRate);
+    MicdelState.EvolveInterpass(state, pass.t_interpass, pass.coolingRate);
+    print one-line summary of state
+  END;
+  MicdelState.Transform(state, sched.cooling);
+  print final results and yield stress breakdown
+\end{verbatim}
+
+\noindent External dependencies are minimal: the standard library
+\texttt{libm3} (for \texttt{Math}, \texttt{Fmt}, \texttt{Wr}, \texttt{Rd},
+\texttt{Params}, \texttt{Scan}), plus \texttt{cit\_util} for
+\texttt{LRVector.T} (a dynamically-sized \texttt{LONGREAL} array used in
+the schedule parser).  No numerical solvers, linear algebra packages, or
+optimization libraries are required---the explicit Euler scheme needs only
+elementary arithmetic.
+
+\subsection{Timing benchmarks}
+\label{sec:timing}
+
+\Cref{tab:timing} reports wall-clock execution times for each test schedule,
+measured as the average of 100 consecutive runs on an Apple~M4~Pro (ARM64\_DARWIN).
+Process startup overhead (Modula-3 runtime initialization, schedule file
+parsing) accounts for approximately \SI{7}{\milli\second}; the actual
+simulation computation ranges from \SI{1.5}{\milli\second} for the simpler
+schedules to \SI{4}{\milli\second} for the multi-species cases.
+
+\begin{table}[htbp]
+\centering
+\caption{Wall-clock execution times (average of 100 runs, Apple~M4~Pro).}
+\label{tab:timing}
+\begin{tabular}{@{}lSS@{}}
+\toprule
+Steel & {Total (ms)} & {Computation (ms)} \\
+\midrule
+Plain C--Mn       &  8.3 & 1.6 \\
+V--N              &  8.7 & 2.0 \\
+Nb                &  9.5 & 2.8 \\
+Nb--V             & 10.4 & 3.7 \\
+Ti-only           &  8.3 & 1.6 \\
+V--Ti--N (RCR)    &  8.7 & 2.0 \\
+V--Ti--N (CR)     &  9.8 & 3.1 \\
+High-V            & 10.5 & 3.8 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent The sub-\SI{5}{\milli\second} computation times make the model
+suitable for rapid parameter studies, schedule optimization loops, or
+integration into online process control systems where thousands of schedule
+evaluations may be required.
 
 %=============================================================================
 \section{Test results}
@@ -844,7 +1116,7 @@ produce an enormous nucleation density of V(C,N)
 
 This extreme value highlights the theoretical potential of controlled rolling
 with V--N steels, though the predicted Orowan increment likely overstates what
-would be achieved in practice: the sub-nanometre precipitate sizes approach the
+would be achieved in practice: the sub-nanometer precipitate sizes approach the
 classical-to-atomistic transition where the mean-field nucleation and growth
 model breaks down.  Nevertheless, the qualitative trend---that CR produces much
 finer V(C,N) dispersions and stronger precipitation hardening than RCR---is
@@ -889,7 +1161,7 @@ captures the essential physics of microalloyed steel hot rolling:
 solubility-limited precipitation, classical nucleation theory,
 diffusion-controlled growth and LSW coarsening, JMAK static recrystallization
 with solute drag, Zener-limited grain growth, Sellars--Beynon ferrite grain size
-prediction, and superposition yield stress modelling.
+prediction, and superposition yield stress modeling.
 
 Testing across eight steel compositions demonstrates physically consistent
 trends and realistic yield stress predictions in the
@@ -935,6 +1207,11 @@ strengthening.
   ``Microstructural development during hot rolling,''
   in \emph{Proc.\ Conf.\ on High Strength Low Alloy Steels},
   Wollongong, Australia, pp.~142--150, 1984.
+
+\bibitem{m3}
+  L.~Cardelli, J.~Donahue, L.~Glassman, M.~Jordan, B.~Kalsow, and G.~Nelson,
+  ``Modula-3 language definition,''
+  \emph{ACM SIGPLAN Notices}, vol.~27, no.~8, pp.~15--42, 1992.
 \end{thebibliography}
 
 \end{document}
