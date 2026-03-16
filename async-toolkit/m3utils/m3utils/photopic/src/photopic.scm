@@ -135,6 +135,38 @@
 (define (total-blackbody-lpW T)
   (total-lumens-per-watt (make-Bl T)))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Philips phosphor-converted LED loss model
+;;
+;; A blue LED at lambda-pump converts photons to longer wavelengths
+;; via phosphors.  Each conversion incurs:
+;;   - Stokes loss: energy ratio lambda/lambda-pump > 1
+;;   - Quantum efficiency < 1 (not every pump photon makes an output photon)
+;;
+;; Cost per watt of optical output at wavelength lambda:
+;;   C(lambda) = max(1, lambda / (lambda-pump * QE))
+;;
+;; Philips-corrected LER = K_m * integral(S*V) / integral(S*C)
+;;
+
+(define *pump-nm*   450e-9)  ;; blue LED pump wavelength [m]
+(define *pump-qe*   0.90)    ;; average phosphor quantum efficiency
+
+(define (philips-cost lambda)
+  ;; watts of pump power needed per watt of output at lambda
+  (if (<= lambda *pump-nm*)
+      1.0
+      (/ lambda (* *pump-nm* *pump-qe*))))
+
+(define (philips-power f)
+  ;; integrate f(lambda) * C(lambda) over visible range
+  (integrate (lambda(x) (* (f x) (philips-cost x))) l0 l1))
+
+(define (philips-lumens-per-watt f)
+  ;; Philips-corrected luminous efficacy
+  (/ (calc-lumens f) (philips-power f)))
+
 (define (visible-blackbody-lpW T)
   (visible-lumens-per-watt (make-Bl T)))
 
@@ -670,10 +702,46 @@
         )
   )
 
+;;
+;; Philips-corrected version: uses the phosphor-converted LED cost model
+;; in the efficacy constraint.  Instead of requiring uncorrected LER >= X,
+;; we require Philips-corrected LER >= X.  This penalizes red-heavy spectra
+;; since longer-wavelength photons cost more to produce via Stokes shift.
+;;
+;; Note: w is the global spectrum function, updated by specs-func before
+;; this is called.
+;;
+(define (specs->max-r9-philips specs)
+  (let ((r9     (nth (car (cddddr specs)) 8))
+        (cri    (car specs))
+        (crmin  (cadr specs))
+        (cct    (caar (cdddr specs)))
+        (Duv    (cadar (cdddr specs)))
+        (lpm-philips (philips-lumens-per-watt w)) ;; Philips-corrected efficacy
+        )
+    (dis specs " Philips-LER=" lpm-philips dnl)
+    (list (- r9)                         ;; target: maximize R9
+          (- cri   *min-cri-ra*)         ;; CRI(Ra) >= min-cri-ra
+          (- crmin (- *min-cri-ra* 10))  ;; worst Ri >= min-cri-ra - 10
+          (- cct (- *target-cct* 50))    ;; cct >= target - 50
+          (- (+ *target-cct* 50) cct)    ;; cct <= target + 50
+          (* 1000 (- 0.012 Duv))         ;; Duv <= 0.012
+          (- lpm-philips *min-efficacy*) ;; Philips-corrected efficacy >= min
+          )
+        )
+  )
+
 (define (run-max-r9! cct min-cri min-efficacy)
   (set! *min-efficacy* min-efficacy)
   (run-example-iters! cct min-cri -100 7 specs->max-r9
                       (string-append "_maxR9_eff"
+                                     (stringify (round min-efficacy))))
+  )
+
+(define (run-max-r9-philips! cct min-cri min-efficacy)
+  (set! *min-efficacy* min-efficacy)
+  (run-example-iters! cct min-cri -100 7 specs->max-r9-philips
+                      (string-append "_maxR9P_eff"
                                      (stringify (round min-efficacy))))
   )
 
@@ -840,6 +908,20 @@
       (define run-cri     (pp 'getNextLongReal -100 100))
       (define run-eff     (pp 'getNextLongReal    0 700))
       (run-max-r9! run-cct run-cri run-eff)
+      (exit)
+      )
+    )
+
+;; Inverse problem with Philips phosphor-converted LED loss model
+;; Efficacy constraint uses Philips-corrected LER (Stokes + QE losses)
+;; Usage: photopic -run-maxr9-philips <cct> <min-cri> <min-efficacy>
+;;   e.g., photopic -run-maxr9-philips 2700 80 300
+(if (pp 'keywordPresent "-run-maxr9-philips")
+    (begin
+      (define run-cct     (pp 'getNextLongReal    0 1e6))
+      (define run-cri     (pp 'getNextLongReal -100 100))
+      (define run-eff     (pp 'getNextLongReal    0 700))
+      (run-max-r9-philips! run-cct run-cri run-eff)
       (exit)
       )
     )

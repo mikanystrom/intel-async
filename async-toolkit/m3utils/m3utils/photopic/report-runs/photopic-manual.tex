@@ -299,6 +299,74 @@ optimizer~\cite{powell1994}, which constructs linear approximations
 to the objective and constraint functions within a shrinking
 trust region.
 
+\subsection{Philips phosphor-converted LED model}
+\label{sec:philips}
+
+Real white LEDs produce light by pumping a short-wavelength (blue) LED
+and converting part of the output to longer wavelengths via phosphor
+down-conversion.  This process incurs two losses:
+\begin{enumerate}
+  \item \textbf{Stokes loss.}  A photon at wavelength $\lambda > \lambda_{\text{pump}}$
+    carries less energy than the pump photon that created it.  The energy
+    ratio is $\lambda / \lambda_{\text{pump}} > 1$.
+  \item \textbf{Quantum efficiency.}  Not every pump photon produces an
+    output photon; the average quantum efficiency is $\eta_{\text{QE}} < 1$.
+\end{enumerate}
+
+\noindent
+Following the model used by Philips Research, we define the
+\emph{cost function}:
+\begin{equation}
+\fboxsep=8pt
+\boxed{\;
+  C(\lambda) = \max\!\biggl(\, 1, \;\;
+    \frac{\lambda}{\lambda_{\text{pump}} \cdot \eta_{\text{QE}}} \,\biggr)
+\;}
+  \label{eq:philips-cost}
+\end{equation}
+where $\lambda_{\text{pump}} = 450\,\text{nm}$ is the blue pump
+wavelength and $\eta_{\text{QE}} = 0.90$ is the average phosphor
+quantum efficiency.  $C(\lambda)$ gives the watts of electrical
+(pump) power needed per watt of optical output at wavelength~$\lambda$.
+
+The \emph{Philips-corrected luminous efficacy} replaces the simple
+power integral in the denominator of~\eqref{eq:ler} with the
+cost-weighted integral:
+\begin{equation}
+\fboxsep=8pt
+\boxed{\;
+  \eta_{\text{P}} = K_m \,
+    \frac{\displaystyle\int_{\lambda_0}^{\lambda_1} S(\lambda)\,\bar{y}(\lambda)\,d\lambda}
+         {\displaystyle\int_{\lambda_0}^{\lambda_1} S(\lambda)\,C(\lambda)\,d\lambda}
+\;}
+  \label{eq:philips-ler}
+\end{equation}
+This penalizes spectra with strong red content, since red photons at
+$\lambda \approx 650\,\text{nm}$ cost $C(650) = 650/(450 \times 0.90)
+\approx 1.60$ times as much pump power as blue photons.
+
+\medskip\noindent
+The Philips-corrected inverse mode (\cmd{-run-maxr9-philips}) solves:
+\begin{equation}
+\fboxsep=8pt
+\boxed{\;
+  \max_{\mathbf{p}} \; R_9\bigl(S(\lambda; \mathbf{p})\bigr)
+  \quad \text{subject to} \quad
+  \begin{cases}
+    R_a \geq R_a^{\min} \\[3pt]
+    \min_{i \in 1..8} R_i \geq R_a^{\min} - 10 \\[3pt]
+    \eta_{\text{P}} \geq \eta_{\min} \\[3pt]
+    |\text{CCT} - T_{\text{target}}| \leq 50\,\text{K} \\[3pt]
+    D_{uv} \leq 0.012
+  \end{cases}
+\;}
+  \label{eq:inverse-philips}
+\end{equation}
+Note that $\eta_{\text{P}}$ is computed fresh at each optimizer
+iteration from the current spectrum~$S(\lambda;\mathbf{p})$, so the
+Philips loss model is fully integrated into the optimization loop, not
+applied as a post-hoc correction.
+
 \subsection{Parametric spectrum}
 
 The spectrum is parameterized as
@@ -458,6 +526,21 @@ This is the inverse of \cmd{-run}: instead of finding how efficient a
 spectrum can be, it finds how well saturated reds can be rendered at a
 given efficiency floor.
 
+\subsection{\texttt{-run-maxr9-philips}: Maximize \texorpdfstring{$R_9$}{R9} with Philips correction}
+
+\begin{lstlisting}[style=shell]
+photopic -run-maxr9-philips <cct> <min-cri> <min-efficacy> \
+         -scm -scmfile photopic.scm
+\end{lstlisting}
+
+Same as \cmd{-run-maxr9} but uses the Philips phosphor-converted LED
+loss model (Section~\ref{sec:philips}) in the efficacy constraint.
+The efficacy floor is interpreted as Philips-corrected lm/W, which
+accounts for Stokes shift and quantum efficiency losses.  Typical
+Philips-corrected values are 30--40\% lower than uncorrected LER.
+
+Output files use the prefix \cmd{maxR9P} instead of \cmd{maxR9}.
+
 \subsection{\texttt{-run-drop}: Multi-run with TCS axis dropping}
 
 \begin{lstlisting}[style=shell]
@@ -544,19 +627,38 @@ levels:
 
 \subsection{Example 6: Sweeping the efficacy--\texorpdfstring{$R_9$}{R9} frontier}
 
-The script \file{run-maxr9-sweep.sh} sweeps efficacy from 300 to
-430\,lm/W in steps of 10, maximizing $R_9$ at each level:
+The script \file{run-maxr9-sweep-parallel.sh} sweeps Philips-corrected
+efficacy from 200 to 320\,lm/W, maximizing $R_9$ at each level using
+10 parallel processes:
 
 \begin{lstlisting}[style=shell]
-./run-maxr9-sweep.sh
+./run-maxr9-sweep-parallel.sh          # CRI >= 80 (default)
+./run-maxr9-sweep-parallel.sh 95       # CRI >= 95
 \end{lstlisting}
 
-\subsection{Example 7: Plotting results}
+The sweep uses the Philips phosphor-converted LED loss model
+(Section~\ref{sec:philips}) so that the efficacy constraint reflects
+real-world LED physics.  Each run produces \file{maxR9P} result files.
+
+\subsection{Example 7: Single Philips-corrected run}
+
+\begin{lstlisting}[style=shell]
+$PHOTOPIC -run-maxr9-philips 2700 80 270 -scm -scmfile $SCMFILE
+\end{lstlisting}
+
+Maximizes $R_9$ at CRI $\geq$ 80 with Philips-corrected efficacy
+$\geq$ 270\,lm/W.  This is equivalent to roughly 400\,lm/W uncorrected
+LER.  The Philips model penalizes red spectral content since long-wavelength
+photons require more pump energy to produce via phosphor conversion.
+
+\subsection{Example 8: Plotting results}
 
 After running optimizations, generate publication-quality figures:
 
 \begin{lstlisting}[style=shell]
-python3 plot_spectra.py
+python3 plot_spectra.py                # forward problem spectra
+python3 plot_maxr9_sweep.py --philips  # Philips-corrected R9 frontier
+python3 plot_maxr9_sweep.py 95 --philips  # CRI >= 95
 \end{lstlisting}
 
 This produces PDF and PNG files for:
@@ -566,7 +668,8 @@ This produces PDF and PNG files for:
   \item Convergence across resolution levels
   \item Overlay of all CRI-constrained spectra
   \item Efficacy vs.\ CRI trade-off curve
-  \item $R_9$ vs.\ efficacy scatter plot
+  \item $R_9$ vs.\ efficacy Pareto frontier (uncorrected and Philips-corrected)
+  \item Individual spectrum plots at each efficacy level
 \end{itemize}
 
 %======================================================================
@@ -953,6 +1056,8 @@ Variable & Default & Purpose \\
 \cmd{*min-cri-ra*}      & 82    & Minimum CRI (Ra) constraint \\
 \cmd{*min-r9*}          & $-100$ & Minimum $R_9$ constraint \\
 \cmd{*min-efficacy*}    & 300   & Minimum efficacy (lm/W, for \cmd{-run-maxr9}) \\
+\cmd{*pump-nm*}         & $450 \times 10^{-9}$ & Blue LED pump wavelength (m) \\
+\cmd{*pump-qe*}         & 0.90  & Phosphor quantum efficiency \\
 \cmd{*num-constraints*} & 6     & Number of COBYLA constraints \\
 \cmd{l0}                & $380 \times 10^{-9}$ & Blue limit of visible spectrum (m) \\
 \cmd{l1}                & $770 \times 10^{-9}$ & Red limit of visible spectrum (m) \\
