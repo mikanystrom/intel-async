@@ -806,7 +806,15 @@ obligation.
 A system is \emph{slack elastic} if its functional behavior (the
 sequence of values produced on each output channel) is independent
 of the amount of buffering on its internal
-channels~\cite{manohar2001,cardi2011}.  Slack elasticity is a
+channels~\cite{manohar2001}.  This property has been studied
+extensively: Papadantonakis~\cite{papadantonakis2002} examined the
+precise conditions under which deterministic CHP programs are slack
+elastic, and Prakash~\cite{prakash2008} showed that the slack
+matching problem (optimally assigning buffer depths to channels in a
+slack-elastic system) is NP-complete, formulating it as a mixed
+integer linear program.
+
+Slack elasticity is a
 critical property for the verified refinement framework because it
 means that slack insertion and removal are \emph{semantics-preserving
 transformations}---the designer (or the \texttt{slacker} tool) can
@@ -2319,6 +2327,18 @@ Ph.D.\ thesis, University of Southern California, 2011.
 P.A.\ Beerel, R.O.\ Ozdag, and M.\ Ferretti,
 \textit{A Designer's Guide to Asynchronous VLSI},
 Cambridge University Press, 2010.
+
+\bibitem{papadantonakis2002}
+K.S.\ Papadantonakis,
+``What is `Deterministic CHP', and is `Slack Elasticity' That
+Useful?''
+M.S.\ thesis, California Institute of Technology, 2002.
+
+\bibitem{prakash2008}
+P.\ Prakash,
+\textit{Throughput Optimization of Quasi Delay Insensitive Circuits
+via Slack Matching},
+Ph.D.\ thesis, California Institute of Technology, 2008.
 
 \bibitem{wong2004}
 C.G.\ Wong,
