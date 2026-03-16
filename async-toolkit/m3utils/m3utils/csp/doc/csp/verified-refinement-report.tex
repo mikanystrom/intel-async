@@ -156,7 +156,7 @@ exist, and what needs to be built.
 \subsection{Fulcrum CSP Language}
 %----------------------------------------------------------------------
 
-The Fulcrum CSP dialect (sometimes called CAST) is a hardware-oriented
+The Fulcrum CSP dialect is a hardware-oriented
 process description language in the tradition of Hoare's
 CSP~\cite{hoare1985} and Martin's CHP~\cite{martin1990}; see the
 language reference manual~\cite{nystrom2025csp} for the complete
@@ -267,14 +267,15 @@ The Fulcrum CSP toolchain currently comprises the following tools:
 
 \item[\texttt{csp2verilog} (BD synthesis).]
   Java tool that converts CSP specifications to synthesizable
-  SystemVerilog with bundled-data handshake protocols.  Uses a visitor
-  pattern over the CAST AST.  Supports coverage probes and state
-  covergroups.
+  SystemVerilog with bundled-data handshake protocols.  Supports
+  coverage probes and state covergroups.
 
 \item[\texttt{Cast2Verilog} (full design synthesis).]
   Comprehensive Java tool that handles both structural (PRS-based) and
-  behavioral (CSP-based) CAST cell designs.  Generates hierarchical
-  Verilog, testbenches, and co-simulation interfaces.
+  behavioral (CSP-based) cell designs via CAST, a wrapper format
+  around Fulcrum CSP (now largely superseded by the \texttt{.sys}
+  format).  Generates hierarchical Verilog, testbenches, and
+  co-simulation interfaces.
 
 \item[\texttt{csp2gma} (QDI path).]
   Java tool that converts CSP to GMA (Graph-based Modeling and
