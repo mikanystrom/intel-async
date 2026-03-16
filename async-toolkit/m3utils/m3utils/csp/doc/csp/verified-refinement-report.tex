@@ -174,19 +174,34 @@ int(32) x;
 
 Key language features include:
 \begin{description}
-\item[Fixed-width data.]
-  Types are \texttt{int(\nonterminal{W})} for $W$-bit integers,
-  \texttt{bool}, arrays, and structures.  All widths are statically
-  known, matching the hardware target.
+\item[Hardware-targeted types.]
+  Three integer types: \texttt{int} (arbitrary precision, the
+  mathematical~$\mathbb{Z}$), \texttt{int(\nonterminal{W})} ($W$-bit
+  unsigned), and \texttt{sint(\nonterminal{W})} ($W$-bit signed two's
+  complement).  Expressions use arbitrary-precision arithmetic
+  regardless of operand types; fixed-width variables truncate on
+  assignment.  The language also supports \texttt{bool}, \texttt{string},
+  arrays, and packed structures.
 
 \item[Directional channels.]
   Channel operations are \texttt{L?x} (receive) and \texttt{R!x}
-  (send).  Each channel has a statically declared width and is used by
-  exactly two processes---one sender, one receiver.
+  (send).  Each channel has a statically declared width (\texttt{int(W)})
+  and is used by exactly two processes---one sender, one receiver.
+  The probe \texttt{\#L} tests whether a channel is ready (works on
+  both input and output ports).
+
+\item[Node ports.]
+  In addition to channels, processes may communicate via \emph{nodes}:
+  shared boolean variables accessible by multiple processes.  Nodes
+  are used for low-level signaling and hardware protocols.  The
+  protocol type framework proposed in this report applies to
+  channel-based communication; node-based interactions require
+  separate treatment.
 
 \item[Deterministic selection.]
-  The guarded command \texttt{[\,]} selects among guards based on
-  channel readiness (\emph{probes}) or data conditions:
+  The guarded command with \texttt{[\,]} separator selects among
+  boolean guards; the programmer guarantees that at most one guard is
+  true at any time:
 \begin{Verbatim}[samepage=true]
 *[[ #L -> L?x ; R!x
   [] #S -> S?y ; T!y
@@ -197,6 +212,14 @@ Key language features include:
   When the guard separator is \texttt{:} instead of \texttt{[\,]},
   the selection is nondeterministic: multiple guards may be
   simultaneously true, and the implementation chooses arbitrarily.
+  The \keyword{else} keyword may appear as the last arm, providing a
+  non-blocking fallback when no other guard is true.
+
+\item[Parallel composition.]
+  Processes run in parallel (inter-process, via the \texttt{.sys}
+  topology).  Within a single process, the comma operator
+  (\texttt{S1\,,\,S2}) provides intra-process parallel composition,
+  executing \texttt{S1} and \texttt{S2} in an arbitrary interleaving.
 
 \item[Repetition.]
   The \texttt{*[\,]} construct is an infinite loop---the normal
@@ -273,9 +296,9 @@ The Fulcrum CSP toolchain currently comprises the following tools:
 \item[\texttt{Cast2Verilog} (full design synthesis).]
   Comprehensive Java tool that handles both structural (PRS-based) and
   behavioral (CSP-based) cell designs via CAST, a wrapper format
-  around Fulcrum CSP (now largely superseded by the \texttt{.sys}
-  format).  Generates hierarchical Verilog, testbenches, and
-  co-simulation interfaces.
+  around Fulcrum CSP (the \texttt{.sys} format is an alternative).
+  Generates hierarchical Verilog, testbenches, and co-simulation
+  interfaces.
 
 \item[\texttt{csp2gma} (QDI path).]
   Java tool that converts CSP to GMA (Graph-based Modeling and
@@ -529,7 +552,8 @@ Delegation (channel passing) & Not needed (static topology) \\
 The key simplifications relative to full session types are:
 (1)~channels are unidirectional, eliminating duality from the type
 system entirely; (2)~channels are point-to-point with fixed-width
-data, eliminating delegation and polymorphism; (3)~multi-channel
+channel values (\texttt{int(W)}), eliminating delegation and
+polymorphism; (3)~multi-channel
 coordination (e.g., request before response) is handled by the
 channel dependency graph rather than by nesting send/receive in a
 single type.  These simplifications make the checking problem
@@ -729,8 +753,8 @@ data constraint, then the concrete process sends values $w_1, w_2,
 is still satisfied under $\rho$.
 
 In the Fulcrum CSP context, the primary data refinement is narrowing
-from \texttt{int} (simulation type, arbitrary precision) to
-\texttt{int(\nonterminal{W})} (synthesis type, $W$~bits).  The tool
+from \texttt{int} (the language's default arbitrary-precision type) to
+\texttt{int(\nonterminal{W})} (fixed-width, required for synthesis).  The tool
 must verify that no computation overflows the reduced width, or that
 overflow behavior matches the intended semantics.
 
@@ -1192,7 +1216,7 @@ where \texttt{bitwidth} is either a BigInt (for \texttt{int(N)}) or
 the empty list (for unbounded \texttt{int}).  The three integer type
 categories are:
 \begin{description}
-\item[\texttt{int}] --- infinite-precision signed integer (from $\mathbb{Z}$).
+\item[\texttt{int}] --- arbitrary-precision integer ($\mathbb{Z}$).
 \item[\texttt{int(N)}] --- $N$-bit unsigned, range $0 \ldots 2^N-1$.
 \item[\texttt{sint(N)}] --- $N$-bit signed two's complement,
   range $-2^{N-1} \ldots 2^{N-1}-1$.
@@ -2066,8 +2090,8 @@ how multiparty session types correspond to communicating automata,
 enabling automated verification of multiparty protocols.
 
 Our protocol types are a specialization of binary session types to the
-hardware domain: point-to-point channels with fixed-width data and
-no delegation.  The key simplification is that our protocols are
+hardware domain: point-to-point channels with fixed-width channel
+values and no delegation.  The key simplification is that our protocols are
 regular (no recursive types beyond Kleene star), which makes
 conformance checking decidable by finite automaton inclusion rather
 than the more complex type-checking algorithms needed for general
