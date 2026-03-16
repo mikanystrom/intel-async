@@ -1081,42 +1081,103 @@ code.  The tool assists by:
 %----------------------------------------------------------------------
 
 Data refinement narrows the abstract types used in the specification
-to the concrete bit widths required for synthesis.
+to the concrete bit widths required for synthesis.  The Fulcrum CSP
+compiler (\texttt{cspc}) already performs substantial data refinement
+automatically during its 9-pass compilation pipeline; the verified
+framework aims to make the correctness of this refinement explicit
+and checkable.
 
-\subsubsection{Type narrowing}
+\subsubsection{Existing infrastructure in \texttt{cspc}}
 
-The specification may use \texttt{int} (unbounded) or \texttt{int(32)}
-throughout.  Data refinement introduces the minimal widths:
-
+The \texttt{cspc} compiler represents integer types as 5-element
+S-expressions:
 \begin{Verbatim}[samepage=true]
-// Before: all 32-bit
-var de_imm : channel(32);
-
-// After: immediate is 16-bit (MIPS I-type)
-var de_imm : channel(16);
+(integer <const?> <signed?> <bitwidth> <range>)
 \end{Verbatim}
+where \texttt{bitwidth} is either a BigInt (for \texttt{int(N)}) or
+the empty list (for unbounded \texttt{int}).  The three integer type
+categories are:
+\begin{description}
+\item[\texttt{int}] --- infinite-precision signed integer (from $\mathbb{Z}$).
+\item[\texttt{int(N)}] --- $N$-bit unsigned, range $0 \ldots 2^N-1$.
+\item[\texttt{sint(N)}] --- $N$-bit signed two's complement,
+  range $-2^{N-1} \ldots 2^{N-1}-1$.
+\end{description}
 
-\subsubsection{Proof obligations}
+Width determination is deferred to \textbf{compile6!}, the sixth
+compiler pass, which performs:
+\begin{enumerate}
+\item \textbf{Table construction} (\texttt{make-the-tables}).  Builds
+  per-variable tables of all assignments, uses, declared ranges, and
+  port (channel) associations.
 
-The tool checks:
+\item \textbf{Range seeding} (\texttt{seed-integer-ranges!}).
+  Initializes the range table from user-declared types.  Channel
+  receive operations seed ranges from the channel's bit width.
+
+\item \textbf{Fixed-point interval arithmetic}
+  (\texttt{close-integer-ranges!}).  Iterates up to 10 rounds,
+  refining each variable's range by computing the union of its
+  assignment ranges (via interval arithmetic on all RHS expressions)
+  intersected with its declared range.  The interval operations cover
+  arithmetic (\texttt{range-+}, \texttt{range-*}), bitwise
+  (\texttt{range-\&}, \texttt{range-<<}), and extraction
+  (\texttt{bits}).
+
+\item \textbf{Type proposal} (\texttt{propose-types!}).
+  Calls \texttt{get-smallest-type} on each variable's converged range
+  to choose the narrowest concrete type.  Unsigned is preferred;
+  signed is used only when the range includes negative values.
+  Variables exceeding 128~bits fall back to dynamic (unbounded).
+\end{enumerate}
+
+The code generator then classifies each integer into three categories:
+\begin{description}
+\item[\texttt{native}] --- fits in a machine word ($\leq 64$ bits).
+  Assignments may need bit-masking (\texttt{Word.And(rhs, Mask)}).
+\item[\texttt{wide}] --- fixed width $> 64$ bits.  Stored as
+  \texttt{Mpz.T} with \texttt{ForceRange} calls.
+\item[\texttt{dynamic}] --- unbounded \texttt{int}.  No truncation.
+\end{description}
+
+\subsubsection{Known limitations}
+
+The current implementation has a documented limitation (noted in
+\texttt{codegen-m3.scm}): it does not distinguish between
+\emph{user-declared} widths (where truncation is intentional, per C
+semantics) and \emph{compiler-inferred} widths (where truncation
+would indicate a compiler bug).  Both cases use the same masking
+logic.  In a verified framework, these two cases should be separated:
+user-declared truncation is a design choice that the protocol checker
+accepts, while inferred truncation that actually fires would be a
+violation of the range analysis soundness.
+
+Additionally, the interval arithmetic for bitwise operations is sound
+but not always tight (conservative over-approximation), and there is
+a noted potential bug in the handling of \texttt{bits} as an LHS
+target (\texttt{interval.scm}).
+
+\subsubsection{Type narrowing in the verified framework}
+
+The verified framework does not replace \texttt{cspc}'s existing
+range analysis---it wraps it with explicit proof obligations:
 
 \begin{enumerate}
 \item \textbf{Width consistency.}  Every assignment, arithmetic
-  operation, and channel communication is type-correct at the new
-  widths.  No implicit truncation occurs unless the designer
-  explicitly acknowledges it.
+  operation, and channel communication is type-correct at the
+  proposed widths.  The range analysis already establishes this; the
+  verification step makes the argument explicit and checkable.
 
 \item \textbf{Protocol preservation.}  The protocol on each channel
   is preserved under the width change.  For simple
   \texttt{\{ v \}*} protocols this is automatic (the sequence of
   communications is unchanged, only the value domain narrows).
-  For protocols with data constraints, the tool must verify that the
-  constraints are still satisfiable at the narrower width.
 
-\item \textbf{Value-range analysis.}  Optional but recommended: the
-  tool performs range analysis to verify that no computation exceeds
-  the declared width.  This is a standard abstract interpretation
-  over integer intervals.
+\item \textbf{Truncation audit.}  For each masking operation in the
+  generated code, the tool reports whether it is (a)~provably
+  unreachable (range analysis guarantees no overflow), (b)~intentional
+  truncation (user declared a narrow type), or (c)~a potential problem
+  (inferred type may be too narrow).
 \end{enumerate}
 
 \subsubsection{Structure refinement}
@@ -1133,10 +1194,17 @@ structure EmData = (int(32) result; int(32) store_data;
                     int(32) target);
 \end{Verbatim}
 
-This packing is a data refinement from separate channels to a single
-structure channel.  The proof obligation is that the packing and
-unpacking are inverses: if the sender packs fields into the structure
-and the receiver unpacks them, the values are preserved.
+The \texttt{cspc} compiler handles structure packing in compile3!
+(\texttt{insert-pack-copies}, \texttt{insert-unpack-copies}), which
+introduces temporaries for serialization.  These temporaries start as
+unbounded \texttt{int} and are narrowed in compile6! using the
+struct's total bit width (via \texttt{structdecl-width}).
+
+The proof obligation is that the packing and unpacking are inverses:
+if the sender packs fields into the structure and the receiver unpacks
+them, the values are preserved.  The range analysis provides this
+guarantee when the struct fields' ranges fit within their declared
+widths.
 
 %----------------------------------------------------------------------
 \subsection{Stage 4: Implementation}
@@ -2010,6 +2078,31 @@ address compositionality for large systems---each design is verified
 as a whole.
 
 %----------------------------------------------------------------------
+\subsection{Data-Driven Decomposition (Wong)}
+%----------------------------------------------------------------------
+
+Wong's data-driven decomposition (DDD)~\cite{wong2004} automates the
+most labor-intensive step in Martin's methodology: decomposing a
+sequential CHP program into a network of fine-grained concurrent
+processes, each implementable as a single PCHB pipeline stage.  DDD
+analyzes data dependencies in the sequential program and partitions it
+into concurrent modules, preserving trace equivalence with the
+original.  The method was validated on the instruction-fetch unit of
+the Lutonium asynchronous 8051 microcontroller~\cite{martin2003}.
+
+DDD operates at exactly the boundary addressed by our ``process
+decomposition'' refinement step (Section~\ref{sec:refinement-steps}):
+it takes a monolithic specification and produces a composed system
+whose correctness relies on the same trace-equivalence argument.  The
+key difference is that DDD is fully automatic (it \emph{computes} the
+decomposition), while our framework verifies designer-written
+decompositions.  The two approaches are complementary: DDD could serve
+as an automated decomposition engine within the verified framework,
+with the protocol type checker verifying the result.  Conversely, the
+protocol type system could provide the correctness certificate that
+DDD's decomposition algorithm currently establishes by construction.
+
+%----------------------------------------------------------------------
 \subsection{CHP Verification}
 %----------------------------------------------------------------------
 
@@ -2226,6 +2319,18 @@ Ph.D.\ thesis, University of Southern California, 2011.
 P.A.\ Beerel, R.O.\ Ozdag, and M.\ Ferretti,
 \textit{A Designer's Guide to Asynchronous VLSI},
 Cambridge University Press, 2010.
+
+\bibitem{wong2004}
+C.G.\ Wong,
+\textit{High-Level Synthesis and Rapid Prototyping of Asynchronous
+VLSI Systems},
+Ph.D.\ thesis, California Institute of Technology, 2004.
+
+\bibitem{martin2003}
+A.J.\ Martin, M.\ Nystr\"om, and C.G.\ Wong,
+``Three Generations of Asynchronous Microprocessors,''
+\textit{IEEE Design \& Test of Computers}, vol.\ 20, no.\ 6,
+pp.\ 9--17, 2003.
 
 \bibitem{cortadella2002}
 J.\ Cortadella, M.\ Kishinevsky, A.\ Kondratyev, L.\ Lavagno,
