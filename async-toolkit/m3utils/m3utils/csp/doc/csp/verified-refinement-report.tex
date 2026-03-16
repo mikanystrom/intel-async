@@ -1,0 +1,2162 @@
+% Copyright (c) 2025 Intel Corporation.  All rights reserved.  See the file COPYRIGHT for more information.
+% SPDX-License-Identifier: Apache-2.0
+
+\documentclass[11pt]{article}
+
+% Page layout
+\usepackage[letterpaper, margin=1in]{geometry}
+\setlength{\headheight}{14pt}
+\usepackage{parskip}
+\setlength{\parindent}{0pt}
+
+% Typography
+\usepackage{fancyvrb}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+
+% Code listings
+\usepackage{listings}
+\lstset{
+    basicstyle=\ttfamily\small,
+    columns=fullflexible,
+    keepspaces=true,
+    showstringspaces=false,
+    breaklines=true,
+    frame=none,
+    xleftmargin=2em,
+}
+
+% Hyperlinks
+\usepackage[colorlinks=true, linkcolor=blue, urlcolor=blue, citecolor=blue]{hyperref}
+
+% Headers and footers
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\textit{Verified Refinement-Based Design Flow}}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% Custom commands (matching csp.tex / cspbuild.tex)
+\newcommand{\keyword}[1]{\texttt{\textbf{#1}}}
+\newcommand{\nonterminal}[1]{\textit{#1}}
+
+% Theorem environments
+\newtheorem{theorem}{Theorem}[section]
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{proposition}[theorem]{Proposition}
+
+\title{\textbf{Verified Refinement-Based Design Flow \\
+for the Fulcrum CSP Toolchain} \\[0.5em]
+\large From Specification to Silicon via Compositional Proof}
+\author{Mika Nystr\"om \and Claude (Anthropic)}
+\date{DRAFT Version 0.1\\
+\today}
+
+\begin{document}
+
+\maketitle
+
+\vspace{1em}
+
+\noindent
+ Copyright \copyright\ 2025 Intel Corporation
+
+ Licensed under the Apache License, Version 2.0 (the ``License'');
+ you may not use this file except in compliance with the License.
+ You may obtain a copy of the License at
+
+ {\tt http://www.apache.org/licenses/LICENSE-2.0}
+
+\tableofcontents
+\newpage
+
+%======================================================================
+\section{Introduction}
+\label{sec:intro}
+%======================================================================
+
+Asynchronous circuit design promises compelling advantages---lower
+power, better modularity, natural tolerance of process variation---but
+it imposes a correctness burden that synchronous design avoids.
+Without a global clock to synchronize all components, the designer
+must ensure that every handshake protocol is correct, every pipeline
+stage communicates in the right order, and no combination of
+interleavings leads to deadlock.  Getting this right is the central
+challenge of the field.
+
+The standard approach to this challenge is \emph{post-hoc model
+checking}: design the circuit, then feed it to a state-space explorer
+that exhaustively checks for deadlock.  FDR4~\cite{fdr4}, the
+canonical tool for CSP refinement checking, works this way.  So does
+the MDD-based deadlock checker we built for the Fulcrum CSP toolchain,
+which scales to over a thousand dining philosophers using symbolic
+saturation~\cite{fv-report}.
+
+Post-hoc model checking works, but it is fundamentally the wrong
+approach.  Here is why:
+
+\begin{enumerate}
+\item \textbf{It reconstructs what the designer already knows.}
+  A skilled designer who decomposes a specification into pipeline
+  stages does so \emph{because} the decomposition preserves the
+  protocol.  The designer's knowledge of \emph{why} the design is
+  correct is lost when the design is handed to a model checker, which
+  must rediscover the correctness argument by brute-force exploration
+  of the state space.
+
+\item \textbf{It does not scale to the design, but to the state space.}
+  The cost of model checking depends on the product of all process
+  state spaces, not on the complexity of the design itself.
+  A clean, well-structured design with 50~processes may have the same
+  state-space explosion as a tangled one.  The model checker does not
+  exploit the structure that makes the design correct.
+
+\item \textbf{It provides no guidance for repair.}
+  When the model checker finds a deadlock, it provides a
+  counterexample trace---a sequence of events leading to the deadlocked
+  state.  This trace tells the designer \emph{that} something is wrong,
+  but not \emph{what} to fix.  The designer must still reason about
+  protocols to find the repair, then re-run the model checker to
+  verify it.
+
+\item \textbf{It cannot verify implementations.}
+  Model checking operates on the CSP-level abstraction.
+  It cannot verify that the SystemVerilog or production-rule
+  implementation faithfully realizes the CSP specification.
+  A separate verification gap exists between the CSP model and the
+  circuit.
+\end{enumerate}
+
+The thesis of this report is that correctness proof obligations should
+be generated \emph{during} the design process, not reconstructed
+afterward.  Each design step---decomposing a process, refining a data
+type, inserting a pipeline stage, mapping to an implementation
+technology---should carry a \emph{local} proof obligation that a tool
+can check.  If every step is locally correct, the overall design is
+globally correct by composition.
+
+This is not a new idea.  It is the essence of Alain Martin's
+synthesis methodology~\cite{martin1990}, which derives circuits from
+specifications via a sequence of semantics-preserving
+transformations.  It is the principle behind Event-B's refinement
+calculus~\cite{abrial2010}.  It underlies session types for
+concurrent programming~\cite{honda1998,kobayashi2006}.  What is new
+here is the application of this principle to a \emph{concrete,
+existing} toolchain---the Fulcrum CSP tools---with a concrete proposal
+for the annotations, checks, and tools needed to make it work.
+
+The scope of this report covers the entire path from initial
+specification to final implementation:
+\begin{itemize}
+\item Bundled-data (BD) asynchronous circuits via \texttt{csp2verilog}
+\item Synchronous RTL via dehandshaking
+\item Quasi-delay-insensitive (QDI) pipeline circuits via
+  \texttt{csp2gma} and production rules
+\end{itemize}
+We describe what annotations the designer adds to \texttt{.csp} and
+\texttt{.sys} files, what the tool checks at each step, what tools
+exist, and what needs to be built.
+
+%======================================================================
+\section{The Current Toolchain}
+\label{sec:current}
+%======================================================================
+
+%----------------------------------------------------------------------
+\subsection{Fulcrum CSP Language}
+%----------------------------------------------------------------------
+
+The Fulcrum CSP dialect (sometimes called CAST) is a hardware-oriented
+process description language in the tradition of Hoare's
+CSP~\cite{hoare1985} and Martin's CHP~\cite{martin1990}.  A process
+is a sequential program that communicates with its environment via
+directional channels:
+
+\begin{Verbatim}[samepage=true]
+int(32) x;
+*[ L?x ;                        // receive from channel L
+   x = x + 1 ;
+   R!x                          // send on channel R
+]
+\end{Verbatim}
+
+Key language features include:
+\begin{description}
+\item[Fixed-width data.]
+  Types are \texttt{int(\nonterminal{W})} for $W$-bit integers,
+  \texttt{bool}, arrays, and structures.  All widths are statically
+  known, matching the hardware target.
+
+\item[Directional channels.]
+  Channel operations are \texttt{L?x} (receive) and \texttt{R!x}
+  (send).  Each channel has a statically declared width and is used by
+  exactly two processes---one sender, one receiver.
+
+\item[Deterministic selection.]
+  The guarded command \texttt{[\,]} selects among guards based on
+  channel readiness (\emph{probes}) or data conditions:
+\begin{Verbatim}[samepage=true]
+*[[ #L -> L?x ; R!x
+  :  #S -> S?y ; T!y
+]]
+\end{Verbatim}
+
+\item[Nondeterministic selection.]
+  The \texttt{:[\,]:} construct provides internal (nondeterministic)
+  choice, used when the environment cannot observe which branch is
+  taken.
+
+\item[Repetition.]
+  The \texttt{*[\,]} construct is an infinite loop---the normal
+  operating mode of a hardware process.
+
+\item[Structures.]
+  The \keyword{structure} declaration packs multiple fields for
+  transmission over a single channel:
+\begin{Verbatim}[samepage=true]
+structure EmData = (int(32) result; int(5) dest; int(1) rw);
+EmData em;
+em::result = alu_out;
+em_data!em
+\end{Verbatim}
+\end{description}
+
+%----------------------------------------------------------------------
+\subsection{The \texttt{.sys} System Description Format}
+%----------------------------------------------------------------------
+
+Multi-process systems are described in \texttt{.sys} files, which
+declare the channels, process types, and instances.  Each process type
+references an external \texttt{.csp} file and declares its ports with
+directions and widths:
+
+\begin{Verbatim}[samepage=true]
+system ProdCons;
+  var c : channel(32);
+
+  process Producer = "producer.csp"
+    port out R : channel(32);
+
+  process Consumer = "consumer.csp"
+    port in L : channel(32);
+begin
+  var p : Producer(R => c);
+  var q : Consumer(L => c);
+end.
+\end{Verbatim}
+
+The instance section binds each process port to a system-level
+channel using \texttt{\nonterminal{port} => \nonterminal{channel}}
+syntax.  The system builder validates that all widths match, all ports
+are bound, and each channel has exactly one sender and one receiver.
+
+%----------------------------------------------------------------------
+\subsection{Existing Tools}
+%----------------------------------------------------------------------
+
+The Fulcrum CSP toolchain currently comprises the following tools:
+
+\begin{description}
+\item[\texttt{cspfe} (parser).]
+  Lex/Yacc-based parser that reads \texttt{.csp} source files and
+  emits S-expression ASTs.  The AST is defined by the
+  \texttt{cspgrammar} Modula-3 library.
+
+\item[\texttt{cspc} (compiler/driver).]
+  The main tool.  With \texttt{-scm} it enters a Scheme REPL (via the
+  embedded \texttt{mscheme} interpreter) that drives a 9-pass
+  compilation pipeline: parsing, type checking, optimization, and code
+  generation of Modula-3 state machines.
+
+\item[\texttt{cspbuild} (system builder).]
+  A Scheme-level build system that reads \texttt{.sys} files,
+  orchestrates compilation of each process, and generates simulator
+  binaries.  Entry point: \texttt{(build-system!\ "file.sys")}.
+
+\item[\texttt{csp2verilog} (BD synthesis).]
+  Java tool that converts CSP specifications to synthesizable
+  SystemVerilog with bundled-data handshake protocols.  Uses a visitor
+  pattern over the CAST AST.  Supports coverage probes and state
+  covergroups.
+
+\item[\texttt{Cast2Verilog} (full design synthesis).]
+  Comprehensive Java tool that handles both structural (PRS-based) and
+  behavioral (CSP-based) CAST cell designs.  Generates hierarchical
+  Verilog, testbenches, and co-simulation interfaces.
+
+\item[\texttt{csp2gma} (QDI path).]
+  Java tool that converts CSP to GMA (Graph-based Modeling and
+  Analysis) format, an intermediate representation for
+  quasi-delay-insensitive circuit synthesis.
+
+\item[\texttt{slacker} (slack optimization).]
+  Java tool that uses linear programming (via GLPK) to compute optimal
+  buffer placements and slack assignments.  Formulates the
+  slack-matching problem as an LP with per-channel constraints and a
+  cost function minimizing area overhead.
+
+\item[Formal verification.]
+  The MDD-based deadlock checker (\texttt{check-deadlock-saturation!})
+  uses Multi-valued Decision Diagrams with a saturation algorithm for
+  symbolic state-space exploration.  It scales to 1024-process dining
+  philosopher systems.  An explicit-state checker with partial-order
+  reduction (\texttt{check-deadlock!}) handles smaller systems with
+  counterexample generation.
+\end{description}
+
+%----------------------------------------------------------------------
+\subsection{The MiniMIPS as Running Example}
+\label{sec:minimips}
+%----------------------------------------------------------------------
+
+Throughout this report we use the MiniMIPS sequential processor as a
+running example.  It is a 5-stage pipeline (Fetch, Decode, Execute,
+MemStage, Writeback) with two server processes (RegFile, DataMem)---7
+processes connected by 26 channels.  The system topology is declared
+in \texttt{minimips.sys}:
+
+\begin{Verbatim}[samepage=true]
+system MiniMIPS;
+  // Pipeline channels: Fetch -> Decode
+  var fd_pc    : channel(32);
+  var fd_instr : channel(32);
+
+  // Pipeline channels: Decode -> Execute
+  var de_pc     : channel(32);
+  var de_instr  : channel(32);
+  var de_rs_val : channel(32);
+  var de_rt_val : channel(32);
+  var de_imm    : channel(32);
+
+  // Execute -> MemStage (struct-packed)
+  var em_data : channel(107);
+
+  // MemStage -> Writeback
+  var mw_result : channel(32);
+  var mw_dest   : channel(5);
+  // ... (20 more channels)
+
+  // Feedback: Writeback -> Fetch
+  var wb_taken  : channel(1);
+  var wb_target : channel(32);
+  // ...
+begin
+  var fetch     : Fetch    (fd_pc => fd_pc, ...);
+  var decode    : Decode   (...);
+  var execute   : Execute  (...);
+  var memstage  : MemStage (...);
+  var writeback : Writeback(...);
+  var regfile   : RegFile  (...);
+  var datamem   : DataMem  (...);
+end.
+\end{Verbatim}
+
+The MiniMIPS exhibits the key structural features that our verification
+framework must handle: linear pipeline flow, feedback channels (branch
+resolution), server processes with multiple clients (RegFile serves
+both Decode ports), and structure-packed wide channels.
+
+%----------------------------------------------------------------------
+\subsection{Current Tool Flow}
+%----------------------------------------------------------------------
+
+The current path from specification to implementation is:
+
+\begin{Verbatim}[samepage=true]
+                  .csp sources        .sys topology
+                       |                    |
+                       v                    v
+                    cspfe              sys parser
+                       |                    |
+                       v                    v
+                  S-expr AST          system graph
+                       |                    |
+              +--------+--------+     +-----+-----+
+              |        |        |     |           |
+              v        v        v     v           v
+           cspc    csp2verilog  csp2gma  slacker   MDD checker
+              |        |        |     |           |
+              v        v        v     v           v
+        M3 simulator  SV BD    GMA   slack LP   deadlock
+        binary        netlist  IR    solution   result
+\end{Verbatim}
+
+The critical observation is that verification is a \emph{separate
+branch}---it operates on the same source but shares no information
+with the synthesis path.  The model checker does not know that the
+designer structured the pipeline to preserve protocols; the synthesis
+tool does not know that the model checker verified deadlock freedom.
+The two paths are disconnected.
+
+%======================================================================
+\section{The Verified Refinement Framework}
+\label{sec:framework}
+%======================================================================
+
+This section presents the theoretical framework for verified
+refinement-based design.  The core idea is that each channel in a
+system carries a \emph{protocol type} that specifies the sequence of
+communications permitted on that channel.  If every process conforms
+to its channel protocols, and the protocols at each channel's two
+endpoints are dual, then the composed system is deadlock-free
+\emph{by construction}.  Design proceeds by a sequence of
+refinement steps, each of which preserves protocol conformance and is
+checked locally.
+
+%----------------------------------------------------------------------
+\subsection{Protocol Types on Channels}
+\label{sec:protocol-types}
+%----------------------------------------------------------------------
+
+A \emph{protocol type} describes the permitted sequence of
+communications on a channel from the perspective of one endpoint.
+Protocol types are regular expressions over send and receive actions,
+with data constraints.
+
+\begin{definition}[Protocol Type]
+\label{def:protocol}
+A protocol type $\pi$ is defined by the grammar:
+\[
+\pi ::= \texttt{!}\tau \mid \texttt{?}\tau \mid
+        \pi_1 \mathbin{;} \pi_2 \mid
+        \pi_1 \mid \pi_2 \mid
+        \pi^{*} \mid \texttt{end}
+\]
+where $\tau$ is a data type (possibly with constraints), $\mathbin{;}$
+is sequencing, $\mid$ is choice, ${}^{*}$ is repetition, and
+\texttt{end} is the terminated protocol.
+\end{definition}
+
+We propose the following concrete syntax for protocol annotations in
+\texttt{.sys} files:
+
+\begin{Verbatim}[samepage=true]
+var c : channel(32) protocol { !x ; ?ack }*;
+\end{Verbatim}
+
+This declares a channel where the sender repeatedly sends a 32-bit
+value and then receives an acknowledgment.  The protocol is from the
+sender's perspective; the receiver sees the dual protocol
+\texttt{\{ ?x ; !ack \}*}.
+
+More examples:
+
+\begin{Verbatim}[samepage=true]
+// Simple data channel: sender sends one value per handshake
+var data : channel(32) protocol { !v }*;
+
+// Request-response: sender sends request, receives response
+var rr : channel(32) protocol { !req ; ?resp }*;
+
+// Conditional: branch on data value
+var ctrl : channel(1) protocol { !b ;
+    [ b=0 -> !payload32 ; ?ack
+    | b=1 -> end ] }*;
+\end{Verbatim}
+
+\subsubsection{Protocol duality}
+
+The dual of a protocol $\pi$, written $\overline{\pi}$, is obtained by
+swapping every send with a receive and vice versa:
+
+\begin{align*}
+\overline{\texttt{!}\tau} &= \texttt{?}\tau \\
+\overline{\texttt{?}\tau} &= \texttt{!}\tau \\
+\overline{\pi_1 \mathbin{;} \pi_2} &=
+  \overline{\pi_1} \mathbin{;} \overline{\pi_2} \\
+\overline{\pi_1 \mid \pi_2} &=
+  \overline{\pi_1} \mid \overline{\pi_2} \\
+\overline{\pi^{*}} &= (\overline{\pi})^{*} \\
+\overline{\texttt{end}} &= \texttt{end}
+\end{align*}
+
+Every channel must have dual protocols at its two endpoints: if the
+sender's protocol is $\pi$, the receiver's protocol must be
+$\overline{\pi}$.
+
+\subsubsection{Protocol conformance}
+
+A process \emph{conforms} to its port protocols if, for every
+reachable state, the next communication on each port is consistent
+with the protocol type declared for that port.  Formally:
+
+\begin{definition}[Protocol Conformance]
+\label{def:conformance}
+Process $P$ with ports $p_1, \ldots, p_n$ having protocol types
+$\pi_1, \ldots, \pi_n$ \emph{conforms} to its protocols if, for every
+reachable state $s$ of $P$ and every port $p_i$, the sequence of
+communications performed by $P$ on $p_i$ up to state $s$ is a prefix
+of some word in $\mathcal{L}(\pi_i)$, the language of protocol~$\pi_i$.
+\end{definition}
+
+Protocol conformance is a \emph{local} property---it can be checked
+for each process independently, without composing it with the rest of
+the system.  This is the key to scalability.
+
+\subsubsection{Relationship to session types}
+
+Protocol types as defined here are closely related to \emph{binary
+session types}~\cite{honda1998}.  The key correspondences are:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{Session types} & \textbf{Protocol types} \\
+\midrule
+Output type $!\tau.\sigma$ & $\texttt{!}\tau \mathbin{;} \pi$ \\
+Input type $?\tau.\sigma$ & $\texttt{?}\tau \mathbin{;} \pi$ \\
+Selection $\oplus\{l_i: \sigma_i\}$ & Choice $\pi_1 \mid \pi_2$ \\
+Branching $\&\{l_i: \sigma_i\}$ & Dual choice \\
+Recursion $\mu X.\sigma$ & Repetition $\pi^{*}$ \\
+End & \texttt{end} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The simplification relative to full session types is that our channels
+are point-to-point and carry fixed-width data, which eliminates the
+need for delegation (channel passing) and polymorphism.  This
+simplification is precisely what makes the checking problem decidable
+and efficient---protocol conformance reduces to language inclusion over
+regular languages.
+
+%----------------------------------------------------------------------
+\subsection{Compositional Deadlock-Freedom}
+\label{sec:deadlock-freedom}
+%----------------------------------------------------------------------
+
+The protocol type system enables a compositional deadlock-freedom
+theorem that avoids global state-space exploration entirely.
+
+\begin{definition}[Channel Dependency Graph]
+\label{def:cdg}
+The \emph{channel dependency graph} $G = (V, E)$ of a system has one
+vertex per channel.  There is an edge $(c_1, c_2)$ if some process
+performs an operation on $c_2$ that depends on the result of an
+operation on $c_1$---that is, the process must complete a communication
+on $c_1$ before it can initiate a communication on $c_2$.
+\end{definition}
+
+\begin{theorem}[Compositional Deadlock Freedom]
+\label{thm:deadlock-free}
+Let $S = P_1 \| P_2 \| \cdots \| P_n$ be a system of processes
+communicating on channels $c_1, \ldots, c_m$.  If:
+\begin{enumerate}
+\item[(a)] Every process $P_i$ conforms to its port protocols
+  (Definition~\ref{def:conformance}).
+\item[(b)] Every channel $c_j$ has dual protocols at its two endpoints.
+\item[(c)] The channel dependency graph $G$ (Definition~\ref{def:cdg})
+  is acyclic.
+\end{enumerate}
+Then $S$ is deadlock-free.
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+Suppose for contradiction that $S$ reaches a deadlocked state~$s$
+where every process is blocked waiting on some channel.  Since $G$ is
+acyclic, it has a topological ordering $c_{i_1}, \ldots, c_{i_m}$.
+Consider the channel $c_{i_1}$ that is first in this ordering.
+The process $P$ that is blocked waiting on $c_{i_1}$ has no prior
+dependency (by the topological ordering), so it is ready to
+communicate on $c_{i_1}$.  By protocol conformance~(a), $P$'s next
+action on $c_{i_1}$ matches the protocol.  By duality~(b), the other
+endpoint's process $Q$ expects the dual action.  By protocol
+conformance of $Q$, $Q$ is ready for this action (since $Q$'s prior
+dependencies are all on channels later in the ordering, which
+contradicts $c_{i_1}$ being first).  But then $P$ and $Q$ can
+communicate on $c_{i_1}$, contradicting the assumption that $s$ is
+deadlocked. \qed
+\end{proof}
+
+\subsubsection{Handling cycles}
+
+Many real systems have cyclic channel dependencies.  The MiniMIPS has
+a cycle through the Writeback$\to$Fetch feedback channels.  When the
+channel dependency graph contains cycles, the compositional theorem
+does not apply directly, and the designer must break the cycle.
+There are several strategies:
+
+\begin{description}
+\item[Slack insertion.]
+  Adding a buffer (slack) on a channel in the cycle can break the
+  dependency by ensuring that one endpoint is always ready.  A channel
+  with slack $d \geq 1$ allows the sender to proceed without waiting
+  for the receiver (up to $d$ pending values), breaking the
+  synchronous dependency.
+
+\item[Asymmetric ordering.]
+  The classic solution for dining philosophers: one process in the
+  cycle acquires its channels in a different order, breaking the
+  circular wait.
+
+\item[Localized model checking.]
+  For cycles that cannot be broken structurally, the system can
+  extract the cycle subgraph and apply model checking only to the
+  processes involved in the cycle.  This is still compositional: the
+  acyclic portion is verified by the protocol type system, and only the
+  cyclic core requires state-space exploration.
+\end{description}
+
+\subsubsection{Relationship to prior work}
+
+The compositional deadlock-freedom theorem draws on several lines of
+work:
+
+\begin{itemize}
+\item Kobayashi's type systems for deadlock-freedom in the
+  $\pi$-calculus~\cite{kobayashi2006} assign ``obligation levels'' and
+  ``capability levels'' to channels to ensure acyclic dependency.  Our
+  channel dependency graph is the explicit version of this implicit
+  ordering.
+
+\item Padovani's deadlock-freedom by typing~\cite{padovani2014}
+  extends Kobayashi's work to more general topologies.  Our approach
+  is less general (we require explicit acyclicity checking) but more
+  directly applicable to hardware designs where the topology is
+  statically known.
+
+\item The ``communication closure'' condition in rely-guarantee
+  reasoning~\cite{jones1983} ensures that processes can be verified
+  independently.  Protocol conformance is our version of this
+  condition.
+\end{itemize}
+
+%----------------------------------------------------------------------
+\subsection{Refinement Steps}
+\label{sec:refinement-steps}
+%----------------------------------------------------------------------
+
+Design proceeds by a sequence of refinement steps, each of which
+transforms the system while preserving its essential properties.
+Each step generates a local proof obligation that a tool can check.
+
+\subsubsection{Process decomposition}
+
+The most common refinement step is splitting a single process into
+two or more parallel sub-processes connected by new internal channels.
+
+\begin{definition}[Process Decomposition]
+A process $P$ with ports $\{p_1, \ldots, p_n\}$ is decomposed into
+$P_1 \| P_2$ with:
+\begin{itemize}
+\item $P_1$ has ports $\{p_1, \ldots, p_k\} \cup \{q_1, \ldots, q_r\}$
+\item $P_2$ has ports $\{p_{k+1}, \ldots, p_n\} \cup \{\bar{q}_1,
+  \ldots, \bar{q}_r\}$
+\item $q_1, \ldots, q_r$ are new internal channels connecting $P_1$
+  to $P_2$, with $\bar{q}_i$ being the dual endpoint of $q_i$.
+\end{itemize}
+\end{definition}
+
+The proof obligation for process decomposition is \emph{trace
+equivalence}: the externally visible behavior of $P_1 \| P_2$ (hiding
+the internal channels $q_1, \ldots, q_r$) must equal the behavior of
+the original process~$P$.  That is:
+\[
+P =_{\mathcal{T}} (P_1 \| P_2) \setminus \{q_1, \ldots, q_r\}
+\]
+
+In practice, we check a weaker condition that is sufficient for
+correctness: $P_1$ and $P_2$ each conform to their port protocols
+(including the new internal channels), the internal channels have dual
+protocols, and the augmented channel dependency graph remains acyclic
+(or any new cycles are handled by slack or localized checking).
+
+\textbf{Example.} Consider a monolithic pipeline process that reads
+from input channel~$L$, processes the data, and writes to output
+channel~$R$:
+
+\begin{Verbatim}[samepage=true]
+// Monolithic version
+int(32) x;
+*[ L?x ; x = transform(x) ; R!x ]
+\end{Verbatim}
+
+Decompose into two stages:
+
+\begin{Verbatim}[samepage=true]
+// Stage 1
+int(32) x;
+*[ L?x ; x = partial_transform(x) ; M!x ]
+
+// Stage 2
+int(32) x;
+*[ M?x ; x = remaining_transform(x) ; R!x ]
+\end{Verbatim}
+
+The proof obligation is that \texttt{partial\_transform} composed with
+\texttt{remaining\_transform} equals \texttt{transform} for all
+inputs, and that the internal channel~$M$ has matching dual protocols
+at its endpoints.
+
+\subsubsection{Data refinement}
+
+Data refinement replaces an abstract data representation with a
+concrete one.  In hardware terms, this is the step from ``this channel
+carries an integer'' to ``this channel carries a 32-bit two's
+complement value.''
+
+\begin{definition}[Data Refinement]
+A data refinement replaces type $\tau_{\text{abs}}$ with
+$\tau_{\text{conc}}$ where there exists a representation function
+$\rho : \tau_{\text{conc}} \to \tau_{\text{abs}}$ that is surjective
+(every abstract value has at least one concrete representation).
+\end{definition}
+
+The proof obligation is that the protocol is preserved: if the
+abstract process sends values $v_1, v_2, \ldots$ satisfying some
+data constraint, then the concrete process sends values $w_1, w_2,
+\ldots$ such that $\rho(w_i) = v_i$ for all $i$, and the constraint
+is still satisfied under $\rho$.
+
+In the Fulcrum CSP context, the primary data refinement is narrowing
+from \texttt{int} (simulation type, arbitrary precision) to
+\texttt{int(\nonterminal{W})} (synthesis type, $W$~bits).  The tool
+must verify that no computation overflows the reduced width, or that
+overflow behavior matches the intended semantics.
+
+\subsubsection{Channel splitting}
+
+Channel splitting replaces a single wide channel with multiple
+narrower channels.  This is common when a structure-packed channel is
+decomposed into its constituent fields.
+
+\begin{Verbatim}[samepage=true]
+// Before: single 107-bit structure channel
+var em_data : channel(107) protocol { !em }*;
+
+// After: three separate channels
+var em_result : channel(32) protocol { !result }*;
+var em_dest   : channel(5)  protocol { !dest   }*;
+var em_rw     : channel(1)  protocol { !rw     }*;
+\end{Verbatim}
+
+The proof obligation is protocol equivalence: the sequence of
+communications on the split channels, interleaved in the declared
+order, must correspond to the original protocol on the packed channel.
+
+\subsubsection{Pipeline insertion (Lines-style)}
+
+Pipeline insertion adds buffer stages to increase throughput.
+In Lines' pipelining theory~\cite{lines1998}, a pipeline stage is a
+process that receives on one channel and sends on another, with a
+specific handshake template (WCHB, PCHB, PCFB, etc.).
+
+\begin{Verbatim}[samepage=true]
+// Before: direct connection
+var c : channel(32) protocol { !v }*;
+
+// After: c split into c1 -> buffer -> c2
+var c1 : channel(32) protocol { !v }*;
+var c2 : channel(32) protocol { !v }*;
+process Buffer = begin int(32) x; *[ c1?x ; c2!x ] end
+    port in c1 : channel(32)
+    port out c2 : channel(32);
+\end{Verbatim}
+
+The proof obligation is that the buffer preserves the protocol: the
+sequence of values on $c_2$ equals the sequence of values on $c_1$
+(possibly delayed by the buffer depth).  This is trivially true for
+the simple buffer above; for more complex pipeline templates with
+handshake reshuffling, the proof involves showing that the template's
+internal protocol matches the declared channel protocols.
+
+%----------------------------------------------------------------------
+\subsection{Separation of Optimization from Correctness}
+\label{sec:separation}
+%----------------------------------------------------------------------
+
+A key design principle of the framework is that \emph{optimizations
+are verified transformations}, not ad hoc modifications.
+
+\subsubsection{Slack insertion as a verified transformation}
+
+Adding buffers to a channel (increasing its slack from $d$ to $d+k$)
+is a transformation that preserves protocol conformance.  A buffer
+process with slack~$k$ on a channel with protocol~$\pi$ simply relays
+values according to $\pi$ with up to $k$ values in flight.  The proof
+obligation is that the buffer conforms to both $\pi$ (on its input
+port) and $\overline{\pi}$ (on its output port)---which is trivially
+the case for a FIFO buffer.
+
+The \texttt{slacker} tool already computes optimal slack assignments
+via linear programming.  In the verified framework, each slack
+assignment is a pipeline insertion step with a trivial proof
+obligation.
+
+\subsubsection{Action reordering}
+
+Independent actions within a process may be reordered for optimization
+(e.g., to improve pipeline throughput or reduce critical path length).
+Two actions are independent if they operate on different channels and
+neither reads data produced by the other.
+
+The proof obligation for action reordering is that the reordered
+sequence is a valid interleaving of the original sequence with respect
+to the channel protocols.  This connects directly to partial-order
+reduction (POR) theory~\cite{peled1993}: the independence relation
+used for action reordering is the same one used to prune the
+state-space search in model checking.
+
+\subsubsection{Technology mapping}
+
+Technology mapping---the step from CSP to gates, production rules, or
+RTL---operates \emph{below} the CSP abstraction level.  The CSP-level
+verification guarantees protocol correctness; technology mapping must
+additionally satisfy timing constraints (setup/hold for synchronous,
+delay matching for BD, isochronic fork for QDI) that are outside the
+scope of CSP-level reasoning.
+
+The framework treats technology mapping as a separate concern:
+the CSP-level proof establishes \emph{functional} correctness (the
+right values appear on the right channels in the right order), and
+implementation-level tools (static timing analysis, production rule
+verification) establish \emph{timing} correctness.
+
+%======================================================================
+\section{The Design Flow}
+\label{sec:flow}
+%======================================================================
+
+This section describes the concrete design flow from specification to
+implementation, organized into four stages.  Each stage is illustrated
+with examples from the MiniMIPS and simpler designs.
+
+%----------------------------------------------------------------------
+\subsection{Stage 1: Specification}
+\label{sec:stage1}
+%----------------------------------------------------------------------
+
+The design flow begins with an executable CSP specification---either a
+Martin-style process description or an external I/O contract.
+
+\subsubsection{Writing the specification}
+
+The specification is an ordinary \texttt{.csp} file that captures the
+intended behavior.  It need not be implementable directly; it serves
+as the reference against which all subsequent refinements are checked.
+
+\textbf{Example: FIFO buffer specification.}
+
+\begin{Verbatim}[samepage=true]
+// fifo_spec.csp — behavioral spec for a 4-deep FIFO
+int(32) buf[4];
+int(3)  head, tail, count;
+
+*[[ count < 4 -> L?buf[tail] ; tail = (tail+1) % 4 ; count = count+1
+  : count > 0 -> R!buf[head] ; head = (head+1) % 4 ; count = count-1
+]]
+\end{Verbatim}
+
+\textbf{Example: arbiter specification.}
+
+\begin{Verbatim}[samepage=true]
+// arbiter_spec.csp — 2-input arbiter
+int(32) x;
+*[[ #L0 -> L0?x ; R!x
+  : #L1 -> L1?x ; R!x
+]]
+\end{Verbatim}
+
+\subsubsection{Annotating channel protocols}
+
+The designer annotates each channel in the \texttt{.sys} file with its
+protocol type.  For the producer-consumer example:
+
+\begin{Verbatim}[samepage=true]
+system ProdCons;
+  var c : channel(32) protocol { !v }*;
+
+  process Producer = "producer.csp"
+    port out R : channel(32) conforms { !v }*;
+
+  process Consumer = "consumer.csp"
+    port in L : channel(32) conforms { ?v }*;
+begin
+  var p : Producer(R => c);
+  var q : Consumer(L => c);
+end.
+\end{Verbatim}
+
+The \keyword{protocol} clause on the channel declaration specifies the
+protocol from the sender's perspective.  The \keyword{conforms} clause
+on each port declaration specifies the protocol that the process
+guarantees on that port.  The tool checks:
+\begin{enumerate}
+\item Each port's \keyword{conforms} protocol matches the channel's
+  \keyword{protocol} (or its dual, depending on direction).
+\item Each process's code actually conforms to its declared port
+  protocols.
+\end{enumerate}
+
+For simple data channels (one send per handshake cycle), the protocol
+is \texttt{\{ !v \}*} and the annotation is straightforward.  For
+request-response protocols like the RegFile's read port:
+
+\begin{Verbatim}[samepage=true]
+// RegFile read protocol: requester sends address, gets data back
+var rs_req  : channel(5)  protocol { !addr }*;
+var rs_resp : channel(32) protocol { !data }*;
+\end{Verbatim}
+
+Here the two channels together implement a request-response protocol.
+The tool verifies that the requester (Decode) always sends on
+\texttt{rs\_req} before receiving on \texttt{rs\_resp}, and that the
+responder (RegFile) always receives on \texttt{rs\_req} before sending
+on \texttt{rs\_resp}.  This ordering constraint is captured in the
+channel dependency graph rather than in the individual protocol types.
+
+\subsubsection{Initial verification}
+
+At this stage, the tool performs three checks:
+\begin{enumerate}
+\item \textbf{Protocol conformance.} Each process's code conforms to
+  its declared port protocols.
+\item \textbf{Protocol duality.} Each channel's sender protocol is the
+  dual of its receiver protocol.
+\item \textbf{Dependency acyclicity.} The channel dependency graph is
+  acyclic (or cycles are annotated as requiring special treatment).
+\end{enumerate}
+
+If all three checks pass, the system is deadlock-free by
+Theorem~\ref{thm:deadlock-free}.  If the dependency graph has cycles,
+the tool reports them and the designer must either break them
+(slack, asymmetry) or mark them for localized model checking.
+
+%----------------------------------------------------------------------
+\subsection{Stage 2: Process Decomposition}
+\label{sec:stage2}
+%----------------------------------------------------------------------
+
+The designer decomposes processes to expose pipeline parallelism, separate
+concerns, or match a target micro-architecture.
+
+\subsubsection{The decomposition step}
+
+Suppose the designer starts with a monolithic specification:
+
+\begin{Verbatim}[samepage=true]
+// mips_spec.csp — monolithic MIPS: fetch, decode, execute in one process
+int(32) pc, instr, rs_val, rt_val, result;
+*[
+  instr = imem[pc >> 2] ;
+  // decode
+  rs_val = regs[(instr >> 21) & 0x1F] ;
+  rt_val = regs[(instr >> 16) & 0x1F] ;
+  // execute
+  result = alu(rs_val, rt_val, instr) ;
+  // writeback
+  regs[(instr >> 11) & 0x1F] = result ;
+  pc = pc + 4
+]
+\end{Verbatim}
+
+The designer decomposes this into the 5-stage pipeline reflected in
+\texttt{minimips.sys}.  Each decomposition step introduces new
+internal channels.  The \texttt{.sys} file records the decomposition:
+
+\begin{Verbatim}[samepage=true]
+system MiniMIPS;
+  // New internal channels (from decomposition)
+  var fd_pc    : channel(32) protocol { !v }*;
+  var fd_instr : channel(32) protocol { !v }*;
+  var de_pc    : channel(32) protocol { !v }*;
+  // ...
+
+  process Fetch = "fetch.csp"
+    port out fd_pc    : channel(32) conforms { !v }*
+    port out fd_instr : channel(32) conforms { !v }*
+    port in  wb_taken : channel(1)  conforms { ?v }*
+    port in  wb_target: channel(32) conforms { ?v }*;
+
+  process Decode = "decode.csp"
+    port in  fd_pc     : channel(32) conforms { ?v }*
+    port in  fd_instr  : channel(32) conforms { ?v }*
+    port out de_pc     : channel(32) conforms { !v }*
+    // ...
+\end{Verbatim}
+
+\subsubsection{Proof obligations}
+
+For each decomposition step, the tool checks:
+
+\begin{enumerate}
+\item \textbf{Protocol conformance of sub-processes.}
+  Each new process (\texttt{fetch.csp}, \texttt{decode.csp}, etc.)
+  conforms to its declared port protocols.  This is a local check on
+  each process individually.
+
+\item \textbf{Duality of new internal channels.}
+  The \texttt{fd\_pc} channel has protocol \texttt{\{ !v \}*} at the
+  Fetch end and \texttt{\{ ?v \}*} at the Decode end---these are dual.
+
+\item \textbf{Dependency acyclicity.}
+  The tool constructs the channel dependency graph for the decomposed
+  system and checks for cycles.  The MiniMIPS has a cycle:
+  \[
+  \text{Fetch} \xrightarrow{\text{fd\_*}} \text{Decode}
+  \xrightarrow{\text{de\_*}} \text{Execute}
+  \xrightarrow{\text{em\_*}} \text{MemStage}
+  \xrightarrow{\text{mw\_*}} \text{Writeback}
+  \xrightarrow{\text{wb\_*}} \text{Fetch}
+  \]
+  The designer must annotate this cycle, indicating that it is broken
+  by the initial token in the Fetch process (the initial PC value).
+\end{enumerate}
+
+\subsubsection{Tool support for decomposition}
+
+The decomposition itself is manual---the designer writes the sub-process
+code.  The tool assists by:
+\begin{itemize}
+\item Automatically inferring the channel dependency graph from the
+  process code.
+\item Checking protocol conformance.
+\item Reporting cycles and suggesting where slack insertion or
+  asymmetry could break them.
+\item Optionally, running localized model checking on cyclic
+  subgraphs.
+\end{itemize}
+
+%----------------------------------------------------------------------
+\subsection{Stage 3: Data Refinement}
+\label{sec:stage3}
+%----------------------------------------------------------------------
+
+Data refinement narrows the abstract types used in the specification
+to the concrete bit widths required for synthesis.
+
+\subsubsection{Type narrowing}
+
+The specification may use \texttt{int} (unbounded) or \texttt{int(32)}
+throughout.  Data refinement introduces the minimal widths:
+
+\begin{Verbatim}[samepage=true]
+// Before: all 32-bit
+var de_imm : channel(32);
+
+// After: immediate is 16-bit (MIPS I-type)
+var de_imm : channel(16);
+\end{Verbatim}
+
+\subsubsection{Proof obligations}
+
+The tool checks:
+
+\begin{enumerate}
+\item \textbf{Width consistency.}  Every assignment, arithmetic
+  operation, and channel communication is type-correct at the new
+  widths.  No implicit truncation occurs unless the designer
+  explicitly acknowledges it.
+
+\item \textbf{Protocol preservation.}  The protocol on each channel
+  is preserved under the width change.  For simple
+  \texttt{\{ !v \}*} protocols this is automatic (the sequence of
+  communications is unchanged, only the value domain narrows).
+  For protocols with data constraints, the tool must verify that the
+  constraints are still satisfiable at the narrower width.
+
+\item \textbf{Value-range analysis.}  Optional but recommended: the
+  tool performs range analysis to verify that no computation exceeds
+  the declared width.  This is a standard abstract interpretation
+  over integer intervals.
+\end{enumerate}
+
+\subsubsection{Structure refinement}
+
+A common data refinement in the Fulcrum CSP toolchain is packing
+multiple fields into a single wide channel.  The MiniMIPS Execute
+stage sends a 107-bit structure:
+
+\begin{Verbatim}[samepage=true]
+structure EmData = (int(32) result; int(32) store_data;
+                    int(32) addr; int(5) dest;
+                    int(1) rw; int(1) mem_read;
+                    int(1) mem_write; int(1) taken;
+                    int(32) target);
+\end{Verbatim}
+
+This packing is a data refinement from separate channels to a single
+structure channel.  The proof obligation is that the packing and
+unpacking are inverses: if the sender packs fields into the structure
+and the receiver unpacks them, the values are preserved.
+
+%----------------------------------------------------------------------
+\subsection{Stage 4: Implementation}
+\label{sec:stage4}
+%----------------------------------------------------------------------
+
+The final stage maps the verified CSP design to a physical
+implementation.  We describe three target paths.
+
+\subsubsection{Bundled-data asynchronous circuits}
+\label{sec:bd}
+
+\textbf{Path:} \texttt{.csp} $\to$ \texttt{csp2verilog} $\to$
+SystemVerilog with BD channel protocol.
+
+Bundled-data circuits use a request-acknowledge handshake alongside
+the data wires.  The timing assumption is that data is stable before
+the request signal arrives---a \emph{matched delay} constraint that
+must be satisfied by the physical implementation but is outside the
+scope of CSP-level verification.
+
+The \texttt{csp2verilog} tool generates SystemVerilog modules where
+each CSP process becomes a finite state machine.  Channel operations
+become handshake transactions:
+
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{CSP operation} & \textbf{BD protocol} \\
+\midrule
+\texttt{R!x} & Assert \texttt{req}, drive \texttt{data}; wait for
+  \texttt{ack}; deassert \texttt{req}; wait for $\neg$\texttt{ack} \\
+\texttt{L?x} & Wait for \texttt{req}; latch \texttt{data}; assert
+  \texttt{ack}; wait for $\neg$\texttt{req}; deassert \texttt{ack} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Verified properties.}
+The CSP-level protocol conformance guarantees that every handshake
+completes: the sender always asserts \texttt{req} when the protocol
+demands a send, and the receiver always asserts \texttt{ack} when the
+protocol demands a receive.  What the CSP level does \emph{not}
+guarantee is the timing: the matched-delay constraint is a physical
+property that must be verified by static timing analysis.
+
+\textbf{Slack assignment.}
+The \texttt{slacker} tool computes the optimal slack (number of
+pipeline buffers) for each channel to meet throughput targets.  In the
+verified framework, each slack assignment is a pipeline insertion step
+(Section~\ref{sec:refinement-steps}) with a trivial proof obligation.
+
+\subsubsection{Synchronous RTL (dehandshaking)}
+\label{sec:rtl}
+
+\textbf{Path:} \texttt{.csp} $\to$ dehandshaking compiler $\to$
+SystemVerilog with clock boundaries replacing handshakes.
+
+Dehandshaking converts an asynchronous CSP design to synchronous RTL
+by replacing each handshake with a clocked register transfer.  Each
+channel becomes a registered pipeline stage; the handshake protocol
+is replaced by valid/ready flow control (or simply pipeline registers
+if the pipeline is fully balanced).
+
+\textbf{Mapping.}
+\begin{center}
+\begin{tabular}{ll}
+\toprule
+\textbf{CSP concept} & \textbf{Synchronous RTL} \\
+\midrule
+Channel & Pipeline register (or valid/ready interface) \\
+Process & Combinational logic between registers \\
+Slack & Pipeline depth \\
+Channel dependency & Data hazard \\
+Guard (probe) & Stall signal \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Verified properties.}
+The CSP-level protocol conformance guarantees the correct sequencing
+of data through the pipeline: if the CSP design is deadlock-free, the
+synchronous implementation cannot stall indefinitely (assuming the
+clock runs and resets complete).  The dehandshaking transformation is
+a verified step: the tool must show that the RTL pipeline behavior
+(under valid/ready flow control) is a refinement of the CSP channel
+protocol.
+
+\textbf{Advantages over direct RTL design.}
+Starting from a verified CSP specification and dehandshaking gives the
+designer the benefits of CSP-level reasoning (compositional
+deadlock-freedom, protocol types) with a synchronous implementation
+that can be processed by standard EDA tools.  Timing closure is
+handled by the standard synchronous flow (synthesis, place-and-route,
+STA).
+
+\subsubsection{QDI pipeline circuits}
+\label{sec:qdi}
+
+\textbf{Path:} \texttt{.csp} $\to$ \texttt{csp2gma} $\to$
+production rules $\to$ transistor-level implementation.
+
+Quasi-delay-insensitive (QDI) circuits use delay-insensitive encoding
+(typically dual-rail) and completion detection (C-elements) to
+eliminate all timing assumptions except the isochronic fork.  This is
+the most robust implementation style but also the most
+area-intensive.
+
+\textbf{Pipeline templates.}
+Lines' pipelining theory~\cite{lines1998} defines a family of pipeline
+templates with varying performance/area tradeoffs:
+
+\begin{description}
+\item[WCHB (Weak-Condition Half Buffer).]
+  The simplest template.  Each stage is a half buffer that
+  alternately receives and sends.  Throughput: 1 token per 2 cycles.
+  Area: minimal.
+
+\item[PCHB (Pre-Charge Half Buffer).]
+  Uses pre-charged logic for higher speed.  Throughput: 1 token per
+  2 cycles (faster cycle).  Area: moderate.
+
+\item[PCFB (Pre-Charge Full Buffer).]
+  A full buffer that can hold a token while simultaneously receiving
+  the next.  Throughput: 1 token per 1 cycle (pipelined).
+  Area: larger.
+\end{description}
+
+\textbf{Verified properties.}
+Each pipeline template is a fixed process that implements a known
+protocol.  The verification obligation is that the template's protocol
+matches the channel protocol declared in the \texttt{.sys} file.
+Since the templates are parameterized only by data width, this check
+need only be done once per template type, not per instance.
+
+The \texttt{csp2gma} tool generates a GMA intermediate
+representation from which production rules can be derived.  The GMA
+preserves the CSP-level semantics; the production rule derivation is a
+separate verified step that must ensure the dual-rail encoding
+faithfully represents the original data values.
+
+%======================================================================
+\section{Required Tools and Development Gaps}
+\label{sec:tools}
+%======================================================================
+
+%----------------------------------------------------------------------
+\subsection{Existing Tools (Ready to Use)}
+\label{sec:existing}
+%----------------------------------------------------------------------
+
+The following tools are already implemented and available:
+
+\begin{description}
+\item[\texttt{cspc} / \texttt{cspfe} / \texttt{cspbuild}.]
+  The core compilation and build pipeline.  Parses \texttt{.csp} and
+  \texttt{.sys} files, compiles to Modula-3 state machines, generates
+  simulator binaries.
+
+\item[\texttt{csp2verilog} / \texttt{Cast2Verilog}.]
+  BD synthesis path.  Generates synthesizable SystemVerilog from CSP
+  specifications with bundled-data handshake protocols.
+
+\item[\texttt{csp2gma}.]
+  QDI synthesis path.  Generates GMA intermediate representation for
+  production rule derivation.
+
+\item[\texttt{slacker}.]
+  Slack optimization.  Computes optimal buffer placements via linear
+  programming.  Integrates with \texttt{Cast2Verilog} for
+  post-synthesis buffer insertion.
+
+\item[MDD-based deadlock checker.]
+  Symbolic state-space exploration using Multi-valued Decision Diagrams
+  with saturation algorithm.  Scales to 1024-process systems.
+  Available as \texttt{check-deadlock-saturation!} in the Scheme
+  environment.
+
+\item[Explicit-state deadlock checker with POR.]
+  BFS/DFS exploration with partial-order reduction and memoization.
+  Provides counterexample traces.  Available as
+  \texttt{check-deadlock!}.
+
+\item[LTS extraction.]
+  Per-process labelled transition system extraction from compiled
+  process code.  Used by both the explicit-state and MDD-based
+  checkers.
+\end{description}
+
+%----------------------------------------------------------------------
+\subsection{Tools Needed (Development Gaps)}
+\label{sec:gaps}
+%----------------------------------------------------------------------
+
+\begin{center}
+\begin{tabular}{llll}
+\toprule
+\textbf{Tool} & \textbf{Purpose} & \textbf{Effort} & \textbf{Priority} \\
+\midrule
+Protocol type checker & Verify process conforms to & Medium & Critical \\
+                      & channel protocols & & \\
+Protocol parser       & Parse protocol annotations & Small & Critical \\
+                      & in \texttt{.sys} files & & \\
+Dependency graph      & Check acyclicity of channel & Small & Critical \\
+analyzer              & dependency graph & & \\
+Refinement proof      & Verify decomposition steps & Large & High \\
+checker               & preserve behavior & & \\
+Data refinement       & Verify type narrowing & Medium & High \\
+checker               & preserves protocols & & \\
+Pipeline insertion    & Verify Lines-style & Medium & High \\
+verifier              & transformations & & \\
+Dehandshaking         & CSP $\to$ synchronous RTL & Large & Medium \\
+compiler              & & & \\
+Protocol inference    & Infer protocols from & Large & Low \\
+                      & existing code (migration) & & \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Each tool is described in detail below.
+
+\subsubsection{Protocol type checker}
+
+\textbf{Purpose.} Given a compiled process and its declared port
+protocols, verify that the process conforms to the protocols
+(Definition~\ref{def:conformance}).
+
+\textbf{Approach.} Extract the per-process LTS (already implemented)
+and check that every path through the LTS, projected onto each port,
+is a word in the protocol's language.  Since protocol types are
+regular, this reduces to checking that the product of the LTS with
+the protocol automaton (for each port) has no error states.
+
+\textbf{Effort: Medium.}  The LTS extraction infrastructure exists.
+The main work is implementing the protocol automaton construction and
+the product-state exploration with error detection.  Estimated: 2--4
+weeks.
+
+\subsubsection{Protocol parser}
+
+\textbf{Purpose.} Extend the \texttt{.sys} file parser to recognize
+\keyword{protocol} and \keyword{conforms} clauses.
+
+\textbf{Approach.}  Add productions to the existing Scheme-based
+\texttt{.sys} parser.  Protocol types are regular expressions, so the
+parser is straightforward.
+
+\textbf{Effort: Small.}  Estimated: 1--2 weeks, including integration
+with the existing \texttt{validate-system!} procedure.
+
+\subsubsection{Dependency graph analyzer}
+
+\textbf{Purpose.} Construct the channel dependency graph from the
+process code and check for cycles.
+
+\textbf{Approach.} For each process, analyze the control flow to
+determine which channel operations depend on which other channel
+operations.  This is a straightforward dataflow analysis on the
+per-process AST.  Cycle detection is a standard graph algorithm
+(Tarjan's SCC or simple DFS).
+
+\textbf{Effort: Small.}  Estimated: 1--2 weeks.  The main subtlety is
+handling guards that probe multiple channels simultaneously.
+
+\subsubsection{Refinement proof checker}
+
+\textbf{Purpose.} Given a specification process $P$ and its
+decomposition $P_1 \| P_2$, verify that the decomposition is correct
+(the external behavior is preserved).
+
+\textbf{Approach.} There are two levels of checking:
+\begin{enumerate}
+\item \textbf{Lightweight:} Check that $P_1$ and $P_2$ each conform
+  to their port protocols, that internal channels have dual
+  protocols, and that the dependency graph is acyclic.  This is
+  sufficient for deadlock-freedom but does not guarantee trace
+  equivalence.
+
+\item \textbf{Full:} Construct the composed LTS of $P_1 \| P_2$,
+  hide the internal channels, and check trace equivalence (or
+  failures equivalence) with the original $P$.  This requires the
+  model checking infrastructure but is applied only to the local
+  decomposition, not the entire system.
+\end{enumerate}
+
+\textbf{Effort: Large.}  The lightweight check reuses the protocol
+type checker and dependency graph analyzer.  The full check requires
+LTS composition and equivalence checking, which is substantial new
+infrastructure.  Estimated: 2--4 months for the full version.
+
+\subsubsection{Data refinement checker}
+
+\textbf{Purpose.} Verify that narrowing a channel's width from $W_1$
+to $W_2 < W_1$ preserves the protocol.
+
+\textbf{Approach.} Perform integer range analysis on the process code
+to verify that no value exceeds the narrowed width.  For channels
+with data constraints in their protocols, verify that the constraints
+are still satisfiable.  This is a standard abstract interpretation
+problem.
+
+\textbf{Effort: Medium.}  Estimated: 3--6 weeks.  Range analysis for
+fixed-width integers is well-understood; the main work is integrating
+it with the Fulcrum CSP AST and type system.
+
+\subsubsection{Pipeline insertion verifier}
+
+\textbf{Purpose.} Verify that inserting a pipeline buffer (WCHB,
+PCHB, PCFB, or simple FIFO) on a channel preserves the protocol.
+
+\textbf{Approach.}  Each pipeline template has a fixed LTS.  The
+verifier checks that the template's LTS, composed with the channel
+protocol automaton, admits exactly the same external behavior (modulo
+buffering delay).  Since the templates are fixed and small, this
+check can be done once per template type and cached.
+
+\textbf{Effort: Medium.}  Estimated: 2--4 weeks.  The main work is
+formalizing the pipeline templates as LTSs and implementing the
+equivalence check.
+
+\subsubsection{Dehandshaking compiler}
+
+\textbf{Purpose.} Compile a CSP design to synchronous RTL by
+replacing handshakes with clocked register transfers.
+
+\textbf{Approach.}  Map each channel to a pipeline register with
+valid/ready flow control.  Map each process to combinational logic
+with registered outputs.  Generate SystemVerilog with appropriate
+clock-domain crossing logic for channels that span clock domains.
+
+\textbf{Effort: Large.}  This is a new synthesis backend, comparable
+in scope to \texttt{csp2verilog}.  Estimated: 3--6 months.  However,
+it can leverage much of the existing \texttt{csp2verilog}
+infrastructure (AST traversal, variable analysis, code emission).
+
+\subsubsection{Protocol inference}
+
+\textbf{Purpose.} Infer protocol types from existing \texttt{.csp}
+code that lacks annotations.  This enables migration of existing
+designs to the verified framework.
+
+\textbf{Approach.} Analyze the process code to extract the sequence
+of channel operations on each port.  Generalize the observed sequences
+into a regular expression (the protocol type).  This is essentially
+the problem of learning a regular language from positive examples.
+
+\textbf{Effort: Large.}  Protocol inference is useful but not
+essential---designers can annotate protocols manually.  The main
+risk is that inferred protocols may be too permissive (accepting
+behaviors the designer did not intend) or too restrictive (rejecting
+valid refinements).  Estimated: 2--4 months.
+
+%----------------------------------------------------------------------
+\subsection{Integration Plan}
+\label{sec:integration}
+%----------------------------------------------------------------------
+
+We recommend a phased implementation:
+
+\subsubsection{Phase 1: Protocol types and conformance checker}
+
+\textbf{Components:} Protocol parser, protocol type checker, dependency
+graph analyzer.
+
+\textbf{Outcome:} The designer can annotate \texttt{.sys} files with
+protocol types and receive immediate feedback on conformance and
+deadlock-freedom (for acyclic systems).
+
+\textbf{Effort:} 1--2 months.
+
+\textbf{Value:} This phase alone provides compositional deadlock-freedom
+checking that scales to arbitrarily large systems without state-space
+explosion.  For acyclic systems, it completely replaces the need for
+model checking.
+
+\subsubsection{Phase 2: Refinement proof checker}
+
+\textbf{Components:} Lightweight refinement checker (protocol-based),
+full refinement checker (LTS-based, for cyclic subgraphs).
+
+\textbf{Outcome:} The designer can decompose processes and have each
+decomposition step verified.  The model checking infrastructure
+(MDD, POR) serves as the backend for checking cyclic subgraphs.
+
+\textbf{Effort:} 2--4 months.
+
+\textbf{Value:} Enables a verified design flow where each step is
+checked locally.  The prior work on MDD-based deadlock checking is
+reused as a backend, not discarded.
+
+\subsubsection{Phase 3: Pipeline and slack verification}
+
+\textbf{Components:} Pipeline insertion verifier, integration with
+\texttt{slacker}.
+
+\textbf{Outcome:} Slack insertion and pipeline optimization are
+verified transformations.  The designer can trust that performance
+optimization does not break correctness.
+
+\textbf{Effort:} 1--2 months.
+
+\textbf{Value:} Closes the gap between the CSP-level correctness proof
+and the optimized implementation.
+
+\subsubsection{Phase 4: Dehandshaking compiler}
+
+\textbf{Components:} Dehandshaking compiler, data refinement checker.
+
+\textbf{Outcome:} A new implementation target (synchronous RTL) with
+verified correctness.  The data refinement checker ensures that type
+narrowing for synthesis does not introduce errors.
+
+\textbf{Effort:} 3--6 months.
+
+\textbf{Value:} Opens the Fulcrum CSP toolchain to synchronous design
+targets, broadening its applicability.
+
+%======================================================================
+\section{Worked Example}
+\label{sec:example}
+%======================================================================
+
+This section walks through a complete design from specification to
+implementation, illustrating every stage of the verified refinement
+flow.  The example is a simplified 4-stage pipeline with feedback,
+inspired by the MiniMIPS.
+
+%----------------------------------------------------------------------
+\subsection{Step 1: Write the Specification}
+%----------------------------------------------------------------------
+
+We begin with a monolithic specification of a simple
+fetch-compute-writeback processor.  It reads instructions from an
+input channel, computes a result, and writes back to a register file.
+
+\begin{Verbatim}[samepage=true]
+// spec.csp — monolithic processor specification
+int(32) regs[8];
+int(32) instr, rs, rt, result;
+int(3)  rd_addr, rs_addr, rt_addr;
+int(1)  wen;
+
+*[
+  IN?instr ;
+  rs_addr = (instr >> 6) & 0x7 ;
+  rt_addr = (instr >> 3) & 0x7 ;
+  rd_addr = instr & 0x7 ;
+  rs = regs[rs_addr] ;
+  rt = regs[rt_addr] ;
+  result = rs + rt ;          // simplified: always ADD
+  wen = (instr >> 9) & 0x1 ;
+  [ wen -> regs[rd_addr] = result
+  [] ~wen -> skip
+  ] ;
+  OUT!result
+]
+\end{Verbatim}
+
+The system description with protocol annotations:
+
+\begin{Verbatim}[samepage=true]
+system SimplePipe;
+  var in_ch  : channel(32) protocol { !instr }*;
+  var out_ch : channel(32) protocol { !result }*;
+
+  process Spec = "spec.csp"
+    port in  IN  : channel(32) conforms { ?instr }*
+    port out OUT : channel(32) conforms { !result }*;
+begin
+  var cpu : Spec(IN => in_ch, OUT => out_ch);
+end.
+\end{Verbatim}
+
+\textbf{Tool output:}
+\begin{Verbatim}[samepage=true]
+$ check-protocols SimplePipe
+Protocol conformance:
+  Spec.IN:  PASS (conforms to { ?instr }*)
+  Spec.OUT: PASS (conforms to { !result }*)
+Protocol duality:
+  in_ch:  PASS (sender { !instr }* dual of receiver { ?instr }*)
+  out_ch: PASS (sender { !result }* dual of receiver { ?result }*)
+Dependency graph: acyclic (1 node, 0 edges)
+Result: DEADLOCK-FREE (by compositional theorem)
+\end{Verbatim}
+
+%----------------------------------------------------------------------
+\subsection{Step 2: Annotate Channel Protocols}
+%----------------------------------------------------------------------
+
+The specification has simple protocols (\texttt{\{ !v \}*} on each
+channel).  As we decompose, we will introduce more channels, each
+needing its own protocol annotation.  For the 4-stage decomposition:
+
+\begin{Verbatim}[samepage=true]
+system SimplePipe4;
+  // External channels
+  var in_ch  : channel(32) protocol { !instr }*;
+  var out_ch : channel(32) protocol { !result }*;
+
+  // Internal pipeline channels
+  var fd_instr : channel(32) protocol { !instr }*;
+  var dc_rs    : channel(32) protocol { !rs_val }*;
+  var dc_rt    : channel(32) protocol { !rt_val }*;
+  var dc_rd    : channel(3)  protocol { !rd_addr }*;
+  var dc_wen   : channel(1)  protocol { !wen }*;
+  var ex_result: channel(32) protocol { !result }*;
+  var ex_rd    : channel(3)  protocol { !rd_addr }*;
+  var ex_wen   : channel(1)  protocol { !wen }*;
+
+  // Feedback: Writeback -> Decode (register file)
+  var wb_wen   : channel(1)  protocol { !wen }*;
+  var wb_rd    : channel(3)  protocol { !rd_addr }*;
+  var wb_val   : channel(32) protocol { !val }*;
+  // ...
+\end{Verbatim}
+
+Every channel in the decomposed system has an explicit protocol.
+The tool verifies duality at each channel endpoint.
+
+%----------------------------------------------------------------------
+\subsection{Step 3: Decompose into 4 Processes}
+%----------------------------------------------------------------------
+
+\textbf{Fetch stage:}
+
+\begin{Verbatim}[samepage=true]
+// fetch.csp
+int(32) instr;
+*[ IN?instr ; fd_instr!instr ]
+\end{Verbatim}
+
+\textbf{Decode stage:}
+
+\begin{Verbatim}[samepage=true]
+// decode.csp
+int(32) instr, rs_val, rt_val;
+int(3) rs_addr, rt_addr, rd_addr;
+int(1) wen;
+// (register file is a separate server process)
+*[
+  fd_instr?instr ;
+  rs_addr = (instr >> 6) & 0x7 ;
+  rt_addr = (instr >> 3) & 0x7 ;
+  rd_addr = instr & 0x7 ;
+  wen = (instr >> 9) & 0x1 ;
+  rf_rs_req!rs_addr ; rf_rs_resp?rs_val ;
+  rf_rt_req!rt_addr ; rf_rt_resp?rt_val ;
+  dc_rs!rs_val ; dc_rt!rt_val ;
+  dc_rd!rd_addr ; dc_wen!wen
+]
+\end{Verbatim}
+
+\textbf{Execute stage:}
+
+\begin{Verbatim}[samepage=true]
+// execute.csp
+int(32) rs, rt, result;
+int(3) rd;
+int(1) wen;
+*[
+  dc_rs?rs ; dc_rt?rt ; dc_rd?rd ; dc_wen?wen ;
+  result = rs + rt ;
+  ex_result!result ; ex_rd!rd ; ex_wen!wen
+]
+\end{Verbatim}
+
+\textbf{Writeback stage:}
+
+\begin{Verbatim}[samepage=true]
+// writeback.csp
+int(32) result;
+int(3) rd;
+int(1) wen;
+*[
+  ex_result?result ; ex_rd?rd ; ex_wen?wen ;
+  wb_wen!wen ; wb_rd!rd ; wb_val!result ;
+  OUT!result
+]
+\end{Verbatim}
+
+\textbf{Register file server:}
+
+\begin{Verbatim}[samepage=true]
+// regfile.csp
+int(32) regs[8];
+int(32) val;
+int(3) addr;
+int(1) wen;
+*[
+  // Serve read requests, then accept writeback
+  rf_rs_req?addr ; rf_rs_resp!regs[addr] ;
+  rf_rt_req?addr ; rf_rt_resp!regs[addr] ;
+  wb_wen?wen ; wb_rd?addr ; wb_val?val ;
+  [ wen -> regs[addr] = val
+  [] ~wen -> skip
+  ]
+]
+\end{Verbatim}
+
+\textbf{Tool output for decomposition check:}
+\begin{Verbatim}[samepage=true]
+$ check-protocols SimplePipe4
+Protocol conformance:
+  Fetch.IN:         PASS    Fetch.fd_instr:    PASS
+  Decode.fd_instr:  PASS    Decode.dc_rs:      PASS
+  Decode.dc_rt:     PASS    Decode.dc_rd:      PASS
+  Decode.dc_wen:    PASS    Decode.rf_rs_req:  PASS
+  Decode.rf_rs_resp:PASS    Decode.rf_rt_req:  PASS
+  Decode.rf_rt_resp:PASS
+  Execute.dc_rs:    PASS    Execute.dc_rt:     PASS
+  Execute.dc_rd:    PASS    Execute.dc_wen:    PASS
+  Execute.ex_result:PASS    Execute.ex_rd:     PASS
+  Execute.ex_wen:   PASS
+  Writeback.ex_*:   PASS    Writeback.wb_*:    PASS
+  Writeback.OUT:    PASS
+  RegFile.rf_*:     PASS    RegFile.wb_*:      PASS
+Protocol duality: ALL PASS (14 channels checked)
+Dependency graph:
+  Cycle detected: Decode -> Execute -> Writeback -> RegFile -> Decode
+  Annotation required: cycle broken by lockstep protocol
+    (Decode always reads before Writeback writes)
+  Localized check: running MDD checker on cycle subgraph...
+  MDD result: DEADLOCK-FREE (4 processes, 12 channels)
+Result: DEADLOCK-FREE
+  (acyclic portion by compositional theorem,
+   cyclic portion by MDD model checking)
+\end{Verbatim}
+
+%----------------------------------------------------------------------
+\subsection{Step 4: Data Refinement}
+%----------------------------------------------------------------------
+
+The specification uses \texttt{int(32)} for all values.  For
+synthesis, we narrow to minimal widths:
+
+\begin{Verbatim}[samepage=true]
+// Width refinement
+var dc_rd    : channel(3)  protocol { !rd_addr }*;  // was 32
+var dc_wen   : channel(1)  protocol { !wen }*;      // was 32
+var ex_rd    : channel(3)  protocol { !rd_addr }*;  // was 32
+var ex_wen   : channel(1)  protocol { !wen }*;      // was 32
+var wb_wen   : channel(1)  protocol { !wen }*;      // was 32
+var wb_rd    : channel(3)  protocol { !rd_addr }*;  // was 32
+// Data channels remain 32-bit
+\end{Verbatim}
+
+\textbf{Tool output:}
+\begin{Verbatim}[samepage=true]
+$ check-data-refinement SimplePipe4
+Width analysis:
+  dc_rd:  3-bit sufficient (max value 7, from 3-bit mask)
+  dc_wen: 1-bit sufficient (max value 1, from 1-bit mask)
+  ex_rd:  3-bit sufficient (passthrough from dc_rd)
+  ex_wen: 1-bit sufficient (passthrough from dc_wen)
+  wb_wen: 1-bit sufficient (passthrough)
+  wb_rd:  3-bit sufficient (passthrough)
+Protocol preservation: ALL PASS
+  (all protocols are { !v }*, width narrowing preserves protocol)
+Result: DATA REFINEMENT VALID
+\end{Verbatim}
+
+%----------------------------------------------------------------------
+\subsection{Step 5: Add Pipeline Slack}
+%----------------------------------------------------------------------
+
+For throughput, we add pipeline buffers.  The \texttt{slacker} tool
+computes the optimal assignment:
+
+\begin{Verbatim}[samepage=true]
+$ slacker SimplePipe4.sys
+Slack assignment (minimizing buffer area):
+  fd_instr: slack 1 (default, no change)
+  dc_rs:    slack 1
+  dc_rt:    slack 1
+  dc_rd:    slack 2  // extra slack to balance pipeline
+  dc_wen:   slack 2
+  ex_result: slack 1
+  ex_rd:    slack 1
+  ex_wen:   slack 1
+  wb_*:     slack 1
+  rf_*:     slack 1
+Total buffer area: 142 bit-slots
+\end{Verbatim}
+
+Each slack insertion is a verified transformation:
+
+\begin{Verbatim}[samepage=true]
+$ verify-slack-insertion SimplePipe4
+Slack insertion verification:
+  dc_rd (slack 1 -> 2): PASS
+    Buffer conforms to { ?v ; !v }* on both ports
+    Protocol preserved (output sequence = input sequence, delayed)
+  dc_wen (slack 1 -> 2): PASS
+  All other channels: slack 1 (no change, trivially valid)
+Result: SLACK INSERTION VALID
+\end{Verbatim}
+
+%----------------------------------------------------------------------
+\subsection{Step 6: Generate BD SystemVerilog}
+%----------------------------------------------------------------------
+
+Finally, we generate the bundled-data implementation:
+
+\begin{Verbatim}[samepage=true]
+$ csp2verilog SimplePipe4
+Generating SystemVerilog:
+  SimplePipe4_Fetch.sv     (2 states, 2 channels)
+  SimplePipe4_Decode.sv    (6 states, 8 channels)
+  SimplePipe4_Execute.sv   (2 states, 6 channels)
+  SimplePipe4_Writeback.sv (2 states, 6 channels)
+  SimplePipe4_RegFile.sv   (4 states, 6 channels)
+  SimplePipe4_top.sv       (top-level with channel instantiation)
+  SimplePipe4_tb.sv        (testbench)
+\end{Verbatim}
+
+\textbf{Verification summary for the complete flow:}
+
+\begin{center}
+\begin{tabular}{llll}
+\toprule
+\textbf{Step} & \textbf{Check} & \textbf{Method} & \textbf{Result} \\
+\midrule
+1. Specification & Protocol conformance & Local per-process & PASS \\
+2. Protocol annotation & Duality & Syntactic & PASS \\
+3. Decomposition & Conformance + acyclicity & Local + graph & PASS* \\
+  & Cyclic subgraph & MDD model check & PASS \\
+4. Data refinement & Width analysis & Abstract interp. & PASS \\
+5. Slack insertion & Buffer conformance & Template check & PASS \\
+6. BD synthesis & Handshake protocol & By construction & PASS \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent *The cyclic portion (Decode--Execute--Writeback--RegFile)
+requires localized model checking; the acyclic portion is verified by
+the compositional theorem.
+
+The total verification cost is dominated by the localized model
+checking of the 4-process cycle.  For the acyclic portions, protocol
+conformance checking is linear in the size of each process's LTS,
+and dependency acyclicity is linear in the number of channels.  This
+stands in contrast to global model checking, which must explore the
+product of all process state spaces.
+
+%======================================================================
+\section{Related Work}
+\label{sec:related}
+%======================================================================
+
+%----------------------------------------------------------------------
+\subsection{Session Types}
+%----------------------------------------------------------------------
+
+Session types, introduced by Honda, Vasconcelos, and
+Kubo~\cite{honda1998}, assign types to communication channels that
+describe the sequence of messages exchanged.  The type system
+guarantees progress (no deadlock) and session fidelity (no protocol
+violation).  Yoshida and Carbone~\cite{yoshida2012} extended session
+types to multiparty protocols.
+
+Our protocol types are a specialization of binary session types to the
+hardware domain: point-to-point channels with fixed-width data and
+no delegation.  The key simplification is that our protocols are
+regular (no recursive types beyond Kleene star), which makes
+conformance checking decidable by finite automaton inclusion rather
+than the more complex type-checking algorithms needed for general
+session types.
+
+Kobayashi's deadlock-freedom types~\cite{kobayashi2006} are
+particularly relevant.  Kobayashi assigns ``usages'' to channels that
+specify the order and multiplicity of operations, then verifies
+acyclicity of the dependency relation.  Our
+Theorem~\ref{thm:deadlock-free} is essentially the hardware
+specialization of Kobayashi's result, with the channel dependency
+graph replacing the implicit dependency relation in the type system.
+
+Padovani~\cite{padovani2014} further refined Kobayashi's approach,
+handling more general topologies including some cyclic ones.  Our
+approach to cycles (localized model checking) is more pragmatic but
+less elegant than Padovani's type-theoretic treatment.
+
+%----------------------------------------------------------------------
+\subsection{Event-B Refinement}
+%----------------------------------------------------------------------
+
+Event-B~\cite{abrial2010} is a formal method based on stepwise
+refinement of abstract machines.  Each refinement step is accompanied
+by proof obligations (invariant preservation, convergence, guard
+strengthening) that are discharged by automated or interactive
+provers.  The Rodin platform~\cite{rodin} provides tool support for
+Event-B development.
+
+Our refinement framework shares Event-B's philosophy of
+correctness-by-construction through stepwise refinement, but differs
+in several ways:
+\begin{itemize}
+\item Event-B's proof obligations are first-order logic formulas
+  about state invariants; ours are protocol conformance checks
+  (regular language inclusion).
+\item Event-B uses general-purpose provers (Atelier~B, SMT solvers);
+  our checks are domain-specific and decidable.
+\item Event-B does not specifically target concurrent hardware;
+  our framework is designed for the CSP channel model.
+\end{itemize}
+
+The tradeoff is generality vs.\ automation: Event-B can express
+arbitrary system properties but requires manual proof guidance; our
+framework handles only protocol-related properties but checks them
+fully automatically.
+
+%----------------------------------------------------------------------
+\subsection{Rely-Guarantee Reasoning}
+%----------------------------------------------------------------------
+
+Jones' rely-guarantee reasoning~\cite{jones1983} verifies concurrent
+programs by specifying, for each thread, the \emph{rely} condition
+(what the environment guarantees) and the \emph{guarantee} condition
+(what the thread provides).  Each thread is verified independently
+against its rely and guarantee.
+
+Protocol types serve an analogous role in our framework: a process's
+port protocol is its guarantee (the communication pattern it promises),
+and the dual protocol on the other endpoint is its rely (the
+communication pattern it expects from the environment).  Protocol
+conformance is the local verification step that ensures the guarantee
+is met.
+
+%----------------------------------------------------------------------
+\subsection{Tangram and Handshake Circuits}
+%----------------------------------------------------------------------
+
+Van Berkel's Tangram compiler~\cite{vanberkel1993} takes a CSP-like
+language and compiles it to handshake circuits in a
+correct-by-construction fashion.  Each language construct maps to a
+fixed handshake component (sequencer, parallel component, arbiter),
+and the composition of correct components yields a correct circuit.
+
+Tangram's approach is elegant but restrictive: the designer is
+limited to the constructs supported by the language, and the
+generated circuits are often larger than hand-designed ones.  Our
+framework is less restrictive---the designer writes arbitrary CSP
+processes and has them verified against protocols---but it requires
+more tool support.  In essence, Tangram proves correctness by
+limiting the design space; we prove correctness by checking the
+design.
+
+%----------------------------------------------------------------------
+\subsection{Martin's Synthesis Methodology}
+%----------------------------------------------------------------------
+
+Alain Martin's synthesis methodology~\cite{martin1990} derives QDI
+circuits from CSP specifications via a sequence of
+semantics-preserving transformations: handshaking expansion,
+production rule derivation, transistor sizing.  Each transformation
+is justified by a semantic argument (typically, trace equivalence or
+failure equivalence in the CSP theory).
+
+Our framework is, in a sense, the \emph{formalization and
+mechanization} of Martin's methodology.  Where Martin relies on the
+designer's skill to ensure each transformation is correct, we propose
+tool-checked proof obligations at each step.  The protocol type system
+provides the formal scaffolding that Martin's methodology assumes
+implicitly.
+
+The key extension beyond Martin's work is the compositional
+deadlock-freedom theorem (Theorem~\ref{thm:deadlock-free}), which
+enables local verification of large systems without global
+state-space exploration.  Martin's methodology does not explicitly
+address compositionality for large systems---each design is verified
+as a whole.
+
+%----------------------------------------------------------------------
+\subsection{CHP Verification}
+%----------------------------------------------------------------------
+
+Myers~\cite{myers2001} and Manohar~\cite{manohar2001} have developed
+verification techniques for CHP (Communicating Hardware Processes),
+the language used by Martin's group.  These include:
+\begin{itemize}
+\item Deadlock and livelock detection via BDD-based state-space
+  exploration.
+\item Timing verification for QDI circuits using Boolean constraint
+  propagation.
+\item Protocol verification for handshake expansion.
+\end{itemize}
+
+Our approach differs in that we aim for compositional verification
+(avoiding global state-space exploration for acyclic systems) and
+integrate verification into the design flow rather than applying it
+post hoc.  However, the CHP verification work provides valuable
+algorithms and techniques that our implementation can draw on,
+particularly for the QDI pipeline verification path.
+
+%----------------------------------------------------------------------
+\subsection{Lines Pipelining Theory}
+%----------------------------------------------------------------------
+
+Lines~\cite{lines1998} developed a theory of asynchronous pipelining
+that characterizes pipeline templates (WCHB, PCHB, PCFB) by their
+handshake protocols and performance properties.  Each template is a
+CSP process with known behavior, and the theory guarantees that
+composing correct templates yields a correct pipeline.
+
+Our framework incorporates Lines' theory directly: each pipeline
+template is a fixed process with a known protocol, and pipeline
+insertion is a verified transformation (Section~\ref{sec:refinement-steps}).
+The verification obligation for pipeline insertion---that the template's
+protocol matches the channel protocol---is a formalization of Lines'
+correctness argument.
+
+The key contribution beyond Lines' work is the integration with the
+protocol type system, which enables pipeline insertion to be verified
+\emph{within} the same framework as all other design steps, rather
+than as a separate correctness argument.
+
+%======================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+%======================================================================
+
+This report has presented a framework for verified refinement-based
+design in the Fulcrum CSP toolchain.  The key ideas are:
+
+\begin{enumerate}
+\item \textbf{Protocol types on channels.}  Each channel carries an
+  annotation specifying the permitted sequence of communications.
+  Protocol types are regular expressions over send/receive actions,
+  simple enough for fully automatic checking yet expressive enough to
+  capture the communication patterns in real hardware designs.
+
+\item \textbf{Compositional deadlock-freedom.}  If every process
+  conforms to its port protocols, every channel has dual protocols at
+  its endpoints, and the channel dependency graph is acyclic, then the
+  system is deadlock-free by construction---no state-space exploration
+  needed.  Cycles in the dependency graph are handled by localized
+  model checking, reusing the existing MDD and explicit-state
+  infrastructure.
+
+\item \textbf{Local proof obligations.}  Each design step---process
+  decomposition, data refinement, channel splitting, pipeline
+  insertion---generates a proof obligation that can be checked locally,
+  without composing the entire system.  This makes verification cost
+  proportional to the complexity of the design step, not the size of
+  the system.
+
+\item \textbf{Three implementation targets.}  The verified design can
+  be mapped to bundled-data async circuits (via \texttt{csp2verilog}),
+  synchronous RTL (via dehandshaking), or QDI pipeline circuits (via
+  \texttt{csp2gma}), with the CSP-level proof carrying across to each
+  target.
+\end{enumerate}
+
+The model checking work from Phases~1--3 of the formal verification
+project---LTS extraction, explicit-state checking with POR, MDD-based
+saturation---is not discarded; it serves as the \emph{backend} for
+verifying the cyclic portions of designs that the compositional theorem
+cannot handle directly.  The shift is from using model checking as the
+\emph{primary} verification method to using it as a \emph{fallback}
+for the cases where compositional reasoning alone is insufficient.
+
+The practical development path is clear:
+\begin{enumerate}
+\item Phase~1 (protocol types + conformance checker) provides
+  immediate value and has modest implementation effort.
+\item Phase~2 (refinement proof checker) enables the full verified
+  design flow.
+\item Phase~3 (pipeline/slack verification) closes the optimization
+  gap.
+\item Phase~4 (dehandshaking compiler) opens a new implementation
+  target.
+\end{enumerate}
+
+The vision is a toolchain where the designer's knowledge of why a
+design is correct is captured in the annotations, checked by the tool,
+and preserved across every step from specification to silicon.
+Post-hoc model checking reconstructs what the designer already knows;
+verified refinement captures it at the source.
+
+%======================================================================
+% Bibliography
+%======================================================================
+\begin{thebibliography}{99}
+
+\bibitem{hoare1985}
+C.A.R.\ Hoare,
+\textit{Communicating Sequential Processes},
+Prentice-Hall, 1985.
+
+\bibitem{fdr4}
+T.\ Gibson-Robinson, P.\ Armstrong, A.\ Boulgakov, and A.W.\ Roscoe,
+``FDR3: A Modern Refinement Checker for CSP,''
+\textit{Proc.\ TACAS}, Springer LNCS 8413, pp.\ 187--201, 2014.
+
+\bibitem{fv-report}
+M.\ Nystr\"om and Claude (Anthropic),
+``Formal Verification for the Fulcrum CSP Toolchain: Feasibility
+Study, Project Plan, and Implementation Report,''
+Intel Corporation, 2025.
+
+\bibitem{martin1990}
+A.J.\ Martin,
+``Programming in VLSI: From Communicating Processes to
+Delay-Insensitive Circuits,''
+in C.A.R.\ Hoare, ed., \textit{Developments in Concurrency and
+Communication}, UT Year of Programming Series, Addison-Wesley,
+pp.\ 1--64, 1990.
+
+\bibitem{abrial2010}
+J.-R.\ Abrial,
+\textit{Modeling in Event-B: System and Software Engineering},
+Cambridge University Press, 2010.
+
+\bibitem{honda1998}
+K.\ Honda, V.T.\ Vasconcelos, and M.\ Kubo,
+``Language Primitives and Type Discipline for Structured
+Communication-Based Programming,''
+\textit{Proc.\ ESOP}, Springer LNCS 1381, pp.\ 122--138, 1998.
+
+\bibitem{kobayashi2006}
+N.\ Kobayashi,
+``A New Type System for Deadlock-Free Processes,''
+\textit{Proc.\ CONCUR}, Springer LNCS 4137, pp.\ 233--247, 2006.
+
+\bibitem{padovani2014}
+L.\ Padovani,
+``Deadlock and Lock Freedom in the Linear $\pi$-Calculus,''
+\textit{Proc.\ CSL-LICS}, ACM, pp.\ 72:1--72:10, 2014.
+
+\bibitem{jones1983}
+C.B.\ Jones,
+``Tentative Steps Toward a Development Method for Interfering
+Programs,''
+\textit{ACM TOPLAS}, vol.\ 5, no.\ 4, pp.\ 596--619, 1983.
+
+\bibitem{vanberkel1993}
+K.\ van Berkel,
+\textit{Handshake Circuits: An Asynchronous Architecture for VLSI
+Programming},
+Cambridge University Press, 1993.
+
+\bibitem{myers2001}
+C.J.\ Myers,
+\textit{Asynchronous Circuit Design},
+Wiley, 2001.
+
+\bibitem{manohar2001}
+R.\ Manohar and A.J.\ Martin,
+``Slack Elasticity in Concurrent Computing,''
+\textit{Proc.\ Mathematics of Program Construction}, Springer LNCS
+2386, pp.\ 272--285, 2001.
+
+\bibitem{lines1998}
+A.\ Lines,
+``Pipelined Asynchronous Circuits,''
+\textit{Caltech CS Technical Report CS-TR-95-21}, revised 1998.
+
+\bibitem{peled1993}
+D.\ Peled,
+``All from One, One for All: On Model Checking Using Representatives,''
+\textit{Proc.\ CAV}, Springer LNCS 697, pp.\ 409--423, 1993.
+
+\bibitem{rodin}
+J.-R.\ Abrial, M.\ Butler, S.\ Hallerstede, T.S.\ Hoang, F.\ Mehta,
+and L.\ Voisin,
+``Rodin: An Open Toolset for Modelling and Reasoning in Event-B,''
+\textit{Int.\ Journal on Software Tools for Technology Transfer},
+vol.\ 12, no.\ 6, pp.\ 447--466, 2010.
+
+\bibitem{yoshida2012}
+N.\ Yoshida and L.\ Gheri,
+``Multiparty Session Types Meet Communicating Automata,''
+\textit{Proc.\ ESOP}, Springer LNCS 7211, pp.\ 194--213, 2012.
+
+\end{thebibliography}
+
+\end{document}
