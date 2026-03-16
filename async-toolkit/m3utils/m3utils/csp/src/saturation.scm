@@ -25,15 +25,136 @@
 ;; span.  For general topologies, use the instance order from the
 ;; .sys file.
 
-(define (compute-level-ordering instances channels)
+(define (build-comm-graph instances channels)
+  ;; Build adjacency list: instance i <-> instance j if they share a channel.
+  ;; channels here is the channel-map: ((ch-sym sender-idx receiver-idx) ...)
+  ;; Returns a vector of n lists, where v[i] = sorted list of neighbors of i.
+  (let* ((n (length instances))
+         (adj (make-vector n '())))
+    (for-each
+     (lambda (ch)
+       (let ((si (cadr ch))
+             (ri (caddr ch)))
+         (if (not (memv ri (vector-ref adj si)))
+             (vector-set! adj si (cons ri (vector-ref adj si))))
+         (if (not (memv si (vector-ref adj ri)))
+             (vector-set! adj ri (cons si (vector-ref adj ri))))))
+     channels)
+    adj))
+
+(define (detect-ring-topology adj n)
+  ;; Check if the graph is a single ring: every node has degree 2
+  ;; and the graph is connected.  Returns the ring order if so, #f otherwise.
+  (if (< n 3)
+      #f  ;; need at least 3 nodes for a ring
+      (let ((all-deg-2
+             (let loop ((i 0))
+               (if (= i n) #t
+                   (if (= (length (vector-ref adj i)) 2)
+                       (loop (+ i 1))
+                       #f)))))
+        (if (not all-deg-2)
+            #f
+            ;; Walk the ring from node 0
+            (let walk ((current 0) (prev -1) (order '()) (count 0))
+              (if (= count n)
+                  (if (= current 0)
+                      (reverse order)  ;; closed ring
+                      #f)              ;; not a ring
+                  (let ((next (let ((nbrs (vector-ref adj current)))
+                                (if (= (car nbrs) prev)
+                                    (cadr nbrs)
+                                    (car nbrs)))))
+                    (walk next current (cons current order) (+ count 1)))))))))
+
+(define (greedy-span-ordering adj n)
+  ;; FORCE-like greedy ordering: start with the instance with the most
+  ;; connections, greedily place connected instances adjacent.
   ;; Returns a permutation list: element k = instance index at MDD level k.
-  ;;
-  ;; For now: identity ordering (instance 0 -> level 0, etc.)
-  ;; This is correct and works well when the .sys file already
-  ;; lists processes in a good order.
+  (let ((placed (make-vector n #f))
+        (order '()))
+
+    ;; Find the instance with the most connections (center of mass)
+    (let ((start 0)
+          (max-deg 0))
+      (let loop ((i 0))
+        (if (< i n)
+            (let ((deg (length (vector-ref adj i))))
+              (if (> deg max-deg)
+                  (begin (set! start i) (set! max-deg deg)))
+              (loop (+ i 1)))))
+
+      ;; BFS from start, placing neighbors greedily
+      (vector-set! placed start #t)
+      (set! order (list start))
+
+      (let bfs ((queue (list start)))
+        (if (not (null? queue))
+            (let* ((current (car queue))
+                   (rest (cdr queue))
+                   (new-neighbors '()))
+              ;; Add unplaced neighbors
+              (for-each
+               (lambda (nbr)
+                 (if (not (vector-ref placed nbr))
+                     (begin
+                       (vector-set! placed nbr #t)
+                       (set! order (cons nbr order))
+                       (set! new-neighbors (cons nbr new-neighbors)))))
+               (vector-ref adj current))
+              (bfs (append rest (reverse new-neighbors))))))
+
+    ;; Any isolated instances not yet placed
+    (let loop ((i 0))
+      (if (< i n)
+          (begin
+            (if (not (vector-ref placed i))
+                (set! order (cons i order)))
+            (loop (+ i 1)))))
+
+    (reverse order))))
+
+(define (compute-level-ordering instances channels)
+  ;; Legacy entry point: identity ordering.
+  ;; Use compute-level-ordering-from-channel-map for optimized ordering.
   (let ((n (length instances)))
     (let loop ((i 0) (acc '()))
       (if (= i n) (reverse acc) (loop (+ i 1) (cons i acc))))))
+
+(define (compute-level-ordering-from-channel-map channel-map n)
+  ;; Compute optimized level ordering from the channel map.
+  ;; channel-map: list of (channel-sym sender-idx receiver-idx)
+  ;; n: number of instances
+  ;; Returns: permutation list where element k = MDD level for instance k.
+  ;; Uses greedy BFS from the most-connected instance to minimize sync span.
+  (if (null? channel-map)
+      ;; No channels: identity
+      (let loop ((i 0) (acc '()))
+        (if (= i n) (reverse acc) (loop (+ i 1) (cons i acc))))
+
+      (let* ((adj (make-vector n '())))
+        ;; Build adjacency
+        (for-each
+         (lambda (ch)
+           (let ((si (cadr ch))
+                 (ri (caddr ch)))
+             (if (not (memv ri (vector-ref adj si)))
+                 (vector-set! adj si (cons ri (vector-ref adj si))))
+             (if (not (memv si (vector-ref adj ri)))
+                 (vector-set! adj ri (cons si (vector-ref adj ri))))))
+         channel-map)
+
+        ;; Use greedy BFS ordering to minimize sync event span
+        (let ((order (greedy-span-ordering adj n)))
+          (dis "  level ordering: greedy BFS" dnl)
+          (let ((perm (make-vector n 0)))
+            (let loop ((k 0) (o order))
+              (if (null? o)
+                  (vector->list perm)
+                  (begin
+                    (vector-set! perm (car o) k)
+                    (loop (+ k 1) (cdr o))))))))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;  2. Event construction from LTS transitions
@@ -223,8 +344,9 @@
                                         result))
                            (cloop (cdr chs) result)))))))
 
-          ;; Compute level ordering
-          (let ((level-perm (compute-level-ordering instances channels)))
+          ;; Compute level ordering (using channel-map for optimized ordering)
+          (let ((level-perm (compute-level-ordering-from-channel-map
+                             channel-map n)))
 
             (dis "check-deadlock-saturation!: "
                  (number->string n) " instances, "
@@ -274,29 +396,35 @@
 
                     ;; Run saturation
                     (dis "check-deadlock-saturation!: running saturation ..." dnl)
-                    (let ((reached (MDDSaturation.ComputeReachable
-                                    init-mdd events)))
+                    (let* ((t-sat-0 (Time.Now))
+                           (reached (MDDSaturation.ComputeReachable
+                                     init-mdd events))
+                           (t-sat-1 (Time.Now)))
 
                       (dis "check-deadlock-saturation!: reachable set: "
                            (number->string (MDD.Size reached))
-                           " MDD nodes" dnl)
+                           " MDD nodes (saturation: "
+                           (number->string (- t-sat-1 t-sat-0)) "s)" dnl)
 
-                      ;; Compute has-successor
-                      (let ((has-succ (MDDSaturation.HasSuccessor
-                                       reached events)))
-                        (let ((deadlocked (MDD.Difference reached has-succ)))
+                      ;; Compute deadlocked states directly (incremental subtraction)
+                      (let* ((t-dl-0 (Time.Now))
+                             (deadlocked (MDDSaturation.ComputeDeadlocked
+                                          reached events))
+                             (t-dl-1 (Time.Now)))
+                        (dis "check-deadlock-saturation!: deadlock detection: "
+                             (number->string (- t-dl-1 t-dl-0)) "s" dnl)
 
-                          (if (not (MDD.IsEmpty deadlocked))
-                              (begin
-                                (dis "check-deadlock-saturation!: DEADLOCK FOUND"
-                                     " (deadlock MDD size: "
-                                     (number->string (MDD.Size deadlocked))
-                                     ")" dnl)
-                                #f)
-                              (begin
-                                (dis "check-deadlock-saturation!: system is deadlock-free."
-                                     dnl)
-                                #t)))))))))))))))
+                        (if (not (MDD.IsEmpty deadlocked))
+                            (begin
+                              (dis "check-deadlock-saturation!: DEADLOCK FOUND"
+                                   " (deadlock MDD size: "
+                                   (number->string (MDD.Size deadlocked))
+                                   ")" dnl)
+                              #f)
+                            (begin
+                              (dis "check-deadlock-saturation!: system is deadlock-free."
+                                   dnl)
+                              #t))))))))))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (dis "saturation.scm loaded." dnl)

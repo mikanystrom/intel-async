@@ -23,4 +23,11 @@ PROCEDURE ComputeReachable(initial: MDD.T; events: EventList) : MDD.T;
    deadlocked = Difference(reached, HasSuccessor(events)). *)
 PROCEDURE HasSuccessor(reached: MDD.T; events: EventList) : MDD.T;
 
+(* Compute the set of deadlocked states directly by incremental
+   subtraction.  Starts with reached and removes states that have
+   a successor under each event.  Terminates early when the set
+   becomes empty.  Much faster than HasSuccessor when few states
+   are deadlocked. *)
+PROCEDURE ComputeDeadlocked(reached: MDD.T; events: EventList) : MDD.T;
+
 END MDDSaturation.

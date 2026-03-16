@@ -316,6 +316,48 @@ PROCEDURE ComputeReachable(initial: MDD.T; events: EventList) : MDD.T =
     END;
   END ComputeReachable;
 
+(* ---- HasSuccForEvent cache ----
+   Direct-mapped cache keyed on MDD node identity.
+   Cleared before each event.  Prevents exponential
+   recomputation when MDD sub-nodes are shared. *)
+
+TYPE
+  HSCacheEntry = RECORD
+    node   : MDD.T;
+    result : MDD.T;
+  END;
+
+CONST HSCacheSize = 65536;
+
+VAR
+  hsCache : REF ARRAY OF HSCacheEntry := NIL;
+  hsMask  : CARDINAL := HSCacheSize - 1;
+
+PROCEDURE InitHSCache() =
+  BEGIN
+    IF hsCache = NIL THEN
+      hsCache := NEW(REF ARRAY OF HSCacheEntry, HSCacheSize);
+    END;
+    FOR i := 0 TO HSCacheSize - 1 DO hsCache[i].node := NIL END;
+  END InitHSCache;
+
+PROCEDURE HSCacheLookup(node: MDD.T; VAR result: MDD.T) : BOOLEAN =
+  VAR h := Word.And(MDD.Hash(node), hsMask);
+  BEGIN
+    IF hsCache[h].node = node THEN
+      result := hsCache[h].result;
+      RETURN TRUE;
+    END;
+    RETURN FALSE;
+  END HSCacheLookup;
+
+PROCEDURE HSCacheStore(node: MDD.T; result: MDD.T) =
+  VAR h := Word.And(MDD.Hash(node), hsMask);
+  BEGIN
+    hsCache[h].node := node;
+    hsCache[h].result := result;
+  END HSCacheStore;
+
 PROCEDURE HasSuccessor(reached: MDD.T; events: EventList) : MDD.T =
   VAR
     result := MDD.Zero();
@@ -326,8 +368,10 @@ PROCEDURE HasSuccessor(reached: MDD.T; events: EventList) : MDD.T =
         e    := events[i];
         top  := MDDEvent.TopLevel(e);
         bot  := MDDEvent.BotLevel(e);
-        succ := HasSuccForEvent(reached, e, n - 1, top, bot);
+        succ : MDD.T;
       BEGIN
+        InitHSCache();
+        succ := HasSuccForEvent(reached, e, n - 1, top, bot);
         result := MDD.Union(result, succ);
       END;
     END;
@@ -337,76 +381,113 @@ PROCEDURE HasSuccessor(reached: MDD.T; events: EventList) : MDD.T =
 PROCEDURE HasSuccForEvent(node: MDD.T; event: MDDEvent.T;
                           level: CARDINAL;
                           top, bot: CARDINAL) : MDD.T =
+  VAR cached : MDD.T;
   BEGIN
     IF MDD.IsEmpty(node) THEN RETURN MDD.Zero() END;
     IF level = LAST(CARDINAL) THEN RETURN node END;
 
-    IF level > top THEN
-      VAR
-        dom     := MDD.Domain(level);
-        ch      := NEW(REF ARRAY OF MDD.T, dom);
-        changed := FALSE;
-      BEGIN
-        FOR i := 0 TO dom - 1 DO
-          VAR
-            old := MDD.NodeChild(node, i);
-            sub := HasSuccForEvent(old, event, level - 1, top, bot);
-          BEGIN
-            ch[i] := sub;
-            IF sub # old THEN changed := TRUE END;
-          END;
-        END;
-        IF NOT changed THEN RETURN node END;
-        RETURN MDD.MakeNode(level, ch^);
-      END;
-    ELSIF level = top OR level = bot THEN
-      VAR
-        matrix := MDDEvent.GetMatrix(event, level);
-        dom    := MDD.Domain(level);
-        ch     := NEW(REF ARRAY OF MDD.T, dom);
-      BEGIN
-        FOR i := 0 TO dom - 1 DO ch[i] := MDD.Zero() END;
-        IF matrix # NIL THEN
-          FOR i := 0 TO LAST(matrix^) DO
+    (* Check cache *)
+    IF HSCacheLookup(node, cached) THEN RETURN cached END;
+
+    VAR result : MDD.T;
+    BEGIN
+      IF level > top THEN
+        VAR
+          dom     := MDD.Domain(level);
+          ch      := NEW(REF ARRAY OF MDD.T, dom);
+          changed := FALSE;
+        BEGIN
+          FOR i := 0 TO dom - 1 DO
             VAR
-              from := matrix[i].from;
-              child := MDD.NodeChild(node, from);
+              old := MDD.NodeChild(node, i);
+              sub := HasSuccForEvent(old, event, level - 1, top, bot);
             BEGIN
-              IF NOT MDD.IsEmpty(child) THEN
-                IF level = bot THEN
-                  ch[from] := MDD.Union(ch[from], child);
-                ELSE
-                  VAR sub := HasSuccForEvent(child, event,
-                                             level - 1, top, bot);
-                  BEGIN
-                    ch[from] := MDD.Union(ch[from], sub);
+              ch[i] := sub;
+              IF sub # old THEN changed := TRUE END;
+            END;
+          END;
+          IF NOT changed THEN
+            HSCacheStore(node, node);
+            RETURN node;
+          END;
+          result := MDD.MakeNode(level, ch^);
+        END;
+      ELSIF level = top OR level = bot THEN
+        VAR
+          matrix := MDDEvent.GetMatrix(event, level);
+          dom    := MDD.Domain(level);
+          ch     := NEW(REF ARRAY OF MDD.T, dom);
+        BEGIN
+          FOR i := 0 TO dom - 1 DO ch[i] := MDD.Zero() END;
+          IF matrix # NIL THEN
+            FOR i := 0 TO LAST(matrix^) DO
+              VAR
+                from := matrix[i].from;
+                child := MDD.NodeChild(node, from);
+              BEGIN
+                IF NOT MDD.IsEmpty(child) THEN
+                  IF level = bot THEN
+                    ch[from] := MDD.Union(ch[from], child);
+                  ELSE
+                    VAR sub := HasSuccForEvent(child, event,
+                                               level - 1, top, bot);
+                    BEGIN
+                      ch[from] := MDD.Union(ch[from], sub);
+                    END;
                   END;
                 END;
               END;
             END;
           END;
+          result := MDD.MakeNode(level, ch^);
         END;
-        RETURN MDD.MakeNode(level, ch^);
-      END;
-    ELSE
-      VAR
-        dom     := MDD.Domain(level);
-        ch      := NEW(REF ARRAY OF MDD.T, dom);
-        changed := FALSE;
-      BEGIN
-        FOR i := 0 TO dom - 1 DO
-          VAR
-            old := MDD.NodeChild(node, i);
-            sub := HasSuccForEvent(old, event, level - 1, top, bot);
-          BEGIN
-            ch[i] := sub;
-            IF sub # old THEN changed := TRUE END;
+      ELSE
+        VAR
+          dom     := MDD.Domain(level);
+          ch      := NEW(REF ARRAY OF MDD.T, dom);
+          changed := FALSE;
+        BEGIN
+          FOR i := 0 TO dom - 1 DO
+            VAR
+              old := MDD.NodeChild(node, i);
+              sub := HasSuccForEvent(old, event, level - 1, top, bot);
+            BEGIN
+              ch[i] := sub;
+              IF sub # old THEN changed := TRUE END;
+            END;
           END;
+          IF NOT changed THEN
+            HSCacheStore(node, node);
+            RETURN node;
+          END;
+          result := MDD.MakeNode(level, ch^);
         END;
-        IF NOT changed THEN RETURN node END;
-        RETURN MDD.MakeNode(level, ch^);
       END;
+
+      HSCacheStore(node, result);
+      RETURN result;
     END;
   END HasSuccForEvent;
+
+PROCEDURE ComputeDeadlocked(reached: MDD.T; events: EventList) : MDD.T =
+  VAR
+    deadlocked := reached;
+    n          := MDD.NumLevels();
+  BEGIN
+    FOR i := 0 TO LAST(events^) DO
+      IF MDD.IsEmpty(deadlocked) THEN RETURN deadlocked END;
+      VAR
+        e    := events[i];
+        top  := MDDEvent.TopLevel(e);
+        bot  := MDDEvent.BotLevel(e);
+        succ : MDD.T;
+      BEGIN
+        InitHSCache();
+        succ := HasSuccForEvent(deadlocked, e, n - 1, top, bot);
+        deadlocked := MDD.Difference(deadlocked, succ);
+      END;
+    END;
+    RETURN deadlocked;
+  END ComputeDeadlocked;
 
 BEGIN END MDDSaturation.

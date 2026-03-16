@@ -386,6 +386,176 @@ fi
 rm -rf "$TDIR4"
 
 # ============================================================================
+#  BATCH 5: Partial-Order Reduction deadlock checking (1 cspc invocation)
+# ============================================================================
+#
+# Same systems as batches 1-3, checked with check-deadlock-por!.
+# Verifies that POR results agree with full-expansion results,
+# and reports state-space reduction statistics.
+
+echo ""
+echo "--- Batch 5: partial-order reduction ---"
+
+TDIR5=$(mktemp -d)
+
+cp "$SYSDIR"/*.csp "$TDIR5/" 2>/dev/null || true
+cp "$SYSDIR"/build_prodcons.sys "$TDIR5/"
+cp "$SYSDIR"/build_pipeline.sys "$TDIR5/"
+cp "$SYSDIR"/build_dining_det.sys "$TDIR5/"
+cp "$SYSDIR"/build_dining_three_det.sys "$TDIR5/"
+cp "$SYSDIR"/build_dining_three_asym.sys "$TDIR5/"
+cp "$SYSDIR"/build_dining_eight_det.sys "$TDIR5/"
+
+cat > "$TDIR5/driver.scm" <<'ENDSCM'
+(load (string-append (Env.Get "M3UTILS") "/csp/src/setup.scm"))
+(load (string-append (Env.Get "M3UTILS") "/csp/src/cspbuild.scm"))
+
+(define (por-test name sys-file expect-deadlock)
+  (define result (check-deadlock-por! sys-file))
+  (if expect-deadlock
+      (begin
+        (dis name ".por-deadlock="
+             (if (not (eq? result #t)) "yes" "no") dnl)
+        (if (and (not (eq? result #t)) (pair? result))
+            (dis name ".por-trace-len="
+                 (number->string (length result)) dnl)))
+      (begin
+        (dis name ".por-deadlock-free="
+             (if (eq? result #t) "yes" "no") dnl))))
+
+;; Deadlock-free systems
+(por-test "prodcons"    "build_prodcons.sys"          #f)
+(por-test "pipeline"    "build_pipeline.sys"          #f)
+(por-test "dining_asym_3" "build_dining_three_asym.sys" #f)
+
+;; Deadlock systems
+(por-test "dining_det_2"   "build_dining_det.sys"         #t)
+(por-test "dining_det_3"   "build_dining_three_det.sys"   #t)
+(por-test "dining_det_8"   "build_dining_eight_det.sys"   #t)
+
+(dis "BATCH5-DONE" dnl)
+(exit)
+ENDSCM
+
+run_cspc "$TDIR5" driver.scm
+
+if [ $_RC -ne 0 ]; then
+    echo "  FAIL  batch 5 cspc exited with rc=$_RC"
+    echo "$_OUTPUT" | tail -20
+    FAIL=$((FAIL + 6))
+    TOTAL=$((TOTAL + 6))
+else
+    if ! echo "$_OUTPUT" | grep -q "BATCH5-DONE"; then
+        echo "  FAIL  batch 5 did not complete"
+        echo "$_OUTPUT" | tail -20
+        FAIL=$((FAIL + 6))
+        TOTAL=$((TOTAL + 6))
+    else
+        for name in prodcons pipeline dining_asym_3; do
+            if check_result "${name}.por-deadlock-free" "yes"; then
+                pass "por-deadlock-free:$name"
+            else
+                actual=$(get_result "${name}.por-deadlock-free")
+                fail "por-deadlock-free:$name" "expected por-deadlock-free=yes, got '$actual'"
+            fi
+        done
+        for name in dining_det_2 dining_det_3 dining_det_8; do
+            if check_result "${name}.por-deadlock" "yes"; then
+                _trace_len=$(get_result "${name}.por-trace-len")
+                if [ -n "$_trace_len" ] && [ "$_trace_len" -gt 0 ] 2>/dev/null; then
+                    pass "por-deadlock:$name (trace=$_trace_len steps)"
+                else
+                    fail "por-deadlock:$name" "deadlock found but no trace"
+                fi
+            else
+                actual=$(get_result "${name}.por-deadlock")
+                fail "por-deadlock:$name" "expected por-deadlock=yes, got '$actual'"
+            fi
+        done
+    fi
+fi
+
+rm -rf "$TDIR5"
+
+# ============================================================================
+#  BATCH 6: Saturation with optimized level ordering (1 cspc invocation)
+# ============================================================================
+#
+# Tests the optimized MDD level ordering (ring detection, greedy BFS)
+# on dining philosopher systems.  Verifies correctness and reports
+# MDD node counts.
+
+echo ""
+echo "--- Batch 6: saturation with optimized level ordering ---"
+
+TDIR6=$(mktemp -d)
+
+cp "$SYSDIR"/*.csp "$TDIR6/" 2>/dev/null || true
+cp "$SYSDIR"/build_dining_det.sys "$TDIR6/"
+cp "$SYSDIR"/build_dining_three_det.sys "$TDIR6/"
+cp "$SYSDIR"/build_dining_three_asym.sys "$TDIR6/"
+cp "$SYSDIR"/build_dining_eight_det.sys "$TDIR6/"
+
+cat > "$TDIR6/driver.scm" <<'ENDSCM'
+(load (string-append (Env.Get "M3UTILS") "/csp/src/setup.scm"))
+(load (string-append (Env.Get "M3UTILS") "/csp/src/cspbuild.scm"))
+
+(define (sat-test name sys-file expect-deadlock-free)
+  (define result (check-deadlock-saturation! sys-file))
+  (if expect-deadlock-free
+      (dis name ".sat-deadlock-free="
+           (if (eq? result #t) "yes" "no") dnl)
+      (dis name ".sat-deadlock="
+           (if (eq? result #f) "yes" "no") dnl)))
+
+;; Deadlock-free systems
+(sat-test "dining_asym_3" "build_dining_three_asym.sys" #t)
+
+;; Deadlock systems
+(sat-test "dining_det_2" "build_dining_det.sys"       #f)
+(sat-test "dining_det_3" "build_dining_three_det.sys" #f)
+(sat-test "dining_det_8" "build_dining_eight_det.sys" #f)
+
+(dis "BATCH6-DONE" dnl)
+(exit)
+ENDSCM
+
+run_cspc "$TDIR6" driver.scm
+
+if [ $_RC -ne 0 ]; then
+    echo "  FAIL  batch 6 cspc exited with rc=$_RC"
+    echo "$_OUTPUT" | tail -20
+    FAIL=$((FAIL + 4))
+    TOTAL=$((TOTAL + 4))
+else
+    if ! echo "$_OUTPUT" | grep -q "BATCH6-DONE"; then
+        echo "  FAIL  batch 6 did not complete"
+        echo "$_OUTPUT" | tail -20
+        FAIL=$((FAIL + 4))
+        TOTAL=$((TOTAL + 4))
+    else
+        for name in dining_asym_3; do
+            if check_result "${name}.sat-deadlock-free" "yes"; then
+                pass "sat-deadlock-free:$name"
+            else
+                actual=$(get_result "${name}.sat-deadlock-free")
+                fail "sat-deadlock-free:$name" "expected sat-deadlock-free=yes, got '$actual'"
+            fi
+        done
+        for name in dining_det_2 dining_det_3 dining_det_8; do
+            if check_result "${name}.sat-deadlock" "yes"; then
+                pass "sat-deadlock:$name"
+            else
+                actual=$(get_result "${name}.sat-deadlock")
+                fail "sat-deadlock:$name" "expected sat-deadlock=yes, got '$actual'"
+            fi
+        done
+    fi
+fi
+
+rm -rf "$TDIR6"
+
+# ============================================================================
 #  Summary
 # ============================================================================
 
