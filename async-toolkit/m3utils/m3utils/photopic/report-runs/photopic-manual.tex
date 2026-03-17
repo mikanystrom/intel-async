@@ -258,6 +258,64 @@ spectrum can score $R_a \geq 80$ while rendering saturated reds
 poorly ($R_9 < 0$), which is precisely the scenario explored by the
 inverse problem mode of \photopic{}.
 
+\subsection{TM-30 Color Fidelity and Gamut}
+\label{sec:tm30-math}
+
+IES~TM-30 (standardized as CIE~224:2017) addresses the well-known
+deficiencies of CRI by using 99~Color Evaluation Samples (CES),
+the CIECAM02 color appearance model, and the CAM02-UCS uniform color
+space.  \photopic{} implements TM-30 in grid mode, enabled by the
+\cmd{-tm30} flag.
+
+\paragraph{Reference illuminant.}
+CIE~2017 selects the reference illuminant based on CCT:
+\begin{itemize}
+  \item $\text{CCT} < 4000\,\text{K}$: Planckian blackbody $B(\lambda, T)$
+  \item $4000 \leq \text{CCT} \leq 5000\,\text{K}$: linear blend of
+    Y-normalized Planckian and CIE D-illuminant, with mixing fraction
+    $m = (\text{CCT} - 4000)/1000$
+  \item $\text{CCT} > 5000\,\text{K}$: CIE D-series illuminant
+    $S_D(\lambda) = S_0(\lambda) + M_1 S_1(\lambda) + M_2 S_2(\lambda)$
+\end{itemize}
+where $S_0$, $S_1$, $S_2$ are CIE basis functions and $M_1$, $M_2$
+are coefficients derived from the daylight-locus chromaticity at the
+given CCT.
+
+\paragraph{Color appearance.}
+For each of the 99~CES, \photopic{} computes the reflected tristimulus
+values under both the test and reference illuminants using the CIE 1964
+$10^\circ$ standard observer.  The XYZ values are then transformed through
+the CIECAM02 forward model (sharpened chromatic adaptation via $M_{\text{CAT02}}$,
+nonlinear cone response compression, opponent color channels) to obtain
+lightness~$J$, colorfulness~$M$, and hue angle~$h$.  These are then
+mapped to the CAM02-UCS uniform space via:
+\begin{equation}
+  J' = \frac{1.7\,J}{1 + 0.007\,J}, \qquad
+  M' = \frac{\ln(1 + 0.0228\,M)}{0.0228}, \qquad
+  a' = M'\cos h, \quad b' = M'\sin h
+  \label{eq:cam02ucs}
+\end{equation}
+
+\paragraph{TM-30 metrics.}
+Three metrics are computed:
+\begin{itemize}
+  \item $R_f$ (Fidelity Index): the average color difference $\overline{\Delta E'}$
+    in $J'a'b'$ space across all 99~CES, mapped to a 0--100 scale via
+    a soft-capped formula:
+    \begin{equation}
+      R_f = 10 \ln\!\Bigl(\exp\!\bigl(\tfrac{100 - 6.73\,\overline{\Delta E'}}{10}\bigr) + 1\Bigr)
+      \label{eq:Rf}
+    \end{equation}
+  \item $R_g$ (Gamut Index): the ratio of the test-illuminant gamut
+    area to the reference gamut area in $a'b'$ space, computed as
+    $R_g = 100 \times A_{\text{test}} / A_{\text{ref}}$ where areas are
+    determined by the shoelace formula over 16~hue-bin centroids.
+    $R_g > 100$ indicates gamut expansion, $R_g < 100$ indicates
+    desaturation.
+  \item $R_{cs,h_j}$ ($j = 1 \ldots 16$): chroma shift per hue bin,
+    quantifying the direction of gamut change.
+\end{itemize}
+
 \subsection{The optimization problem}
 
 In the forward mode (\cmd{-run}), \photopic{} solves:
@@ -422,6 +480,16 @@ W.~Walter,
 bounds for sources with color rendering constraints,''
 \emph{Color Res.\ Appl.}, vol.~3, no.~2, pp.~83--90, 1978.
 
+\bibitem{cie2017}
+CIE,
+\emph{CIE 224:2017 --- Colour Fidelity Index for accurate scientific
+use}, Commission Internationale de l'\'Eclairage, 2017.
+
+\bibitem{li2002}
+C.~Li, M.\,R.~Luo, B.~Rigg, and R.\,W.\,G.~Hunt,
+``CMC 2000 chromatic adaptation transform: CMCCAT2000,''
+\emph{Color Res.\ Appl.}, vol.~27, no.~1, pp.~49--58, 2002.
+
 \end{thebibliography}
 
 %======================================================================
@@ -552,6 +620,36 @@ test color sample axis with the worst $R_i$ is removed from the CRI
 average, and the optimizer re-runs against the remaining axes.  This
 explores how much additional efficacy can be gained by sacrificing
 individual color rendering dimensions.
+
+\subsection{\texttt{-grid}: Grid-based integration}
+
+\begin{lstlisting}[style=shell]
+photopic -grid <other flags...> -scm -scmfile photopic.scm
+\end{lstlisting}
+
+Enables the grid-based integration mode, which pre-tabulates all
+spectral weight vectors (color matching functions, test color sample
+reflectances, photopic response) on a 391-point grid at 1\,nm
+resolution.  Spectrum evaluation then reduces to dot products,
+eliminating per-evaluation numerical integration.  Grid mode is
+required for TM-30 computation and is recommended for all use.
+
+\subsection{\texttt{-tm30}: TM-30 color metrics}
+\label{sec:tm30-cli}
+
+\begin{lstlisting}[style=shell]
+photopic -grid -tm30 <other flags...> -scm -scmfile photopic.scm
+\end{lstlisting}
+
+Enables computation of TM-30 metrics ($R_f$, $R_g$, $R_{cs,h_j}$)
+alongside CRI.  Requires \cmd{-grid} mode.  This flag loads the 99~CES
+reflectance spectra (\file{ces99.scm}), the CIE 1964 $10^\circ$ color
+matching functions, and the CIE D-illuminant basis functions at startup.
+
+When \cmd{-tm30} is active, \cmd{grid-calc-specs} appends TM-30 data to
+its return value (see Section~\ref{sec:tm30-access}).  TM-30 adds
+approximately 30\% overhead to each spectrum evaluation due to the 99
+additional color-sample dot products and CIECAM02 transforms.
 
 %======================================================================
 \section{Worked Examples}
@@ -959,6 +1057,71 @@ $PHOTOPIC -scm -scmfile ../src/photopic.scm
 \end{lstlisting}
 
 %======================================================================
+\section{TM-30 Usage}
+\label{sec:tm30-access}
+
+TM-30 metrics are available in both interactive and batch modes when
+\cmd{-grid -tm30} flags are active.
+
+\subsection{Interactive TM-30 evaluation}
+
+\begin{lstlisting}[style=scheme]
+;; Compute TM-30 for a fluorescent illuminant
+(let ((fl2-grid (spectrum->grid (FL 2))))
+  (grid-calc-tm30 fl2-grid))
+;; => (Rf Rg #(Rcs-h1 ... Rcs-h16) ((CCT Duv) (R1 ... R14)))
+
+;; TM-30 for a blackbody (should give Rf~100, Rg~100)
+(grid-calc-tm30 (grid-blackbody 3000))
+
+;; Compute the CIE D-illuminant reference for a given CCT
+(grid-d-illuminant 6500)     ;; D65-like spectrum
+(grid-tm30-reference 4500)   ;; Planckian/D blend at 4500K
+\end{lstlisting}
+
+\subsection{TM-30 in \texttt{grid-calc-specs}}
+
+When \cmd{*compute-tm30*} is true (set automatically by the \cmd{-tm30}
+flag), \cmd{grid-calc-specs} appends a TM-30 data element to its
+return list:
+
+\begin{lstlisting}[style=scheme]
+(cri-ra worst-ri efficacy
+ ((cct duv) (R1 R2 ... R14))
+ cri-14 worst-14 sel-cri sel-worst worst-axis
+ ;; appended when -tm30 is active:
+ (Rf Rg #(Rcs-h1 ... Rcs-h16) ((ref-cct ref-duv) ...)))
+\end{lstlisting}
+
+To extract TM-30 fields from the result:
+
+\begin{lstlisting}[style=scheme]
+(define s (grid-calc-specs my-sgrid))
+;; TM-30 data is the last element (10th, 0-indexed 9th)
+(define tm (list-ref s 9))     ;; TM-30 data list
+(car tm)                       ;; Rf (fidelity index)
+(cadr tm)                      ;; Rg (gamut index)
+(caddr tm)                     ;; Rcs vector (16 hue bins)
+(vector-ref (caddr tm) 0)      ;; Rcs for hue bin 1
+\end{lstlisting}
+
+\subsection{Validation}
+
+A validation script is provided at \file{report-runs/validate-tm30.scm}
+that compares \photopic{} TM-30 results against reference values from
+the Python \texttt{colour-science} library:
+
+\begin{lstlisting}[style=shell]
+$PHOTOPIC -scm -scmfile $SCMFILE -grid -tm30 \
+    -scmfile ../report-runs/validate-tm30.scm
+\end{lstlisting}
+
+Expected: Planckian self-tests give $R_f \approx 100$, $R_g \approx 100$;
+FL2 gives $R_f \approx 70$, $R_g \approx 86$; FL11 gives
+$R_f \approx 80$, $R_g \approx 100$.  All results agree with
+\texttt{colour-science} within $\pm 2$ units.
+
+%======================================================================
 \section{Customization}
 \label{sec:customization}
 
@@ -1061,6 +1224,8 @@ Variable & Default & Purpose \\
 \cmd{*num-constraints*} & 6     & Number of COBYLA constraints \\
 \cmd{l0}                & $380 \times 10^{-9}$ & Blue limit of visible spectrum (m) \\
 \cmd{l1}                & $770 \times 10^{-9}$ & Red limit of visible spectrum (m) \\
+\cmd{*use-grid*}        & \cmd{\#f} & Grid-based integration (set by \cmd{-grid}) \\
+\cmd{*compute-tm30*}    & \cmd{\#f} & TM-30 computation (set by \cmd{-tm30}) \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -1081,6 +1246,7 @@ File & Contents \\
 \file{src/Tcs.i3}                 & Test color sample reflectance spectra (1--14) \\
 \file{src/TempUv.m3}              & Temperature-to-$uv$ lookup table \\
 \file{src/Blackbody.m3}           & Planck blackbody radiance \\
+\file{src/ces99.scm}              & 99 CES reflectance spectra, 10$^\circ$ CMFs, D-basis \\
 \file{src/m3makefile}             & Build dependencies and Scheme stub generation \\
 \bottomrule
 \end{tabular}

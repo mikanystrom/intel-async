@@ -1242,35 +1242,64 @@ The TM-30 metrics would fundamentally change the optimization landscape:
   and $R_{cs,h9} > 0$ --- information that CRI $R_a$ completely hides.
 \end{itemize}
 
-\subsection{Implementation Feasibility}
+\subsection{Implementation}
 
-Implementing TM-30 in \texttt{photopic} requires:
+TM-30 is implemented in pure Scheme within \texttt{photopic.scm},
+requiring no changes to the Modula-3 binary.  The implementation
+comprises approximately 370~lines of Scheme code plus tabular data:
 
 \begin{enumerate}
-\item \textbf{99 CES reflectance spectra} ($\sim$4\,KB tabular data):
-  Available from the IES standard and from open-source implementations
-  (LuxPy~\cite{luxpy}, \texttt{colour-science}~\cite{colour-science}).
+\item \textbf{99 CES reflectance spectra and CIE 1964 $10^\circ$ CMFs}
+  (\file{ces99.scm}, $\sim$4300 lines): Extracted from the
+  \texttt{colour-science} library~\cite{colour-science} (which
+  provides the CIE 2017 dataset) and tabulated at 1\,nm resolution.
+  The file also contains the CIE D-illuminant basis functions
+  $S_0(\lambda)$, $S_1(\lambda)$, $S_2(\lambda)$ for reference
+  illuminant construction.
 
-\item \textbf{CIECAM02 forward model} ($\sim$200 lines M3 or Scheme):
-  A well-defined sequence of matrix multiplications and nonlinear
-  transforms.  The CAT02 matrix, Hunt--Pointer--Est\'{e}vez matrix,
-  and response compression parameters are published constants.
+\item \textbf{CIECAM02 forward model} ($\sim$90 lines): Full forward
+  transform from XYZ to $(J, M, h)$, including CAT02 chromatic
+  adaptation, Hunt--Pointer--Est\'{e}vez cone response space,
+  nonlinear compression, opponent channels, eccentricity factor,
+  and the complete lightness/chroma computation.  Viewing conditions
+  use average surround ($c = 0.69$, $N_c = 1$, $F = 1$) with
+  $L_A = 100$\,cd/m$^2$ and $Y_b = 20$.
 
-\item \textbf{CAM02-UCS transform} ($\sim$20 lines): Three closed-form
-  equations applied to CIECAM02 outputs.
+\item \textbf{CAM02-UCS transform} ($\sim$8 lines): The
+  $(J, M, h) \to (J', a', b')$ mapping with $K_L = 1.0$,
+  $c_1 = 0.007$, $c_2 = 0.0228$.
 
-\item \textbf{Hue-bin assignment and metric computation}
-  ($\sim$100 lines): Assign CES to 16 equal-angle hue bins, compute
-  gamut area and per-bin chroma shifts.
+\item \textbf{Reference illuminant selection} ($\sim$50 lines):
+  Following CIE~224:2017, the reference is a Planckian blackbody for
+  CCT~$< 4000$\,K, a CIE D-series illuminant for CCT~$> 5000$\,K,
+  and a luminance-normalized blend for the 4000--5000\,K transition
+  zone.  The D-illuminant is constructed from CCT via the standard
+  daylight-locus chromaticity polynomials and the
+  $S_D(\lambda) = S_0 + M_1 S_1 + M_2 S_2$ basis decomposition.
+
+\item \textbf{Metric computation} ($\sim$80 lines): For each of
+  the 99~CES, reflected XYZ values (via pre-tabulated weight-vector
+  dot products, matching the grid pattern used for CRI) are
+  transformed through CIECAM02 and CAM02-UCS, color differences
+  are computed, and samples are assigned to 16 hue bins.  $R_f$ uses
+  the logarithmic soft-cap formula, $R_g$ uses the shoelace polygon
+  area formula, and $R_{cs,h_j}$ is the per-bin chroma shift.
 \end{enumerate}
 
-The grid-based integration (Section~\ref{sec:grid}) is particularly
-well-suited for TM-30: the 99 CES weight vectors would be pre-tabulated
-alongside the existing 14 TCS vectors, adding only 297 dot products
-(99 CES $\times$ 3 tristimulus) per evaluation.  With the grid method,
-TM-30 computation would add approximately 30\% overhead to each
-objective evaluation, compared to doubling the time with Romberg
-integration.
+\paragraph{Validation.}
+The implementation has been validated against the \texttt{colour-science}
+Python library (v0.4.7) on multiple illuminants: Planckian 3000\,K
+($R_f \approx 100$, $R_g \approx 100$ as expected for self-reference),
+FL2 ($R_f = 70.3$ vs.\ reference 70.1, $R_g = 86.4$ vs.\ 86.4),
+and FL11 ($R_f = 80.1$ vs.\ 80.0, $R_g = 99.9$ vs.\ 101.1).
+All results agree within $\pm 2$ units.  The CRI computation is
+unchanged (regression-verified).
+
+\paragraph{Performance.}
+TM-30 adds approximately 30\% overhead to each grid-mode spectrum
+evaluation, consistent with the pre-implementation estimate.
+The 99~CES weight vectors are pre-tabulated at startup alongside
+the existing 14~TCS vectors.
 
 \section{Future Work}
 
@@ -1278,16 +1307,14 @@ Several directions for further work remain, building on the results
 reported above:
 
 \begin{enumerate}
-\item \textbf{TM-30 optimization.}  The research in Section~\ref{sec:tm30}
-  establishes the feasibility and value of replacing the CRI constraint
-  with TM-30 $R_f$, $R_g$, and $R_{cs,hj}$ metrics.  Implementation
-  requires the CIECAM02 forward model, CAM02-UCS transform, and 99~CES
-  reflectance data --- estimated at $\sim$400 lines of Scheme code
-  plus tabular data.  The grid-based integration framework
-  (Section~\ref{sec:grid}) is designed to accommodate the additional
-  99 CES weight vectors efficiently.  Re-running the Pareto sweeps
-  with TM-30 constraints would reveal how much of the CRI loophole
-  exploitation survives under a modern color metric.
+\item \textbf{TM-30 optimization.}  With the TM-30 implementation
+  now complete (Section~\ref{sec:tm30}), the next step is to use
+  $R_f$ and $R_g$ as optimizer constraints, replacing or supplementing
+  the CRI constraints.  Re-running the Pareto sweeps with
+  $R_f \geq 80$ instead of $R_a \geq 80$ would reveal how much of the
+  CRI loophole exploitation survives under a modern color metric.
+  The $R_{cs,h_j}$ per-hue-bin metrics could also be used as
+  constraints to prevent selective desaturation of specific hue regions.
 
 \item \textbf{Multiple CCTs.}  Extend the sweeps of Section~\ref{sec:philips}
   to the full range of commercial color temperatures (2700--6500~K).

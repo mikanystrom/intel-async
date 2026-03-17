@@ -581,6 +581,11 @@
 (define *grid-tcs-xyz*     #f)  ;; vector of 14 (vx vy vz) triples,
                                 ;;   pre-multiplied TCS_j * xyz
 
+;;; TM-30 grid data (set by init-ces-grid!, lazy-loaded with -tm30)
+(define *compute-tm30*     #f)  ;; #t when -tm30 flag present
+(define *grid-ces-xyz*     #f)  ;; vector of 99 (vx vy vz) triples,
+                                ;;   pre-multiplied CES_j * xyz_10deg
+
 ;;; vector operations
 
 (define (vdot a b)
@@ -746,6 +751,407 @@
     (list ref-temp-res
           (map calc-one '(1 2 3 4 5 6 7 8 9 10 11 12 13 14)))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; TM-30 (IES/CIE 2017) Colour Fidelity and Gamut Metrics
+;;
+;; Uses 99 CES samples, CIE 1964 10-degree observer, CIECAM02,
+;; and CAM02-UCS.  Grid-mode only.
+;;
+
+;;; Initialize CES weight vectors (call after init-grid! and loading ces99.scm)
+
+(define (init-ces-grid!)
+  ;; Pre-multiply CES_j(lambda) * xyz_10deg at each grid point.
+  ;; Uses 10-degree CMFs (*cmf10-x/y/z*) from ces99.scm, not the
+  ;; 2-degree CIE functions used for CRI.
+  (set! *grid-ces-xyz* (make-vector *ces-count*))
+  (let tloop ((j 0))
+    (if (< j *ces-count*)
+        (begin
+          (let ((tx (make-vector *grid-n*))
+                (ty (make-vector *grid-n*))
+                (tz (make-vector *grid-n*))
+                (refl (vector-ref *ces-reflectance* j)))
+            (let iloop ((i 0))
+              (if (< i *grid-n*)
+                  (begin
+                    (let ((ri (vector-ref refl i)))
+                      (vector-set! tx i (* ri (vector-ref *cmf10-x* i)))
+                      (vector-set! ty i (* ri (vector-ref *cmf10-y* i)))
+                      (vector-set! tz i (* ri (vector-ref *cmf10-z* i))))
+                    (iloop (+ i 1)))))
+            (vector-set! *grid-ces-xyz* j (list tx ty tz)))
+          (tloop (+ j 1)))))
+  (dis "CES grid initialized: " *ces-count* " samples" dnl))
+
+;;; Grid-based XYZ using 10-degree observer (for TM-30)
+
+(define (grid-xyz-10deg sgrid)
+  (list (vdot sgrid *cmf10-x*)
+        (vdot sgrid *cmf10-y*)
+        (vdot sgrid *cmf10-z*)))
+
+;;; Grid-based reflected XYZ for CES j (0-indexed)
+
+(define (grid-ces-reflected-xyz sgrid-norm j)
+  (let ((txyz (vector-ref *grid-ces-xyz* j)))
+    (list (vdot sgrid-norm (car   txyz))
+          (vdot sgrid-norm (cadr  txyz))
+          (vdot sgrid-norm (caddr txyz)))))
+
+;;; Grid-based normalize using 10-degree observer
+
+(define (grid-normalize-10deg sgrid)
+  (let* ((Y (vdot sgrid *cmf10-y*))
+         (ng (vcopy sgrid)))
+    (vscale! ng (/ 100.0 Y))
+    ng))
+
+;;; atan2 — mscheme's atan ignores 2nd arg, so implement manually
+
+(define (atan2 y x)
+  (cond ((> x 0)         (atan (/ y x)))
+        ((and (< x 0) (>= y 0)) (+ (atan (/ y x)) pi))
+        ((and (< x 0) (< y 0))  (- (atan (/ y x)) pi))
+        ((and (= x 0) (> y 0))  (/ pi 2))
+        ((and (= x 0) (< y 0))  (/ pi -2))
+        (else 0.0)))  ;; x=0, y=0: undefined, return 0
+
+;;; 3x3 matrix-vector multiply: M * v, M is row-major list of 9 elements
+
+(define (mat3x3-mul m v)
+  (let ((x (car v)) (y (cadr v)) (z (caddr v)))
+    (list (+ (* (list-ref m 0) x) (* (list-ref m 1) y) (* (list-ref m 2) z))
+          (+ (* (list-ref m 3) x) (* (list-ref m 4) y) (* (list-ref m 5) z))
+          (+ (* (list-ref m 6) x) (* (list-ref m 7) y) (* (list-ref m 8) z)))))
+
+;;; CIECAM02 constants
+
+;; CAT02 chromatic adaptation matrix
+(define *M-CAT02*
+  '( 0.7328  0.4296 -0.1624
+    -0.7036  1.6975  0.0061
+     0.003   0.0136  0.9834))
+
+;; CAT02 inverse
+(define *M-CAT02-inv*
+  '( 1.09612382 -0.278869    0.18274518
+     0.45436904  0.47353315  0.0720978
+    -0.00962761 -0.00569803  1.01532564))
+
+;; Hunt-Pointer-Estevez matrix (XYZ -> HPE cone space)
+(define *M-HPE*
+  '( 0.38971  0.68898 -0.07868
+    -0.22981  1.18340  0.04641
+     0.00000  0.00000  1.00000))
+
+;; Combined M_HPE * M_CAT02^-1
+(define *M-HPC*
+  '( 0.7409791   0.21802516  0.04100575
+     0.28535329  0.62420157  0.09044513
+    -0.00962761 -0.00569803  1.01532564))
+
+;; CIE 2017 viewing conditions
+(define *cam-LA*  100)   ;; adapting luminance (cd/m2)
+(define *cam-Yb*   20)   ;; background relative luminance
+(define *cam-c*   0.69)  ;; surround factor (average)
+(define *cam-Nc*  1.0)   ;; chromatic induction factor
+(define *cam-F*   1.0)   ;; degree of adaptation factor
+
+;;; CIECAM02 forward model
+;;; Given XYZ of sample and XYZ_w of white point, returns (J M h-radians)
+
+(define (ciecam02-forward XYZ XYZ-w)
+  (let* (;; --- viewing condition parameters ---
+         (LA    *cam-LA*)
+         (Yb    *cam-Yb*)
+         (k     (/ 1 (+ (* 5 LA) 1)))
+         (FL    (+ (* 0.2 k k k k LA)
+                   (* 0.1 (- 1 (* k k k k))
+                      (Math.pow (* 5 LA) (/ 1 3)))))
+         (n     (/ Yb 100.0))   ;; Yb/Yw where Yw=100 (normalized)
+         (Nbb   (/ 0.725 (Math.pow n 0.2)))
+         (Ncb   Nbb)
+         (z     (+ 1.48 (Math.sqrt n)))
+
+         ;; --- chromatic adaptation ---
+         ;; degree of adaptation
+         (D     (* *cam-F*
+                   (- 1 (* (/ 1 3.6)
+                            (exp (/ (+ (- LA) 42) 92))))))
+
+         ;; white point adapted RGB
+         (RGB-w  (mat3x3-mul *M-CAT02* XYZ-w))
+         (Rw (car RGB-w)) (Gw (cadr RGB-w)) (Bw (caddr RGB-w))
+
+         ;; adapted white RGB (D-scaled)
+         (Dr (+ (* D (/ 100.0 Rw)) (- 1 D)))
+         (Dg (+ (* D (/ 100.0 Gw)) (- 1 D)))
+         (Db (+ (* D (/ 100.0 Bw)) (- 1 D)))
+
+         ;; --- adapt the sample ---
+         (RGB-s  (mat3x3-mul *M-CAT02* XYZ))
+         (Rc (* (car RGB-s)   Dr))
+         (Gc (* (cadr RGB-s)  Dg))
+         (Bc (* (caddr RGB-s) Db))
+
+         ;; --- adapt the white ---
+         (Rwc (* Rw Dr))
+         (Gwc (* Gw Dg))
+         (Bwc (* Bw Db))
+
+         ;; --- HPE cone responses ---
+         (HPE-s  (mat3x3-mul *M-HPC* (list Rc Gc Bc)))
+         (Rp (car HPE-s)) (Gp (cadr HPE-s)) (Bp (caddr HPE-s))
+
+         (HPE-w  (mat3x3-mul *M-HPC* (list Rwc Gwc Bwc)))
+         (Rpw (car HPE-w)) (Gpw (cadr HPE-w)) (Bpw (caddr HPE-w)))
+
+    ;; --- nonlinear compression ---
+    (define (compress x)
+      (let* ((sign (if (>= x 0) 1 -1))
+             (ax   (abs x))
+             (p    (Math.pow (/ (* FL ax) 100.0) 0.42)))
+        (* sign (/ (* 400 p) (+ 27.13 p)) )))
+
+    (let* ((Ra (+ (compress Rp) 0.1))
+           (Ga (+ (compress Gp) 0.1))
+           (Ba (+ (compress Bp) 0.1))
+
+           (Raw (+ (compress Rpw) 0.1))
+           (Gaw (+ (compress Gpw) 0.1))
+           (Baw (+ (compress Bpw) 0.1))
+
+           ;; --- opponent channels ---
+           (a  (+ Ra (* -12.0 (/ Ga 11.0)) (/ Ba 11.0)))
+           (b  (/ (+ Ra Ga (* -2 Ba)) 9.0))
+
+           ;; --- hue angle ---
+           (h-rad (atan2 b a))
+           (h-deg (let ((d (* (/ 180.0 pi) h-rad)))
+                    (if (< d 0) (+ d 360) d)))
+
+           ;; --- achromatic response ---
+           (A  (* (+ (* 2 Ra) Ga (/ Ba 20.0) -0.305) Nbb))
+           (Aw (* (+ (* 2 Raw) Gaw (/ Baw 20.0) -0.305) Nbb))
+
+           ;; --- lightness ---
+           (J  (* 100 (Math.pow (/ A Aw) (* *cam-c* z))))
+
+           ;; --- eccentricity factor ---
+           (et (/ (+ (cos (+ h-rad 2.0)) 3.8) 4.0))
+
+           ;; --- chroma ---
+           (t  (/ (* (/ 50000.0 13.0) *cam-Nc* Ncb et (Math.sqrt (+ (* a a) (* b b))))
+                  (+ Ra Ga (* (/ 21.0 20.0) Ba))))
+           (C  (* (Math.pow t 0.9)
+                  (Math.pow (/ J 100.0) 0.5)
+                  (Math.pow (- 1.64 (Math.pow 0.29 n)) 0.73)))
+
+           ;; --- colorfulness ---
+           (M  (* C (Math.pow FL 0.25))))
+
+      (list J M h-rad))))
+
+;;; CAM02-UCS transform: (J, M, h-rad) -> (J', a', b')
+;;; Luo et al. (2006), CAM02-UCS coefficients: K_L=1.0, c1=0.007, c2=0.0228
+
+(define (cam02-ucs JMh)
+  (let* ((J (car JMh))
+         (M (cadr JMh))
+         (h (caddr JMh))
+         (Jp (/ (* 1.7 J) (+ 1 (* 0.007 J))))
+         (Mp (/ (log (+ 1 (* 0.0228 M))) 0.0228))
+         (ap (* Mp (cos h)))
+         (bp (* Mp (sin h))))
+    (list Jp ap bp)))
+
+;;; TM-30 Rf formula: softcapped fidelity index
+;;; R_f = 10 * ln(exp((100 - 6.73 * deltaE') / 10) + 1)
+
+(define (delta-E-to-Rf dE)
+  (* 10 (log (+ (exp (/ (- 100 (* 6.73 dE)) 10)) 1))))
+
+;;; Shoelace formula for polygon area from 16 hue-bin centroids
+
+(define (shoelace-area pts)
+  ;; pts is a vector of 16 (a' . b') pairs
+  (let ((n (vector-length pts)))
+    (let loop ((i 0) (sum 0.0))
+      (if (>= i n)
+          (/ (abs sum) 2.0)
+          (let* ((j    (modulo (+ i 1) n))
+                 (pi-v (vector-ref pts i))
+                 (pj   (vector-ref pts j)))
+            (loop (+ i 1)
+                  (+ sum (- (* (car pi-v) (cdr pj))
+                            (* (car pj) (cdr pi-v))))))))))
+
+;;; CIE D-illuminant series: construct daylight spectrum from CCT
+;;; SD(λ) = S0(λ) + M1·S1(λ) + M2·S2(λ)
+;;; where M1,M2 are computed from chromaticity (xD,yD) on daylight locus
+
+(define (grid-d-illuminant CCT)
+  (let* (;; CCT -> xD (piecewise polynomial, CIE 015:2004)
+         (T2 (* CCT CCT))
+         (T3 (* T2 CCT))
+         (xD (if (<= CCT 7000)
+                  (+ 0.244063 (/ (* 0.09911e3) CCT)
+                     (/ 2.9678e6 T2) (/ -4.607e9 T3))
+                  (+ 0.23704  (/ (* 0.24748e3) CCT)
+                     (/ 1.9018e6 T2) (/ -2.0064e9 T3))))
+         ;; yD from Judd's quadratic
+         (yD (+ (* -3.000 xD xD) (* 2.870 xD) -0.275))
+         ;; M1, M2 coefficients
+         (M  (+ 0.0241 (* 0.2562 xD) (* -0.7341 yD)))
+         (M1 (/ (+ -1.3515 (* -1.7703 xD) (* 5.9114 yD)) M))
+         (M2 (/ (+ 0.0300  (* -31.4424 xD) (* 30.0717 yD)) M))
+         ;; construct spectrum
+         (v (make-vector *grid-n*)))
+    (let loop ((i 0))
+      (if (< i *grid-n*)
+          (begin
+            (vector-set! v i (+ (vector-ref *d-basis-S0* i)
+                                (* M1 (vector-ref *d-basis-S1* i))
+                                (* M2 (vector-ref *d-basis-S2* i))))
+            (loop (+ i 1)))))
+    v))
+
+;;; TM-30 reference illuminant: Planckian/D blend per CIE 2017
+;;;   CCT < 4000:  Planckian
+;;;   4000..5000:  blend (normalize by Y, then mix)
+;;;   CCT > 5000:  D-series
+
+(define (grid-tm30-reference CCT)
+  (cond
+    ((< CCT 4000) (grid-blackbody CCT))
+    ((> CCT 5000) (grid-d-illuminant CCT))
+    (else
+     ;; blend zone: normalize both by Y (10-deg), then linear mix
+     (let* ((planck  (grid-blackbody CCT))
+            (daylit  (grid-d-illuminant CCT))
+            (Yp      (vdot planck *cmf10-y*))
+            (Yd      (vdot daylit *cmf10-y*))
+            (m       (/ (- CCT 4000) 1000.0))  ;; 0 at 4000K, 1 at 5000K
+            (result  (make-vector *grid-n*)))
+       (let loop ((i 0))
+         (if (< i *grid-n*)
+             (begin
+               (vector-set! result i
+                 (+ (* (- 1.0 m) (/ (vector-ref planck i) Yp))
+                    (* m          (/ (vector-ref daylit i) Yd))))
+               (loop (+ i 1)))))
+       result))))
+
+;;; Main TM-30 calculation (grid-mode only)
+;;; Returns: (Rf Rg Rcs-vector ref-temp-res)
+
+(define (grid-calc-tm30 sgrid)
+  (let* ((norm-sgrid     (grid-normalize-10deg sgrid))
+         ;; CCT from 2-degree observer (per CIE 2017 spec)
+         (test-Yxy       (grid-calc-Yxy (grid-normalize sgrid)))
+         (test-uv        (Yxy->uv test-Yxy))
+         (ref-temp-res   (search-T test-uv))
+         (ref-temp       (car ref-temp-res))
+         (bgrid          (grid-tm30-reference ref-temp))
+         (norm-bgrid     (grid-normalize-10deg bgrid))
+
+         ;; white point XYZ under test and reference (10-degree)
+         (XYZ-w-test (grid-xyz-10deg norm-sgrid))
+         (XYZ-w-ref  (grid-xyz-10deg norm-bgrid))
+
+         ;; per-sample results
+         (n-bins 16)
+         (bin-width (/ (* 2 pi) n-bins))  ;; 22.5 degrees in radians
+
+         ;; accumulators for hue bins
+         (bin-count     (make-vector n-bins 0))
+         (bin-dE-sum    (make-vector n-bins 0.0))
+         (bin-at-sum    (make-vector n-bins 0.0))  ;; test a' sum
+         (bin-bt-sum    (make-vector n-bins 0.0))  ;; test b' sum
+         (bin-ar-sum    (make-vector n-bins 0.0))  ;; ref a' sum
+         (bin-br-sum    (make-vector n-bins 0.0))  ;; ref b' sum
+         (dE-total      0.0))
+
+    ;; process each CES
+    (let ces-loop ((j 0))
+      (if (< j *ces-count*)
+          (let* (;; reflected XYZ under test and reference
+                 (xyz-test (grid-ces-reflected-xyz norm-sgrid j))
+                 (xyz-ref  (grid-ces-reflected-xyz norm-bgrid j))
+
+                 ;; CIECAM02 forward
+                 (JMh-test (ciecam02-forward xyz-test XYZ-w-test))
+                 (JMh-ref  (ciecam02-forward xyz-ref  XYZ-w-ref))
+
+                 ;; CAM02-UCS
+                 (Jpapbp-test (cam02-ucs JMh-test))
+                 (Jpapbp-ref  (cam02-ucs JMh-ref))
+
+                 ;; delta E in J'a'b' space
+                 (dJp (- (car   Jpapbp-test) (car   Jpapbp-ref)))
+                 (dap (- (cadr  Jpapbp-test) (cadr  Jpapbp-ref)))
+                 (dbp (- (caddr Jpapbp-test) (caddr Jpapbp-ref)))
+                 (dE  (Math.sqrt (+ (* dJp dJp) (* dap dap) (* dbp dbp))))
+
+                 ;; assign to hue bin based on reference hue angle
+                 (h-ref (caddr JMh-ref))
+                 (h-pos (if (< h-ref 0) (+ h-ref (* 2 pi)) h-ref))
+                 (bin   (min (- n-bins 1)
+                             (truncate (floor (/ h-pos bin-width))))))
+
+            ;; accumulate
+            (set! dE-total (+ dE-total dE))
+            (vector-set! bin-count  bin (+ (vector-ref bin-count  bin) 1))
+            (vector-set! bin-dE-sum bin (+ (vector-ref bin-dE-sum bin) dE))
+            (vector-set! bin-at-sum bin (+ (vector-ref bin-at-sum bin) (cadr  Jpapbp-test)))
+            (vector-set! bin-bt-sum bin (+ (vector-ref bin-bt-sum bin) (caddr Jpapbp-test)))
+            (vector-set! bin-ar-sum bin (+ (vector-ref bin-ar-sum bin) (cadr  Jpapbp-ref)))
+            (vector-set! bin-br-sum bin (+ (vector-ref bin-br-sum bin) (caddr Jpapbp-ref)))
+
+            (ces-loop (+ j 1)))))
+
+    ;; compute Rf (average fidelity)
+    (let* ((avg-dE (/ dE-total *ces-count*))
+           (Rf     (delta-E-to-Rf avg-dE))
+
+           ;; compute bin centroids and Rg
+           (test-centroids (make-vector n-bins))
+           (ref-centroids  (make-vector n-bins))
+           (Rcs            (make-vector n-bins 0.0)))
+
+      ;; compute centroids per bin
+      (let bin-loop ((b 0))
+        (if (< b n-bins)
+            (let ((cnt (vector-ref bin-count b)))
+              (if (> cnt 0)
+                  (let ((at (/ (vector-ref bin-at-sum b) cnt))
+                        (bt (/ (vector-ref bin-bt-sum b) cnt))
+                        (ar (/ (vector-ref bin-ar-sum b) cnt))
+                        (br (/ (vector-ref bin-br-sum b) cnt)))
+                    (vector-set! test-centroids b (cons at bt))
+                    (vector-set! ref-centroids  b (cons ar br))
+                    ;; Rcs,hj = (test chroma - ref chroma) / ref chroma
+                    (let ((Ct (Math.sqrt (+ (* at at) (* bt bt))))
+                          (Cr (Math.sqrt (+ (* ar ar) (* br br)))))
+                      (if (> Cr 0.001)
+                          (vector-set! Rcs b (/ (- Ct Cr) Cr)))))
+                  (begin
+                    ;; empty bin: use angle midpoint at zero chroma
+                    (let* ((mid-h (+ (* b bin-width) (/ bin-width 2.0))))
+                      (vector-set! test-centroids b (cons 0.0 0.0))
+                      (vector-set! ref-centroids  b (cons 0.0 0.0)))))
+              (bin-loop (+ b 1)))))
+
+      (let* ((test-area (shoelace-area test-centroids))
+             (ref-area  (shoelace-area ref-centroids))
+             (Rg        (if (> ref-area 1e-10)
+                            (* 100 (/ test-area ref-area))
+                            100.0)))
+
+        (list Rf Rg Rcs ref-temp-res)))))
+
 ;;; grid-based luminous and efficacy quantities
 
 (define (grid-calc-lumens sgrid)
@@ -782,10 +1188,14 @@
          (cri-ra   (/ (apply + ri-8) 8))
          (cri-14   (/ (apply + (cadr full-cri)) 14))
          (worst-14 (apply min (cadr full-cri)))
-         (sel-data (compute-on-selection (cadr full-cri))))
+         (sel-data (compute-on-selection (cadr full-cri)))
+         (tm30-data (if *compute-tm30*
+                        (grid-calc-tm30 sgrid)
+                        #f)))
     (append (list cri-ra worst-ri efficacy)
             full-cri
-            (append (list cri-14 worst-14) sel-data))))
+            (append (list cri-14 worst-14) sel-data)
+            (if tm30-data (list tm30-data) '()))))
 
 ;;; current sampled grid (set by specs-func when *use-grid* is #t)
 (define *current-sgrid* #f)
@@ -1090,6 +1500,14 @@
     (begin
       (set! *use-grid* #t)
       (init-grid!)))
+
+;; TM-30 toggle: load CES data and initialize CES grid
+;; Requires -grid to have been set first
+(if (pp 'keywordPresent "-tm30")
+    (begin
+      (set! *compute-tm30* #t)
+      (load "ces99.scm")
+      (init-ces-grid!)))
 
 (if (pp 'keywordPresent "-run")
     (begin
