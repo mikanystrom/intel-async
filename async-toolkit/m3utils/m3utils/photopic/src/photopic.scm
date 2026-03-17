@@ -1401,6 +1401,72 @@
                                      (stringify (round min-efficacy))))
   )
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Inverse problem: maximize TM-30 Rf subject to CRI and efficacy
+;;
+;; Requires -grid -tm30 flags.  TM-30 data is at index 10 of specs:
+;;   (list-ref specs 10) = (Rf Rg Rcs ref-temp-res)
+;;
+
+(define (specs->max-Rf specs)
+  (let ((Rf     (car (list-ref specs 10)))
+        (cri    (car specs))
+        (crmin  (cadr specs))
+        (cct    (caar (cdddr specs)))
+        (Duv    (cadar (cdddr specs)))
+        (lpm    (caddr specs))
+        )
+    (dis specs " Rf=" Rf dnl)
+    (list (- Rf)                             ;; target: maximize Rf
+          (- cri   *min-cri-ra*)             ;; CRI(Ra) >= min-cri-ra
+          (- crmin (- *min-cri-ra* 10))      ;; worst Ri >= min-cri-ra - 10
+          (- cct (- *target-cct* 50))        ;; cct >= target - 50
+          (- (+ *target-cct* 50) cct)        ;; cct <= target + 50
+          (* 1000 (- 0.012 Duv))             ;; Duv <= 0.012
+          (- lpm *min-efficacy*)             ;; efficacy >= min-efficacy
+          )
+        )
+  )
+
+(define (specs->max-Rf-philips specs)
+  (let ((Rf     (car (list-ref specs 10)))
+        (cri    (car specs))
+        (crmin  (cadr specs))
+        (cct    (caar (cdddr specs)))
+        (Duv    (cadar (cdddr specs)))
+        (lpm-philips (if *use-grid*
+                        (grid-philips-lumens-per-watt *current-sgrid*)
+                        (philips-lumens-per-watt w)))
+        )
+    (dis specs " Philips-LER=" lpm-philips " Rf=" Rf dnl)
+    (list (- Rf)                             ;; target: maximize Rf
+          (- cri   *min-cri-ra*)             ;; CRI(Ra) >= min-cri-ra
+          (- (+ *min-cri-ra* 2) cri)         ;; CRI(Ra) <= min-cri-ra + 2  (pin CRI)
+          (- crmin (- *min-cri-ra* 10))      ;; worst Ri >= min-cri-ra - 10
+          (- cct (- *target-cct* 50))        ;; cct >= target - 50
+          (- (+ *target-cct* 50) cct)        ;; cct <= target + 50
+          (* 1000 (- 0.012 Duv))             ;; Duv <= 0.012
+          (- lpm-philips *min-efficacy*)     ;; Philips-corrected efficacy >= min
+          )
+        )
+  )
+
+(define (run-max-Rf! cct min-cri min-efficacy)
+  (set! *min-efficacy* min-efficacy)
+  (run-example-iters! cct min-cri -100 7 specs->max-Rf
+                      (string-append "_maxRf_eff"
+                                     (stringify (round min-efficacy))))
+  )
+
+(define (run-max-Rf-philips! cct min-cri min-efficacy)
+  (set! *num-constraints* 7)  ;; one extra: CRI upper bound
+  (set! *min-efficacy* min-efficacy)
+  (run-example-iters! cct min-cri -100 7 specs->max-Rf-philips
+                      (string-append "_maxRfP_eff"
+                                     (stringify (round min-efficacy))))
+  )
+
 (define (m3-opt-r9 p)
   (ParametricSpectrum.Scheme2Vec
    (specs->target-r9 (specs-func p))))
@@ -1420,7 +1486,9 @@
              ))
          (wr (FileWr.Open (string-append nm ".res"))))
 
-    (dis (stringify (calc-specs w)) dnl dnl wr)
+    (dis (stringify (if *use-grid*
+                        (grid-calc-specs *current-sgrid*)
+                        (calc-specs w))) dnl dnl wr)
 
     (dis (stringify (ParametricSpectrum.Vec2Scheme *p*)) dnl wr)
     
@@ -1592,6 +1660,34 @@
       (define run-cri     (pp 'getNextLongReal -100 100))
       (define run-eff     (pp 'getNextLongReal    0 700))
       (run-max-r9-philips! run-cct run-cri run-eff)
+      (exit)
+      )
+    )
+
+;; Maximize TM-30 Rf at given efficacy constraint (uncorrected LER)
+;; Requires -grid -tm30 flags
+;; Usage: photopic -grid -tm30 -run-maxRf <cct> <min-cri> <min-efficacy>
+;;   e.g., photopic -grid -tm30 -run-maxRf 2700 80 350
+(if (pp 'keywordPresent "-run-maxRf")
+    (begin
+      (define run-cct     (pp 'getNextLongReal    0 1e6))
+      (define run-cri     (pp 'getNextLongReal -100 100))
+      (define run-eff     (pp 'getNextLongReal    0 700))
+      (run-max-Rf! run-cct run-cri run-eff)
+      (exit)
+      )
+    )
+
+;; Maximize TM-30 Rf with Philips phosphor-converted LED loss model
+;; Requires -grid -tm30 flags
+;; Usage: photopic -grid -tm30 -run-maxRf-philips <cct> <min-cri> <min-efficacy>
+;;   e.g., photopic -grid -tm30 -run-maxRf-philips 2700 80 300
+(if (pp 'keywordPresent "-run-maxRf-philips")
+    (begin
+      (define run-cct     (pp 'getNextLongReal    0 1e6))
+      (define run-cri     (pp 'getNextLongReal -100 100))
+      (define run-eff     (pp 'getNextLongReal    0 700))
+      (run-max-Rf-philips! run-cct run-cri run-eff)
       (exit)
       )
     )
