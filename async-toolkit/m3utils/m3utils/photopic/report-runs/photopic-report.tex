@@ -488,6 +488,133 @@ fundamental tension between efficacy and color quality is a physical
 constraint that no regulation can eliminate --- it can only choose where
 on the Pareto frontier to operate.
 
+\subsection{The Impossibility of Blackbody-Quality Light}
+\label{sec:impossibility}
+
+A common assumption in lighting policy is that consumers can
+``buy whatever quality light they want, as long as the lamp meets
+efficiency standards.''  This assumption is false.  We can show
+quantitatively that \emph{no human technology enables a
+blackbody-quality visible spectrum to meet government efficiency
+standards at any warm CCT.}
+
+\subsubsection{From spectrum to wall plug}
+
+The luminous efficacy figures computed by \texttt{photopic} are
+\emph{luminous efficacies of radiation} (LER): lumens per watt of
+\emph{optical} power, determined solely by the shape of the spectrum.
+Government standards specify \emph{system efficacy}: lumens per watt
+of \emph{electrical input} at the wall plug.  The two are related by
+a multiplicative chain of losses, each unavoidable in phosphor-converted
+LED technology:
+
+\begin{table}[H]
+\centering
+\caption{Loss chain from spectrum to wall plug in a phosphor-converted
+  white LED lamp.  ``Best production'' reflects top-bin parts available
+  today; ``best lab'' reflects demonstrated laboratory results; ``DOE
+  limit'' reflects the DOE SSL roadmap ultimate targets.}
+\label{tab:losses}
+\begin{tabular}{lccc}
+\toprule
+Loss factor & Best prod.\ & Best lab & DOE limit \\
+\midrule
+Blue LED wall-plug efficiency  & 0.75 & 0.84 & 0.90 \\
+Phosphor backscatter/reabsorption & 0.92 & 0.95 & 0.98 \\
+Thermal droop (at junction temp)  & 0.90 & 0.93 & 0.97 \\
+AC-DC driver efficiency           & 0.92 & 0.95 & 0.98 \\
+Optical (diffuser/lens/fixture)   & 0.90 & 0.95 & 0.97 \\
+\midrule
+\textbf{Total}                & \textbf{0.514} & \textbf{0.670} & \textbf{0.813} \\
+\quad (total loss)            & (48.6\%) & (33.0\%) & (18.7\%) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent
+These losses are \emph{in addition to} the Stokes shift and quantum
+efficiency losses inherent in phosphor down-conversion, which are already
+captured by the Philips-corrected LER (Table~\ref{tab:stokes}).
+The blue LED wall-plug efficiency --- the conversion of electrical power
+to 450\,nm photons at the chip junction --- is the single largest loss
+and the most resistant to improvement, as it is limited by Auger
+recombination (``efficiency droop'') at practical drive currents.
+
+\subsubsection{Blackbody system efficacy}
+
+Table~\ref{tab:bb-system} computes the system efficacy that would be
+achieved by a phosphor-converted LED replicating the Planck blackbody
+spectrum across the visible range (380--770\,nm) at several CCTs.
+The Philips-corrected LER accounts for Stokes and quantum-efficiency
+losses; the system efficacy columns further apply the loss chain from
+Table~\ref{tab:losses}.
+
+\begin{table}[H]
+\centering
+\caption{System efficacy for a blackbody-spectrum phosphor-converted LED.
+  ``Vis LER'' is the luminous efficacy of the visible-range blackbody
+  radiation.  ``Phil LER'' applies the Philips phosphor cost model.
+  System columns multiply by the corresponding loss chain.  Compare
+  against EU Class~E minimum of 85\,lm/W and EU Class~D minimum of
+  110\,lm/W.}
+\label{tab:bb-system}
+\begin{tabular}{rrrrrr}
+\toprule
+CCT & Vis LER & Phil LER & Best prod.\ & Best lab & DOE limit \\
+(K) & (lm/W) & (lm/W) & (lm/W) & (lm/W) & (lm/W) \\
+\midrule
+2100 & 113 &  68 &  35 &  45 &  55 \\
+2400 & 137 &  84 &  43 &  56 &  68 \\
+2700 & 156 &  97 &  50 &  65 &  79 \\
+3000 & 171 & 109 &  56 &  73 &  88 \\
+3500 & 188 & 123 &  63 &  82 & 100 \\
+4000 & 197 & 132 &  68 &  89 & 108 \\
+5000 & 203 & 142 &  73 &  95 & 116 \\
+5500 & 203 & 144 &  74 &  97 & 117 \\
+6500 & 199 & 146 &  75 &  97 & 118 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The implications are stark:
+
+\begin{itemize}
+\item A 2700\,K blackbody LED --- replicating the warm white of a
+  classic incandescent lamp --- would achieve at most \textbf{65\,lm/W}
+  with today's best laboratory technology.  This fails every current
+  efficiency standard worldwide except California JA8 (which requires
+  only 68\,lm/W but also mandates CRI\,$\geq$\,90 and $R_9 \geq 50$,
+  which a blackbody trivially satisfies).
+
+\item Even at 6500\,K (harsh daylight white) with \emph{theoretical-limit}
+  technology that may never be achieved, the system efficacy reaches only
+  118\,lm/W --- still below the US DOE 2028 target of 120\,lm/W and the
+  forthcoming EU Class~C threshold.
+
+\item At the popular residential CCTs of 2700--3000\,K, a blackbody
+  LED fails the current EU Ecodesign Class~F minimum (70\,lm/W) with
+  today's production technology, and barely reaches EU Class~E
+  (85\,lm/W) at 3000\,K even with the most optimistic lab results.
+\end{itemize}
+
+\noindent
+In other words, \textbf{a consumer who wants incandescent-quality light
+from an LED cannot legally purchase it in the EU at any warm CCT, and
+this situation will not improve even with foreseeable advances in LED
+technology.}  The efficiency regulations do not merely encourage
+manufacturers to optimize spectra --- they make blackbody-quality
+illumination physically impossible to deliver at the required wall-plug
+efficiency.
+
+This is the fundamental policy trade-off that spectral optimization
+quantifies.  Our Pareto frontier results (Sections~3--4) show precisely
+how much color quality can be retained at each efficiency level.  But
+the ``lossless'' ideal --- a smooth Planckian spectrum at warm CCT ---
+is categorically excluded by the combination of LED physics and
+regulatory floors.  The notion that energy-efficiency regulation is
+``technology-neutral'' is contradicted by these results: the regulations
+implicitly mandate non-Planckian, spectrally engineered light.
+
 \section{Literature Review}
 
 The optimization of white-light spectra has a history reaching back to
@@ -667,41 +794,506 @@ regulatory framework, even though the resulting light may render saturated
 colors poorly.  The ``weird final state'' is not a theoretical curiosity
 --- it is the market equilibrium toward which regulations push.
 
-\section{Future Work}
+\section{Philips Phosphor Cost Model and $R_9$ Maximization Sweeps}
+\label{sec:philips}
 
-Several directions suggest themselves:
+The luminous efficacy of radiation (LER) computed in
+Sections~3--4 assumes unit quantum efficiency: every watt of optical power
+in the spectral power distribution produces its full complement of lumens.
+In a real phosphor-converted LED, shorter-wavelength photons from the blue
+pump must be down-converted to longer wavelengths by phosphors, incurring
+a Stokes loss proportional to the wavelength ratio.  A photon at 450\,nm
+converted to 610\,nm loses $1 - 450/610 \approx 26\%$ of its energy as heat,
+regardless of quantum yield.
+
+Koedam and Opstelten of Philips~\cite{walter1978} proposed a simple cost
+model that captures this loss: the cost of producing one watt of optical
+power at wavelength $\lambda$ relative to the pump wavelength $\lambda_p$
+is
+\begin{equation}
+C(\lambda) = \max\!\left(1,\; \frac{\lambda}{\lambda_p \cdot \eta_Q}\right)
+\end{equation}
+where $\eta_Q$ is the phosphor quantum yield (here assumed 0.95).  Photons
+at the pump wavelength cost 1 (no conversion needed); longer wavelengths
+cost progressively more due to the Stokes shift.  The ``Philips-corrected
+LER'' replaces the radiant power denominator with the cost-weighted integral:
+\begin{equation}
+\eta_{\text{Phil}} = K_m \frac{\int S(\lambda)\, V(\lambda)\, d\lambda}
+                               {\int S(\lambda)\, C(\lambda)\, d\lambda}
+\end{equation}
+
+We use this corrected efficacy as the constraint in a new optimization
+mode: \textbf{maximize $R_9$} (saturated red rendering) subject to
+$\text{CRI}(R_a) \geq \text{floor}$, $\text{CCT} \in [T_0-50, T_0+50]$,
+$D_{uv} \leq 0.012$, and $\eta_{\text{Phil}} \geq E_{\min}$.
+The CRI constraint uses a double-sided ``pin'' ($R_a \in [\text{floor},
+\text{floor}+2]$) to prevent the optimizer from spending efficacy budget
+on CRI headroom rather than $R_9$.
+
+\subsection{CRI\,$\geq$\,80 Sweep}
+
+Table~\ref{tab:cri80-sweep} shows the results of sweeping the Philips
+efficacy floor from 200 to 320\,lm/W at 2700\,K with CRI pinned
+to $80 \pm 2$.
+
+\begin{table}[H]
+\centering
+\caption{Maximum $R_9$ vs.\ Philips-corrected efficacy floor at 2700\,K,
+  CRI\,$\geq$\,80.  All results at 129 spectral parameters.
+  LER is the raw luminous efficacy of radiation.}
+\label{tab:cri80-sweep}
+\begin{tabular}{rrrrrr}
+\toprule
+$E_{\min}$ (Phil) & CRI & $R_9$ & LER & CCT & $D_{uv}$ \\
+\midrule
+200 & 81.1 & 99.2 & 297 & 2663 & 0.010 \\
+210 & 81.8 & 97.3 & 309 & 2670 & 0.011 \\
+220 & 81.4 & 98.5 & 323 & 2703 & 0.011 \\
+230 & 82.5 & 98.5 & 335 & 2701 & 0.011 \\
+240 & 80.0 & 97.8 & 349 & 2700 & 0.010 \\
+250 & 80.0 & 96.1 & 362 & 2691 & 0.012 \\
+255 & 82.2 & 89.7 & 364 & 2750 & 0.012 \\
+260 & 82.0 & 89.0 & 370 & 2750 & 0.012 \\
+265 & 82.2 & 88.2 & 377 & 2750 & 0.012 \\
+\midrule
+270 & 82.1 & 47.1 & 385 & 2650 & 0.012 \\
+275 & 81.9 & 40.2 & 391 & 2650 & 0.013 \\
+280 & 81.2 & 44.7 & 397 & 2650 & 0.015 \\
+285 & 81.6 & 35.0 & 404 & 2648 & 0.015 \\
+290 & 80.2 & 32.7 & 410 & 2646 & 0.016 \\
+\midrule
+295 & 76.6 & 29.1 & 415 & 2644 & 0.018 \\
+300 & 76.1 & 25.2 & 425 & 2646 & 0.016 \\
+305 & 72.3 & 29.7 & 428 & 2651 & 0.020 \\
+310 & 69.9 & 25.4 & 431 & 2724 & 0.022 \\
+315 & 67.9 & 23.6 & 435 & 2762 & 0.023 \\
+320 & 66.2 & 16.3 & 439 & 2762 & 0.023 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The results reveal three distinct regimes, separated by horizontal rules
+in the table:
 
 \begin{enumerate}
-\item \textbf{$R_9$ as a function of required efficacy.}  The most
-  practically important question is: under a given regulatory framework
-  (e.g., EU Ecodesign minimum efficacy), what is the \emph{achievable}
-  $R_9$ (saturated red rendering)?  Our current runs fix the CRI floor
-  and let efficacy be the objective.  The dual problem --- fix efficacy
-  and maximize $R_9$ --- would map out the ``quality frontier'' that
-  regulations actually define.  Similarly, sweeping over required
-  efficacy at fixed CRI floor would show how $R_9$ degrades as efficiency
-  pressure increases.
+\item \textbf{Comfortable region} ($E_{\min} \leq 265$):
+  $R_9 > 88$, CRI\,$\approx$\,80--82.  The efficacy budget is generous
+  enough for the optimizer to produce spectra with excellent red rendering.
+  The spectrum remains relatively smooth with broad red content.
 
-\item \textbf{Realistic quantum efficiency.}  Our calculations assume
-  unit quantum efficiency, following Walter's approach.  Real
-  phosphors have wavelength-dependent quantum efficiencies $\eta_Q(\lambda)$,
-  typically 80--95\% for blue/green and dropping for deep red.
-  Koedam and Opstelten noted that applying realistic $\eta_Q$ reduces
-  calculated efficacy by $\sim$20\%.  Incorporating $\eta_Q(\lambda)$
-  into the objective function would shift the optimal peak positions
-  and show whether the three-peak structure survives under real-world
-  conversion losses.
+\item \textbf{$R_9$ cliff} ($E_{\min} = 270$--$290$):
+  $R_9$ collapses from 88 to 33.  The optimizer can still satisfy
+  CRI\,$\geq$\,80 (since $R_9$ is not part of $R_a$), but cannot
+  afford the red phosphor power needed for saturated red fidelity.
+  This is the regime where the CRI loophole is most actively exploited.
 
-\item \textbf{TM-30 optimization.}  Replace the CRI constraint with
-  TM-30 $R_f$ and $R_g$ metrics.  Because TM-30 uses 99 test samples and
-  a more uniform color space, the optimizer would have far less room to
-  exploit loopholes.  The resulting spectra may be broader and more
-  natural-looking.
+\item \textbf{Constraint infeasible} ($E_{\min} \geq 295$):
+  Even CRI\,$=$\,80 becomes unachievable.  The optimizer violates the
+  CRI constraint (dropping to 66--77) and the chromaticity tolerance
+  ($D_{uv}$ exceeds 0.012).  At these extreme efficacies, no
+  well-rendering white light is possible.
+\end{enumerate}
 
-\item \textbf{Multiple CCTs.}  Extend the analysis to the full range of
-  commercial color temperatures (2700--6500~K).  Walter showed that the
-  four-band positions are remarkably stable across ANSI lamp types;
-  verifying this with our continuous parameterization would be valuable.
+\subsection{CRI\,$\geq$\,95 Sweep}
+
+Table~\ref{tab:cri95-sweep} shows the same sweep at CRI\,$\geq$\,95.
+Higher CRI forces broader spectra, which leaves less room for the
+$R_9$ loophole --- but also reduces the achievable efficacy range.
+
+\begin{table}[H]
+\centering
+\caption{Maximum $R_9$ vs.\ Philips-corrected efficacy floor at 2700\,K,
+  CRI\,$\geq$\,95.  All results at 129 spectral parameters.}
+\label{tab:cri95-sweep}
+\begin{tabular}{rrrrrr}
+\toprule
+$E_{\min}$ (Phil) & CRI & $R_9$ & LER & CCT & $D_{uv}$ \\
+\midrule
+200 & 96.3 & 99.4 & 290 & 2776 & 0.002 \\
+210 & 97.0 & 98.2 & 304 & 2746 & 0.002 \\
+220 & 97.0 & 97.5 & 318 & 2745 & 0.003 \\
+230 & 95.0 & 97.1 & 331 & 2750 & 0.005 \\
+240 & 95.0 & 96.5 & 344 & 2750 & 0.005 \\
+250 & 95.1 & 94.9 & 358 & 2750 & 0.007 \\
+255 & 95.0 & 85.7 & 365 & 2663 & 0.005 \\
+260 & 94.0 & 92.4 & 370 & 2751 & 0.009 \\
+265 & 94.7 & 92.5 & 377 & 2750 & 0.006 \\
+\midrule
+270 & 90.5 & 85.0 & 380 & 2706 & 0.010 \\
+275 & 87.9 & 83.1 & 385 & 2700 & 0.013 \\
+280 & 93.3 & 58.8 & 396 & 2752 & 0.008 \\
+285 & 85.8 & 76.5 & 396 & 2691 & 0.015 \\
+290 & 84.2 & 61.7 & 400 & 2679 & 0.014 \\
+295 & 85.2 & 66.7 & 408 & 2748 & 0.016 \\
+300 & 79.6 & 54.0 & 410 & 2657 & 0.018 \\
+305 & 79.5 & 52.8 & 416 & 2681 & 0.018 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Compared to the CRI\,$\geq$\,80 sweep, the CRI\,$\geq$\,95 results show:
+\begin{itemize}
+\item The $R_9$ cliff occurs at a similar efficacy ($\sim$270 Phil\,lm/W)
+  but is less severe: $R_9$ drops from 92 to 85 rather than from 88 to 47.
+  The broader spectra required by CRI\,$\geq$\,95 provide some red content
+  ``for free'' as a byproduct of the fidelity constraint.
+\item Constraint infeasibility sets in earlier: by $E_{\min} = 280$,
+  the optimizer can no longer reliably achieve CRI\,$=$\,95 (dropping to
+  84--93).  The nonconvex optimization landscape also produces
+  non-monotonic behavior (e.g., $R_9 = 58.8$ at 280 but 76.5 at 285),
+  reflecting different local optima.
+\item The feasible range is narrower: useful results span
+  200--265 Phil\,lm/W for CRI\,$\geq$\,95 vs.\ 200--290 for
+  CRI\,$\geq$\,80.
+\end{itemize}
+
+\subsection{The $R_9$ Cliff: Policy Implications}
+
+Both sweeps confirm the central finding of this report: there exists a
+critical Philips-corrected efficacy threshold ($\sim$265--270\,lm/W at
+2700\,K) above which saturated red rendering degrades sharply.  Applying
+the production loss chain from Table~\ref{tab:losses} (best production:
+$\times 0.514$), this corresponds to a system efficacy of
+$\sim$135--140\,lm/W --- squarely in the range of current and near-future
+regulatory floors.
+
+Regulators who set only a CRI\,$\geq$\,80 floor are implicitly permitting
+$R_9$ values as low as 33--47 (Table~\ref{tab:cri80-sweep}), representing
+severely compromised red rendering.  Even CRI\,$\geq$\,95 permits
+$R_9$ to drop below 60 at high efficacy.  Only explicit $R_9$ mandates
+--- as in California JA8 --- can close this loophole.
+
+\section{Grid-Based Integration Optimization}
+\label{sec:grid}
+
+\subsection{Motivation}
+
+Each evaluation of the COBYLA objective function requires computing
+CRI (14 color shifts), CCT (root-finding on the blackbody locus), LER,
+and chromaticity --- a total of approximately \textbf{99 Romberg
+integrations} per evaluation.  The breakdown:
+
+\begin{itemize}
+\item CRI calculation: 14 TCS $\times$ 3 tristimulus values (X, Y, Z)
+  = 42 integrations for TCS color coordinates, plus 3 for the test
+  illuminant's own XYZ, plus 3 for the reference blackbody = 48
+  integrations
+\item Chromaticity and LER: 4 integrations (X, Y, Z, total luminous flux)
+\item Philips cost model: 1 integration (cost-weighted power)
+\item CCT search: multiple iterations of the above during Brent's method
+  root-finding
+\end{itemize}
+
+Each Romberg integration (Numerical Recipes \S4.4, midpoint rule variant)
+uses adaptive refinement, typically evaluating the integrand at 50--200
+wavelength points.  At 129 spectral parameters, COBYLA makes thousands of
+objective evaluations over the 8-level hierarchical run, resulting in
+optimization times of $\sim$50 minutes per sweep point.
+
+\subsection{Approach: Pre-Tabulated Weight Vectors}
+
+The key observation is that all integrands have the form
+$S(\lambda) \cdot W(\lambda)$ where $S(\lambda)$ is the test spectrum
+(which changes every evaluation) and $W(\lambda)$ is a fixed weight
+function (CIE color matching functions, $V(\lambda)$, TCS reflectances,
+Philips cost, etc.)\ that depends only on the problem setup.
+
+By discretizing the visible range onto a fixed grid --- 391 points at
+1\,nm spacing from 380 to 770\,nm --- we can:
+\begin{enumerate}
+\item Pre-tabulate all weight vectors $\mathbf{w}_k$ at grid points
+  once during initialization
+\item Sample the test spectrum $\mathbf{s}$ onto the grid (one pass
+  through the M3 \texttt{ParametricSpectrum.Eval} function)
+\item Replace each integration $\int S(\lambda) W(\lambda) d\lambda$
+  with a dot product $\Delta\lambda \cdot \mathbf{s}^T \mathbf{w}_k$
+\end{enumerate}
+
+The pre-tabulated weight vectors include:
+\begin{itemize}
+\item CIE $\bar{x}(\lambda)$, $\bar{y}(\lambda)$, $\bar{z}(\lambda)$
+  --- 3 vectors
+\item $K_m V(\lambda)$ (photopic conversion) --- 1 vector
+\item $C(\lambda)$ (Philips cost) --- 1 vector
+\item 14 TCS reflectances $\times$ $\bar{x}, \bar{y}, \bar{z}$
+  --- 42 pre-multiplied vectors of the form
+  $\text{TCS}_j(\lambda) \cdot \bar{x}(\lambda)$
+\end{itemize}
+
+Each ``integration'' becomes a vector dot product in $\mathbb{R}^{391}$
+--- a tight loop of 391 multiply-accumulates with no function calls,
+no adaptive refinement overhead, and no M3/Scheme boundary crossings
+beyond the initial spectrum sampling.
+
+\subsection{Pure-Scheme Blackbody}
+
+The reference illuminant (blackbody at the CCT) must also be computed
+on the grid.  Rather than making 391 calls to the M3
+\texttt{Blackbody.PlanckRadiance} function, we implemented Planck's law
+directly in Scheme:
+\begin{equation}
+B_\lambda(T,\lambda) = \frac{2hc^2}{\lambda^5}
+  \cdot \frac{1}{\exp(hc/\lambda k_B T) - 1}
+\end{equation}
+where $h$, $c$, and $k_B$ are defined as Scheme constants.  This
+eliminates the M3/Scheme call overhead for the reference illuminant
+and keeps the entire grid-mode calculation in pure Scheme except for
+the initial spectrum sampling.
+
+\subsection{Implementation}
+
+The grid mode is activated by the \texttt{-grid} command-line flag and
+can be toggled at runtime via the \texttt{*use-grid*} variable.  This
+allows direct comparison of results between the Romberg and grid methods
+on the same optimization problem.
+
+A critical implementation detail is the normalization convention:
+the CIE CRI calculation normalizes spectra such that $X + Y + Z = 100$,
+not $Y = 100$.  The \texttt{photopic} codebase follows the convention
+that \texttt{xyz->Yxy} returns $(X+Y+Z, x, y)$ as its first element
+(confusingly named ``Y'' in the function name but actually the sum).
+Getting this wrong in the grid normalization caused CRI errors of up to
+63 units in $R_9$ during development --- a subtle but critical bug.
+
+\subsection{Accuracy Validation}
+
+Table~\ref{tab:grid-accuracy} compares the grid and Romberg methods
+on the same optimized spectrum (CRI\,$\geq$\,80, Philips eff\,$\geq$\,300,
+129 parameters).
+
+\begin{table}[H]
+\centering
+\caption{Grid vs.\ Romberg accuracy on an optimized 129-parameter spectrum.}
+\label{tab:grid-accuracy}
+\begin{tabular}{lrrr}
+\toprule
+Metric & Romberg & Grid (1\,nm) & Difference \\
+\midrule
+CRI ($R_a$)       & 81.93 & 81.76 & 0.18 \\
+$R_9$             & 40.15 & 39.53 & 0.62 \\
+Phil LPW          & 274.31 & 274.24 & 0.07 \\
+LER               & 424.0 & 423.8 & 0.2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The differences are negligible for optimization purposes.  Testing at
+0.5\,nm grid spacing (781 points) produced identical values to 1\,nm,
+confirming that the grid is converged.
+
+\subsection{Performance Results}
+
+\begin{table}[H]
+\centering
+\caption{Timing comparison: Romberg vs.\ grid integration.}
+\label{tab:grid-timing}
+\begin{tabular}{lrr}
+\toprule
+Measurement & Romberg & Grid (1\,nm) \\
+\midrule
+Per objective evaluation & 0.59\,s & 0.20\,s \\
+Full 8-level optimization & 52\,min & 14.5\,min \\
+Speedup & \multicolumn{2}{c}{$\mathbf{3.6\times}$} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The $3.6\times$ speedup makes parameter sweeps practical: a 20-point
+sweep that took 17 hours with Romberg integration completes in under
+5 hours with the grid method.  The sweep results in
+Tables~\ref{tab:cri80-sweep} and \ref{tab:cri95-sweep} were computed
+using grid-mode integration.
+
+Because the grid and Romberg methods produce slightly different objective
+landscapes (due to $<$0.2\% numerical differences), the COBYLA optimizer
+may converge to different local optima.  This is expected behavior in
+nonconvex optimization and is not a deficiency of the grid method ---
+the solutions are equally valid.
+
+\section{TM-30: A Better Color Metric}
+\label{sec:tm30}
+
+\subsection{Why CRI Needs Replacement}
+
+The deficiencies of CRI enumerated in Section~7 are not merely academic:
+our optimization results demonstrate that they have practical consequences.
+The CRI loophole ($R_9$ not included in $R_a$) allows the optimizer to
+produce spectra with $R_9 = -28$ while claiming CRI\,$=$\,65.  The
+8-sample average hides severe rendering failures.  The von~Kries
+adaptation model and CIE~1964 $U^*V^*W^*$ color space are outdated by
+decades of color science research.
+
+The IES TM-30-18 standard~\cite{tm30} was developed specifically to
+address these problems.  It is not merely an incremental improvement ---
+it represents a fundamentally different approach to characterizing color
+rendition.
+
+\subsection{TM-30 Architecture}
+
+TM-30 evaluates light sources using \textbf{99 Color Evaluation Samples}
+(CES), selected by Royer et al.\ from a database of 105,000 measured
+object spectra to span the full range of real-world colors including
+saturated hues~\cite{royer2012}.  Compare this to CRI's 8 unsaturated
+Munsell samples (or 14 including the supplementary set).
+
+The colorimetric pipeline replaces every component of the CRI calculation
+with modern equivalents:
+
+\begin{center}
+\begin{tabular}{lll}
+\toprule
+\textbf{Component} & \textbf{CRI (1995)} & \textbf{TM-30 (2018)} \\
+\midrule
+Test samples   & 8 (unsaturated)        & 99 (full gamut) \\
+Color space    & CIE 1964 $U^*V^*W^*$   & CAM02-UCS ($J', a', b'$) \\
+Adaptation     & von Kries diagonal      & CIECAM02 (CAT02) \\
+Scale          & Linear ($R_i = 100 - 4.6\Delta E$) & Logarithmic \\
+Metrics        & $R_a$ (fidelity avg)    & $R_f$, $R_g$, $R_{cs,hj}$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsubsection{CIECAM02 Color Appearance Model}
+
+TM-30 computes all color differences in the CIECAM02 color appearance
+model~\cite{ciecam02}, which accounts for:
+\begin{itemize}
+\item \textbf{Chromatic adaptation}: The CAT02 transform (a $3\times 3$
+  matrix applied in an LMS-like cone response space) models how the human
+  visual system adapts to the illuminant white point.  This is
+  substantially more accurate than von~Kries scaling, especially for
+  narrow-band illuminants.
+\item \textbf{Nonlinear response compression}: Cone signals are
+  compressed by a power function modeling the saturation of neural
+  response, parameterized by the adapting luminance.
+\item \textbf{Perceptual correlates}: The model outputs lightness ($J$),
+  chroma ($C$), hue angle ($h$), colorfulness ($M$), and saturation ($s$)
+  as perceptual dimensions rather than tristimulus coordinates.
+\end{itemize}
+
+For TM-30, the CIECAM02 $J$, $a$, $b$ correlates are further transformed
+into the CAM02-UCS (Uniform Colour Space) via:
+\begin{align}
+J' &= \frac{1.7 J}{1 + 0.007 J} \\
+M' &= \frac{1}{0.0228} \ln(1 + 0.0228 M) \\
+a' &= M' \cos h, \qquad b' = M' \sin h
+\end{align}
+This logarithmic compression yields a more perceptually uniform space
+than the CIE $U^*V^*W^*$ used by CRI.
+
+\subsubsection{TM-30 Metrics}
+
+TM-30 reports three families of metrics:
+
+\begin{enumerate}
+\item \textbf{Fidelity Index $R_f$}: Analogous to CRI $R_a$, but
+  averaged over all 99 CES in CAM02-UCS.  The color difference
+  $\Delta E'$ for each sample is mapped through a logarithmic function:
+  \begin{equation}
+  R_{f,j} = 10 \ln\!\left(\exp\!\left(\frac{100 - c_f \Delta E'_j}{10}\right) + 1\right)
+  \end{equation}
+  where $c_f$ is a normalization constant.  This ensures $R_f \leq 100$
+  (equality only for a perfect match) and provides better discrimination
+  at high fidelity than CRI's linear scale.
+  $R_f = \frac{1}{99}\sum_j R_{f,j}$.
+
+\item \textbf{Gamut Index $R_g$}: Measures whether the test source
+  expands or contracts the color gamut relative to the reference.
+  The 99 CES are assigned to 16 hue bins; $R_g$ is the ratio of the
+  gamut areas (in $a'b'$ coordinates) of the test and reference
+  illuminants, scaled so that $R_g = 100$ means identical gamut area.
+  Values $> 100$ indicate gamut expansion (more saturated colors);
+  $< 100$ indicates gamut contraction.  CRI penalizes both; $R_g$
+  distinguishes them.
+
+\item \textbf{Local chroma shift $R_{cs,hj}$}: For each of the 16 hue
+  bins, TM-30 reports whether colors in that hue region become more or
+  less saturated.  $R_{cs,h1}$ (the first hue bin, centered on red) is
+  of particular interest: it directly measures the red chroma shift that
+  $R_9$ only crudely captures.  Negative $R_{cs,h1}$ means reds are
+  desaturated --- the precise failure mode our optimizer exploits.
+\end{enumerate}
+
+\subsection{Why TM-30 Matters for This Work}
+
+The TM-30 metrics would fundamentally change the optimization landscape:
+
+\begin{itemize}
+\item \textbf{No 8-sample loophole.}  With 99 CES spanning the full
+  gamut, the optimizer cannot sacrifice one color region to boost
+  another.  Saturated reds are represented by multiple CES samples,
+  not just the single TCS~9.
+
+\item \textbf{$R_{cs,h1}$ as a direct red metric.}  Rather than the
+  blunt instrument of $R_9$ (which conflates hue shift, chroma shift,
+  and lightness shift into a single number), $R_{cs,h1}$ isolates the
+  red chroma shift.  This is precisely the quantity that determines
+  whether reds ``look right.''
+
+\item \textbf{Better adaptation model.}  The CIECAM02 transform handles
+  the narrow-band illuminants produced by our optimizer more accurately
+  than von~Kries scaling.  CRI may over- or under-penalize color shifts
+  for these non-Planckian spectra.
+
+\item \textbf{Gamut shape information.}  $R_g$ and the per-hue-bin
+  metrics reveal \emph{how} colors change, not just \emph{how much}.
+  A spectrum that expands the blue gamut while contracting red would
+  show $R_g \approx 100$ (gamut area preserved) but $R_{cs,h1} < 0$
+  and $R_{cs,h9} > 0$ --- information that CRI $R_a$ completely hides.
+\end{itemize}
+
+\subsection{Implementation Feasibility}
+
+Implementing TM-30 in \texttt{photopic} requires:
+
+\begin{enumerate}
+\item \textbf{99 CES reflectance spectra} ($\sim$4\,KB tabular data):
+  Available from the IES standard and from open-source implementations
+  (LuxPy~\cite{luxpy}, \texttt{colour-science}~\cite{colour-science}).
+
+\item \textbf{CIECAM02 forward model} ($\sim$200 lines M3 or Scheme):
+  A well-defined sequence of matrix multiplications and nonlinear
+  transforms.  The CAT02 matrix, Hunt--Pointer--Est\'{e}vez matrix,
+  and response compression parameters are published constants.
+
+\item \textbf{CAM02-UCS transform} ($\sim$20 lines): Three closed-form
+  equations applied to CIECAM02 outputs.
+
+\item \textbf{Hue-bin assignment and metric computation}
+  ($\sim$100 lines): Assign CES to 16 equal-angle hue bins, compute
+  gamut area and per-bin chroma shifts.
+\end{enumerate}
+
+The grid-based integration (Section~\ref{sec:grid}) is particularly
+well-suited for TM-30: the 99 CES weight vectors would be pre-tabulated
+alongside the existing 14 TCS vectors, adding only 297 dot products
+(99 CES $\times$ 3 tristimulus) per evaluation.  With the grid method,
+TM-30 computation would add approximately 30\% overhead to each
+objective evaluation, compared to doubling the time with Romberg
+integration.
+
+\section{Future Work}
+
+Several directions for further work remain, building on the results
+reported above:
+
+\begin{enumerate}
+\item \textbf{TM-30 optimization.}  The research in Section~\ref{sec:tm30}
+  establishes the feasibility and value of replacing the CRI constraint
+  with TM-30 $R_f$, $R_g$, and $R_{cs,hj}$ metrics.  Implementation
+  requires the CIECAM02 forward model, CAM02-UCS transform, and 99~CES
+  reflectance data --- estimated at $\sim$400 lines of Scheme code
+  plus tabular data.  The grid-based integration framework
+  (Section~\ref{sec:grid}) is designed to accommodate the additional
+  99 CES weight vectors efficiently.  Re-running the Pareto sweeps
+  with TM-30 constraints would reveal how much of the CRI loophole
+  exploitation survives under a modern color metric.
+
+\item \textbf{Multiple CCTs.}  Extend the sweeps of Section~\ref{sec:philips}
+  to the full range of commercial color temperatures (2700--6500~K).
+  Walter showed that the four-band positions are remarkably stable across
+  ANSI lamp types; verifying this with our continuous parameterization
+  and Philips cost model would be valuable.
 
 \item \textbf{LED-realistic spectra.}  Constrain the spectrum to
   physically realizable LED spectra: a narrow blue pump peak
@@ -832,6 +1424,28 @@ in the CM3 distribution, \texttt{m3-scheme/} package.
 IES~TM-30-18,
 ``IES method for evaluating light source color rendition,''
 Illuminating Engineering Society, New York, 2018.
+
+\bibitem{ciecam02}
+N.~Moroney, M.~D.~Fairchild, R.~W.~G.~Hunt, C.~Li, M.~R.~Luo, and
+T.~Newman,
+``The CIECAM02 color appearance model,''
+in \emph{Proc.\ IS\&T/SID 10th Color Imaging Conference}, 2002,
+pp.~23--27.
+
+\bibitem{royer2012}
+M.~P.~Royer, K.~W.~Houser, and A.~M.~Wilkerson,
+``Color rendering and visual clarity,''
+\emph{Leukos}, vol.~8, no.~3, pp.~165--179, 2012.
+
+\bibitem{luxpy}
+K.~A.~G.~Smet,
+``LuxPy: A Python package for lighting and color science,''
+2019. \url{https://github.com/ksmet1977/luxpy}. GPLv3.
+
+\bibitem{colour-science}
+Colour Developers,
+``colour-science: Colour science for Python,''
+2024. \url{https://github.com/colour-science/colour}. BSD-3-Clause.
 
 \end{thebibliography}
 

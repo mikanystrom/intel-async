@@ -67,11 +67,12 @@ def compute_efficacies(wavelength_nm, power):
     Returns (ler_uncorrected, ler_philips) in lm/W.
     """
     v = V_interp(wavelength_nm)
-    lumens_integral = np.trapz(power * v, wavelength_nm)
-    power_integral = np.trapz(power, wavelength_nm)
+    _trapz = np.trapezoid if hasattr(np, 'trapezoid') else np.trapz
+    lumens_integral = _trapz(power * v, wavelength_nm)
+    power_integral = _trapz(power, wavelength_nm)
 
     cost = philips_cost(wavelength_nm)
-    philips_power_integral = np.trapz(power * cost, wavelength_nm)
+    philips_power_integral = _trapz(power * cost, wavelength_nm)
 
     ler = K_M * lumens_integral / power_integral if power_integral > 0 else 0
     ler_phil = K_M * lumens_integral / philips_power_integral if philips_power_integral > 0 else 0

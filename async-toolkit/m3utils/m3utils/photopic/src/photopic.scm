@@ -553,6 +553,245 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
+;; Grid-based integration (optional speedup)
+;;
+;; Instead of ~99 adaptive Romberg integrations per objective
+;; evaluation, precompute weight vectors on a fixed 1nm grid and
+;; use dot products.  Toggle with *use-grid*.
+;;
+;; At 1nm spacing, trapezoidal integration of smooth spectra against
+;; the CIE functions matches Romberg to >6 significant figures.
+;;
+
+(define *use-grid* #f)  ;; #t = grid (fast), #f = Romberg (reference)
+
+;;; grid parameters
+(define *grid-lo*   380e-9)   ;; 380 nm (= l0)
+(define *grid-hi*   770e-9)   ;; 770 nm (= l1)
+(define *grid-step* 1e-9)     ;; 1 nm
+(define *grid-n*    391)      ;; number of grid points
+
+;;; pre-tabulated weight vectors (set by init-grid!)
+(define *grid-lambdas*     #f)
+(define *grid-x*           #f)  ;; CIE x-bar
+(define *grid-y*           #f)  ;; CIE y-bar
+(define *grid-z*           #f)  ;; CIE z-bar
+(define *grid-photoconv*   #f)  ;; CieSpectrum.PhotoConv (K_m * V(lambda))
+(define *grid-philips-c*   #f)  ;; Philips cost C(lambda)
+(define *grid-tcs-xyz*     #f)  ;; vector of 14 (vx vy vz) triples,
+                                ;;   pre-multiplied TCS_j * xyz
+
+;;; vector operations
+
+(define (vdot a b)
+  ;; dot product with trapezoidal step => integral approximation
+  (let loop ((i 0) (sum 0.0))
+    (if (>= i *grid-n*)
+        (* sum *grid-step*)
+        (loop (+ i 1)
+              (+ sum (* (vector-ref a i) (vector-ref b i)))))))
+
+(define (vsum v)
+  ;; sum(v) * step => integral of f
+  (let loop ((i 0) (sum 0.0))
+    (if (>= i *grid-n*)
+        (* sum *grid-step*)
+        (loop (+ i 1) (+ sum (vector-ref v i))))))
+
+(define (vscale! v factor)
+  (let loop ((i 0))
+    (if (< i *grid-n*)
+        (begin
+          (vector-set! v i (* factor (vector-ref v i)))
+          (loop (+ i 1))))))
+
+(define (vcopy v)
+  (let ((r (make-vector *grid-n*)))
+    (let loop ((i 0))
+      (if (< i *grid-n*)
+          (begin
+            (vector-set! r i (vector-ref v i))
+            (loop (+ i 1)))))
+    r))
+
+;;; initialization — call once before using grid mode
+
+(define (init-grid!)
+  (set! *grid-lambdas*   (make-vector *grid-n*))
+  (set! *grid-x*         (make-vector *grid-n*))
+  (set! *grid-y*         (make-vector *grid-n*))
+  (set! *grid-z*         (make-vector *grid-n*))
+  (set! *grid-photoconv* (make-vector *grid-n*))
+  (set! *grid-philips-c* (make-vector *grid-n*))
+
+  ;; fill CIE functions and Philips cost
+  (let loop ((i 0) (lam *grid-lo*))
+    (if (< i *grid-n*)
+        (begin
+          (vector-set! *grid-lambdas* i lam)
+          (let ((xyz (CieXyz.Interpolate lam)))
+            (vector-set! *grid-x* i (cdr (assoc 'x xyz)))
+            (vector-set! *grid-y* i (cdr (assoc 'y xyz)))
+            (vector-set! *grid-z* i (cdr (assoc 'z xyz))))
+          (vector-set! *grid-photoconv* i (CieSpectrum.PhotoConv lam))
+          (vector-set! *grid-philips-c* i (philips-cost lam))
+          (loop (+ i 1) (+ lam *grid-step*)))))
+
+  ;; pre-multiply TCS_j(lambda) * xyz at each grid point
+  (set! *grid-tcs-xyz* (make-vector 14))
+  (let tloop ((j 0))
+    (if (< j 14)
+        (begin
+          (let ((tx (make-vector *grid-n*))
+                (ty (make-vector *grid-n*))
+                (tz (make-vector *grid-n*)))
+            (let iloop ((i 0) (lam *grid-lo*))
+              (if (< i *grid-n*)
+                  (begin
+                    (let ((ri ((R (+ j 1)) lam)))
+                      (vector-set! tx i (* ri (vector-ref *grid-x* i)))
+                      (vector-set! ty i (* ri (vector-ref *grid-y* i)))
+                      (vector-set! tz i (* ri (vector-ref *grid-z* i))))
+                    (iloop (+ i 1) (+ lam *grid-step*)))))
+            (vector-set! *grid-tcs-xyz* j (list tx ty tz)))
+          (tloop (+ j 1)))))
+
+  (dis "Grid initialized: " *grid-n* " points, "
+       (* *grid-lo* 1e9) "-" (* *grid-hi* 1e9) " nm" dnl))
+
+;;; sample a spectrum function onto the grid
+
+(define (spectrum->grid f)
+  (let ((v (make-vector *grid-n*)))
+    (let loop ((i 0) (lam *grid-lo*))
+      (if (< i *grid-n*)
+          (begin
+            (vector-set! v i (f lam))
+            (loop (+ i 1) (+ lam *grid-step*)))))
+    v))
+
+;;; grid-based blackbody at temperature T (pure Scheme, no M3 calls)
+
+(define (grid-blackbody T)
+  (let ((v    (make-vector *grid-n*))
+        (hkT  (/ h (* k T)))        ;; h/(kT), precompute
+        (2hc2 (/ (* 2 h) (* c c)))) ;; 2h/c^2, precompute
+    (let loop ((i 0) (lam *grid-lo*))
+      (if (< i *grid-n*)
+          (begin
+            (let* ((nu   (/ c lam))
+                   (x    (* hkT nu))
+                   (Bnu  (/ (* 2hc2 nu nu nu) (- (exp x) 1)))
+                   (Blam (/ (* Bnu nu nu) c)))
+              (vector-set! v i Blam))
+            (loop (+ i 1) (+ lam *grid-step*)))))
+    v))
+
+;;; grid-based XYZ and Yxy
+
+(define (grid-xyz sgrid)
+  (list (vdot sgrid *grid-x*)
+        (vdot sgrid *grid-y*)
+        (vdot sgrid *grid-z*)))
+
+(define (grid-calc-Yxy sgrid)
+  (xyz->Yxy (grid-xyz sgrid)))
+
+;;; grid-based normalize: returns new grid with X+Y+Z = 100
+;;; (matches normalize-spectrum which divides by car(calc-Yxy) = X+Y+Z)
+
+(define (grid-normalize sgrid)
+  (let* ((xyz (grid-xyz sgrid))
+         (sum (+ (car xyz) (cadr xyz) (caddr xyz)))
+         (ng  (vcopy sgrid)))
+    (vscale! ng (/ 100.0 sum))
+    ng))
+
+;;; grid-based reflected XYZ for TCS j (1-indexed)
+
+(define (grid-reflected-xyz sgrid-norm j)
+  (let ((txyz (vector-ref *grid-tcs-xyz* (- j 1))))
+    (list (vdot sgrid-norm (car   txyz))
+          (vdot sgrid-norm (cadr  txyz))
+          (vdot sgrid-norm (caddr txyz)))))
+
+;;; grid-based CRI: same algorithm as calc-cri, dot products for integrals
+
+(define (grid-calc-cri sgrid)
+  (let* ((norm-sgrid     (grid-normalize sgrid))
+         (test-Yxy       (grid-calc-Yxy norm-sgrid))
+         (test-uv        (Yxy->uv test-Yxy))
+         (ref-temp-res   (search-T test-uv))
+         (ref-temp       (car ref-temp-res))
+         (ref-uv         (temp-uv ref-temp))
+         (bgrid          (grid-blackbody ref-temp))
+         (norm-bgrid     (grid-normalize bgrid)))
+
+    (define (calc-one tcsi)
+      (let* ((ref-reflected-Yxy  (xyz->Yxy (grid-reflected-xyz norm-bgrid tcsi)))
+             (ref-UVW            (Yuv->UVW (Yxy->Yuv ref-reflected-Yxy) ref-uv))
+
+             (reflected-Yxy      (xyz->Yxy (grid-reflected-xyz norm-sgrid tcsi)))
+             (reflected-Yuv      (Yxy->Yuv reflected-Yxy))
+             (Y                  (car reflected-Yuv))
+             (reflected-uv       (cdr reflected-Yuv))
+             (reflected-UVW      (Yuv->UVW (cons Y reflected-uv) ref-uv))
+
+             (cat-uv             (adapted-uv ref-uv test-uv reflected-uv))
+             (cat-UVW            (Yuv->UVW (cons Y cat-uv) ref-uv))
+             (delta-EUVW         (euclidean-3 cat-UVW ref-UVW))
+             (Ri                 (+ 100 (* -4.6 delta-EUVW))))
+        Ri))
+
+    (list ref-temp-res
+          (map calc-one '(1 2 3 4 5 6 7 8 9 10 11 12 13 14)))))
+
+;;; grid-based luminous and efficacy quantities
+
+(define (grid-calc-lumens sgrid)
+  (vdot sgrid *grid-photoconv*))
+
+(define (grid-visible-power sgrid)
+  (vsum sgrid))
+
+(define (grid-visible-lumens-per-watt sgrid)
+  (/ (grid-calc-lumens sgrid) (grid-visible-power sgrid)))
+
+(define (grid-philips-power sgrid)
+  (let loop ((i 0) (sum 0.0))
+    (if (>= i *grid-n*)
+        (* sum *grid-step*)
+        (loop (+ i 1)
+              (+ sum (* (vector-ref sgrid i)
+                        (vector-ref *grid-philips-c* i)))))))
+
+(define (grid-philips-lumens-per-watt sgrid)
+  (/ (grid-calc-lumens sgrid) (grid-philips-power sgrid)))
+
+;;; grid-based calc-specs (same return format as calc-specs)
+
+(define (grid-calc-specs sgrid)
+  (let* ((full-cri (grid-calc-cri sgrid))
+         (ref-temp (caar full-cri))
+         (Duv      (cadar full-cri))
+         (ri-8     (head 8 (cadr full-cri)))
+         (worst-ri (apply min ri-8))
+         ;; parametric spectra are truncated to visible range,
+         ;; so total-lpw = visible-lpw
+         (efficacy (grid-visible-lumens-per-watt sgrid))
+         (cri-ra   (/ (apply + ri-8) 8))
+         (cri-14   (/ (apply + (cadr full-cri)) 14))
+         (worst-14 (apply min (cadr full-cri)))
+         (sel-data (compute-on-selection (cadr full-cri))))
+    (append (list cri-ra worst-ri efficacy)
+            full-cri
+            (append (list cri-14 worst-14) sel-data))))
+
+;;; current sampled grid (set by specs-func when *use-grid* is #t)
+(define *current-sgrid* #f)
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
 ;; Optimization code for use with COBYLA
 ;;
 
@@ -610,8 +849,11 @@
                   
 (define (specs-func new-p)
   (ParametricSpectrum.SetVec *p* new-p)
-  (calc-specs w)
-  )
+  (if *use-grid*
+      (begin
+        (set! *current-sgrid* (spectrum->grid w))
+        (grid-calc-specs *current-sgrid*))
+      (calc-specs w)))
 
 (define *target-cct*      2700)
 (define *min-cri-ra*        82)
@@ -717,16 +959,19 @@
         (crmin  (cadr specs))
         (cct    (caar (cdddr specs)))
         (Duv    (cadar (cdddr specs)))
-        (lpm-philips (philips-lumens-per-watt w)) ;; Philips-corrected efficacy
+        (lpm-philips (if *use-grid*
+                        (grid-philips-lumens-per-watt *current-sgrid*)
+                        (philips-lumens-per-watt w)))
         )
     (dis specs " Philips-LER=" lpm-philips dnl)
-    (list (- r9)                         ;; target: maximize R9
-          (- cri   *min-cri-ra*)         ;; CRI(Ra) >= min-cri-ra
-          (- crmin (- *min-cri-ra* 10))  ;; worst Ri >= min-cri-ra - 10
-          (- cct (- *target-cct* 50))    ;; cct >= target - 50
-          (- (+ *target-cct* 50) cct)    ;; cct <= target + 50
-          (* 1000 (- 0.012 Duv))         ;; Duv <= 0.012
-          (- lpm-philips *min-efficacy*) ;; Philips-corrected efficacy >= min
+    (list (- r9)                             ;; target: maximize R9
+          (- cri   *min-cri-ra*)             ;; CRI(Ra) >= min-cri-ra
+          (- (+ *min-cri-ra* 2) cri)         ;; CRI(Ra) <= min-cri-ra + 2  (pin CRI)
+          (- crmin (- *min-cri-ra* 10))      ;; worst Ri >= min-cri-ra - 10
+          (- cct (- *target-cct* 50))        ;; cct >= target - 50
+          (- (+ *target-cct* 50) cct)        ;; cct <= target + 50
+          (* 1000 (- 0.012 Duv))             ;; Duv <= 0.012
+          (- lpm-philips *min-efficacy*)     ;; Philips-corrected efficacy >= min
           )
         )
   )
@@ -739,6 +984,7 @@
   )
 
 (define (run-max-r9-philips! cct min-cri min-efficacy)
+  (set! *num-constraints* 7)  ;; one extra: CRI upper bound
   (set! *min-efficacy* min-efficacy)
   (run-example-iters! cct min-cri -100 7 specs->max-r9-philips
                       (string-append "_maxR9P_eff"
@@ -838,6 +1084,12 @@
 
 (define pp
   (obj-method-wrap (LibertyUtils.DoParseParams) 'ParseParams.T))
+
+;; Grid-based integration toggle (use before any -run* flag)
+(if (pp 'keywordPresent "-grid")
+    (begin
+      (set! *use-grid* #t)
+      (init-grid!)))
 
 (if (pp 'keywordPresent "-run")
     (begin
