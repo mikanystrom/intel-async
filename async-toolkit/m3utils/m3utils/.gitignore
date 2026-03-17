@@ -18,3 +18,11 @@ bin/
 *.done
 *.pdf
 build/
+
+# LaTeX intermediates
+*.aux
+*.out
+*.toc
+*.synctex.gz
+*.fls
+*.fdb_latexmk
