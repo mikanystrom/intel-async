@@ -45,19 +45,28 @@ producing light that many people find unnatural.
 An incandescent lamp is a near-perfect blackbody radiator.  Its spectrum is
 broad and smooth, rendering colors with perfect fidelity (CRI~$=$~100).
 But most of its radiation falls in the infrared, giving it a luminous efficacy
-of only $\sim$15~lm/W.  Government regulations worldwide --- EU Ecodesign,
-US EISA/DOE, California Title~24 --- have mandated minimum efficacy standards
-that incandescent lamps cannot meet, effectively banning them.
+of only $\sim$12~lm/W.  Paradoxically, incandescent lamps are excellent
+\emph{radiant} emitters: a tungsten filament at 2700\,K converts roughly
+85\% of its electrical input into radiation.  The problem is that at this
+temperature only $\sim$5\% of the blackbody spectrum falls in the visible
+band; the rest is infrared.  Government regulations worldwide --- EU
+Ecodesign, US EISA/DOE, California Title~24 --- have mandated minimum
+efficacy standards that incandescent lamps cannot meet, effectively banning
+them.
 
 The replacement technologies (fluorescent, LED) achieve high efficacy by
 concentrating their emission in the visible spectrum.  But \emph{where} in
 the visible spectrum?  The CIE photopic luminous efficiency function $V(\lambda)$
 peaks sharply at 555~nm (yellow-green).  A monochromatic source at 555~nm
-would achieve the theoretical maximum of 683~lm/W --- but it would render
-no colors at all.
+with perfect electrical-to-optical conversion would achieve the theoretical
+maximum of 683~lm/W --- but it would render no colors at all.
 
-The question becomes: \textbf{What spectral power distribution maximizes
-luminous efficacy while maintaining acceptable color rendering?}
+Legislators recognized that pushing efficacy alone would produce light that
+people hate, so they added color quality requirements.  The instrument they
+chose is the CIE Color Rendering Index (CRI), a 1965-era metric based on
+only 8~test color samples.  The regulatory question thus becomes:
+\textbf{What spectral power distribution maximizes luminous efficacy while
+satisfying the CRI constraint?}
 
 This is a constrained optimization problem.  The constraints come from
 regulations:
@@ -67,9 +76,14 @@ regulations:
 \item \textbf{Duv $\leq$ 0.012}: chromaticity tolerance (distance from the blackbody locus)
 \end{itemize}
 
-We explore what happens as you ``turn up the knob'' on the efficacy
-requirement.  The answer is surprising: the optimal spectra become
-increasingly bizarre.
+The central question of this report is whether the legislative response
+actually solves the problem that people care about --- faithful color
+reproduction --- or whether CRI's 8-sample design leaves enough room for
+an optimizer to ``game the metric,'' producing spectra that pass the
+regulatory test while rendering many real-world colors poorly.  We explore
+what happens as you turn up the efficacy requirement and let the optimizer
+find the best spectrum that satisfies CRI.  The answer is that the optimal
+spectra become increasingly bizarre, and CRI fails to prevent this.
 
 \section{Background}
 
@@ -122,6 +136,335 @@ prime-color fluorescent lamp patents~\cite{thornton-inventor}.
 
 The optimization results below independently rediscover Thornton's prime
 colors from first principles.
+
+\section{What Gets Regulated as a ``White Lamp''?}
+\label{sec:scope}
+
+Not every light source falls under efficiency and color-quality
+regulations.  Colored lamps, decorative filament bulbs, stage lighting,
+plant grow lights, and various specialty products are typically exempt.
+The regulations target \emph{general-service lamps} --- the everyday
+bulbs that replaced incandescents in homes and offices.  The precise
+definition of ``in scope'' varies by jurisdiction and determines which
+products face the efficacy/CRI constraints that drive the optimization
+problem analyzed in this report.
+
+\subsection{EU Ecodesign (2019/2020)}
+
+The EU regulation defines its scope via a \emph{chromaticity boundary}
+rather than an explicit CCT range.  A light source is treated as white
+(and thus in scope) if its chromaticity coordinates satisfy:
+\[
+0.270 < x < 0.530 \quad\text{and}\quad
+-2.3172\,x^2 + 2.3653\,x - 0.2199 < y < -2.3172\,x^2 + 2.3653\,x - 0.1595
+\]
+On the Planckian locus, $x = 0.530$ corresponds to approximately
+1800\,K, so the regulation covers very warm lamps.  Sources outside
+this boundary (UV, deep red, amber, grow lights) are exempt.
+Quality requirements: CRI\,$\geq$\,80, with an exemption for
+HID $>$4\,klm and outdoor/industrial applications.  There is no
+$R_9$ requirement and no TM-30 requirement.
+
+\subsection{US DOE General Service Lamp (GSL)}
+
+The US defines scope differently: a lamp with CCT $< 2500$\,K is
+classified as ``colored'' and falls outside the general-service lamp
+definition under EPCA, exempting it from efficiency standards.
+Lamps with CCT $\geq 2500$\,K and lumen output between 310 and
+3300\,lm are in scope.  The current backstop (2022) requires only
+45\,lm/W; the 2028 standard raises this to $\sim$125\,lm/W for a
+typical 810-lumen omnidirectional lamp.  The DOE imposes
+\emph{no color quality requirements at all} --- neither CRI nor $R_9$.
+
+\subsection{California Title~24 JA8}
+
+JA8 is the most stringent regime: CCT $\leq 4000$\,K (warm and
+neutral white only), CRI\,$\geq$\,90, $R_9 \geq 50$, minimum
+efficacy 45\,lm/W.  Products with CCT $> 4000$\,K are not JA8-eligible
+for high-efficacy residential applications.
+
+\subsection{ANSI C78.377 Chromaticity Standard}
+
+While not itself a regulation, ANSI~C78.377 defines the nominal CCT
+categories that manufacturers target and that regulations reference.
+The 2024 revision added 1800\,K and 2000\,K for the first time,
+reflecting the growing market for ``ultra-warm'' and ``candlelight''
+LED products.  The standard now covers 10 nominal CCTs: 1800, 2000,
+2200, 2500, 2700, 3000, 3500, 4000, 4500, 5000, 5700, and 6500\,K.
+
+\subsection{Summary and Implications for This Study}
+
+\begin{table}[H]
+\centering
+\caption{Regulatory scope: which lamps must meet efficiency and color
+  standards.}
+\label{tab:scope}
+\begin{tabular}{lcccl}
+\toprule
+Jurisdiction & Min CCT & Max CCT & CRI & Notes \\
+\midrule
+EU 2019/2020 & $\sim$1800 & $\sim$10000 & $\geq$80
+  & Chromaticity boundary \\
+US DOE (2022) & 2500 & --- & ---
+  & 45\,lm/W backstop \\
+US DOE (2028) & 2500 & --- & ---
+  & $\sim$125\,lm/W, no CRI \\
+CA Title~24 JA8 & --- & 4000 & $\geq$90
+  & $R_9 \geq 50$ \\
+ANSI C78.377 & 1800 & 6500 & ---
+  & Chromaticity bins only \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{The Regulatory War on Coziness}
+
+Consumers choose low CCT for ambiance.  2700\,K is the standard
+residential warm white; 2200\,K is marketed as ``warm dim'' or
+``vintage''; 2000\,K and 1800\,K appear as ``candlelight'' or
+``ultra-warm'' in restaurants, bedrooms, and hospitality settings ---
+precisely the environments where people care most about how light
+\emph{feels}.  The lowest CCT that falls under a binding efficiency
+regulation is approximately 1800\,K (EU, via the chromaticity boundary)
+or 2500\,K (US DOE).
+
+Unfortunately, the physics of warm light works against efficiency.  The
+warmer and cozier you want the light, the harder it is to produce
+efficiently:
+
+\begin{enumerate}
+\item \textbf{Lower theoretical LER.}  The visible-band LER of a
+  blackbody drops from $\sim$109\,lm/W at 3000\,K to $\sim$88\,lm/W at
+  2700\,K to $\sim$60\,lm/W at 2200\,K.  Achieving a given LER floor
+  requires more aggressive spectral shaping at lower CCT.
+
+\item \textbf{Higher Stokes loss.}  Matching the warm chromaticity
+  requires substantial red phosphor emission ($>$600\,nm), which incurs
+  the largest Stokes penalty in the Philips cost model: a photon at
+  630\,nm costs $C = 630/(450 \times 0.90) = 1.56$ --- over 50\% more
+  electrical power per optical watt than the blue pump.
+
+\item \textbf{More demanding CRI reference.}  The CRI calculation
+  compares the test spectrum against the blackbody at the measured CCT.
+  At low CCT, this reference is very red-rich, so any deficit in deep-red
+  emission is penalized more severely in the $R_i$ scores.
+\end{enumerate}
+
+\noindent Efficiency regulations therefore bite hardest on exactly the
+products that serve the most atmosphere-sensitive applications.  A
+restaurant owner who wants 2200\,K candlelight-quality LEDs faces a
+tighter physics budget than someone lighting an office at 4000\,K ---
+yet both must meet the same efficiency floor.
+
+Of the major regulatory regimes, the EU is the most difficult to
+satisfy at low CCT, because it is the only one that simultaneously
+covers very warm lamps (down to $\sim$1800\,K), requires CRI\,$\geq$\,80,
+\emph{and} imposes a high efficacy floor ($\sim$98\,lm/W system).
+The US DOE has a higher efficacy target (125\,lm/W by 2028) but
+imposes no CRI requirement and excludes lamps below 2500\,K.
+California JA8 has the strictest color quality (CRI\,$\geq$\,90,
+$R_9 \geq 50$) but requires only 45\,lm/W.  Only the EU squeezes
+both ends --- efficacy and color quality --- across the widest CCT
+range.
+
+Table~\ref{tab:cct-comparison} quantifies this effect by comparing
+the maximum achievable efficacy across four CCTs at equal CRI floors.
+All runs use grid mode with 129 spectral parameters.
+
+\begin{table}[H]
+\centering
+\caption{Maximum achievable LER (lm/W) vs CCT and CRI floor.
+  $R_9$ values in parentheses show the unconstrained red-rendering
+  penalty at each operating point.}
+\label{tab:cct-comparison}
+\begin{tabular}{r|rr|rr|rr|rr}
+\toprule
+ & \multicolumn{2}{c|}{1800\,K} & \multicolumn{2}{c|}{2100\,K}
+ & \multicolumn{2}{c|}{2200\,K} & \multicolumn{2}{c}{2700\,K} \\
+CRI & LER & ($R_9$) & LER & ($R_9$) & LER & ($R_9$) & LER & ($R_9$) \\
+\midrule
+$\geq$60 & 412 & ($-34$) & 438 & ($-27$) & 423 & ($-25$) & 437 & ($-28$) \\
+$\geq$70 & 400 & ($-15$) & 422 & ($-9$)  & 423 & ($-7$)  & 428 & ($-7$)  \\
+$\geq$80 & 385 & ($+11$) & 404 & ($+21$) & 415 & ($+11$) & 412 & ($+21$) \\
+$\geq$85 & 370 & ($+25$) & 389 & ($+34$) & 402 & ($+32$) & 402 & ($+33$) \\
+$\geq$90 & 360 & ($+35$) & 386 & ($+36$) & 403 & ($+50$) & 399 & ($+45$) \\
+$\geq$95 & 366 & ($+72$) & 381 & ($+77$) & 386 & ($+75$) & 388 & ($+58$) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent At CRI\,$\geq$\,80 (the EU minimum), the efficacy penalty
+for dropping from 2700\,K to 1800\,K is about 27\,lm/W --- a 7\%
+reduction in theoretical LER, which translates directly to a 7\%
+higher electricity cost for the same lumen output.  The penalty
+steepens at CRI\,$\geq$\,90: 39\,lm/W or roughly 10\%.  At 1800\,K,
+$R_9$ is also consistently worse at each CRI floor, confirming that
+warm light forces a harder compromise between efficiency and red
+rendering.
+
+Several non-monotonicities appear in the table: at 1800\,K,
+CRI\,$\geq$\,95 yields higher efficacy (366\,lm/W) than
+CRI\,$\geq$\,90 (360\,lm/W); at 2200\,K, CRI\,$\geq$\,70 matches
+CRI\,$\geq$\,60.  Since relaxing a constraint can never worsen the
+true optimum, these indicate that COBYLA is finding different local
+minima at different constraint levels --- a tighter constraint can
+steer the optimizer away from a bad basin.  See
+Section~\ref{sec:future} for planned improvements to optimizer
+robustness.
+
+\subsubsection{Individual $R_i$ Breakdown}
+\label{sec:ri-breakdown}
+
+The CRI general index $R_a$ averages only the first eight test color
+samples ($R_1$--$R_8$), which are all unsaturated pastels.  The six
+``special'' samples ($R_9$--$R_{14}$) --- saturated reds, yellows,
+greens, blues, plus skin and foliage --- are reported separately but
+carry no regulatory weight.  Table~\ref{tab:ri-breakdown} reveals
+which colors the optimizer sacrifices.
+
+\begin{table}[H]
+\centering
+\caption{Individual $R_i$ scores at CRI\,$\geq$\,80 and CRI\,$\geq$\,95
+  across four CCTs.  Values below 50 are in bold.}
+\label{tab:ri-breakdown}
+\small
+\begin{tabular}{rl|rrrr|rrrr}
+\toprule
+ & & \multicolumn{4}{c|}{CRI $\geq$ 80}
+   & \multicolumn{4}{c}{CRI $\geq$ 95} \\
+ & Test color & 1800 & 2100 & 2200 & 2700
+              & 1800 & 2100 & 2200 & 2700 \\
+\midrule
+$R_1$  & Light greyish red     & 87 & 94 & 83 & 94  & 98 & 99 & 99 & 97 \\
+$R_2$  & Dark greyish yellow   & 89 & 85 & 91 & 88  & 92 & 91 & 90 & 91 \\
+$R_3$  & Strong yellow green   & 67 & 68 & 69 & 70  & 96 & 96 & 96 & 91 \\
+$R_4$  & Mod.\ yellowish green & 82 & 81 & 81 & 93  & 99 & 99 & 99 & 97 \\
+$R_5$  & Light bluish green    & 96 & 90 & 93 & 81  & 94 & 94 & 93 & 92 \\
+$R_6$  & Light blue            & 81 & 77 & 83 & 75  & 94 & 93 & 93 & 89 \\
+$R_7$  & Light violet          & 82 & 77 & 89 & 93  & 98 & 97 & 97 & 95 \\
+$R_8$  & Light reddish purple  & 67 & 68 & 69 & 70  & 90 & 92 & 91 & 86 \\
+\midrule
+$R_9$  & Strong red            & 11 & 21 & 11 & 21  & 72 & 77 & 76 & 58 \\
+$R_{10}$ & Strong yellow       & 68 & 61 & 71 & 56  & 83 & 84 & 83 & 78 \\
+$R_{11}$ & Strong green        & 80 & 78 & 78 & 84  & 99 & 96 & 96 & 97 \\
+$R_{12}$ & Strong blue         & \textbf{29} & \textbf{7} & \textbf{6} & \textbf{15}
+                                & 68 & 60 & 60 & \textbf{44} \\
+$R_{13}$ & Light skin           & 86 & 91 & 84 & 92  & 91 & 91 & 91 & 95 \\
+$R_{14}$ & Leaf green           & 76 & 78 & 77 & 79  & 94 & 95 & 96 & 93 \\
+\midrule
+\multicolumn{2}{l|}{Worst $R_i$ (all 14)} & \textbf{11} & \textbf{7} & \textbf{6} & \textbf{15}
+                                & 68 & 60 & 60 & \textbf{44} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent Several patterns emerge:
+
+\begin{enumerate}
+\item \textbf{$R_{12}$ (strong blue) is worse than $R_9$ at every CCT.}
+  At CRI\,$\geq$\,80, $R_{12}$ is the overall worst score at 2100\,K
+  (7), 2200\,K (6), and 2700\,K (15).  The optimizer's blue emission is a
+  narrow spike at the 450\,nm pump wavelength --- efficient for
+  chromaticity matching but inadequate for rendering the broader
+  reflectance of saturated blue objects.
+
+\item \textbf{Even CRI\,$\geq$\,95 cannot save $R_{12}$.}  At 2700\,K,
+  $R_{12} = 44$ despite CRI\,$=$\,92.  This is the worst individual
+  score in the entire table at CRI\,$\geq$\,95, and it is far worse
+  than the corresponding $R_9 = 58$.  Blue is the blind spot
+  of CRI-constrained optimization.
+
+\item \textbf{1800\,K does \emph{better} on $R_{12}$ than 2700\,K.}
+  At CRI\,$\geq$\,95: $R_{12} = 68$ (1800\,K) vs.\ 44 (2700\,K).
+  The warm CCT chromaticity requires less blue energy, giving the
+  optimizer more freedom in placing the blue peak.
+
+\item \textbf{$R_{10}$ (strong yellow) is quietly poor.}  At
+  CRI\,$\geq$\,80, $R_{10}$ ranges from 56--71 across CCTs --- always
+  below the $R_a$ average, but not low enough to attract regulatory
+  attention.  Strong yellows fall between the optimizer's green and
+  red peaks, receiving insufficient spectral support.
+\end{enumerate}
+
+The concentration of damage in $R_9$, $R_{10}$, and $R_{12}$ ---
+precisely the three most saturated test colors in the red, yellow, and
+blue regions --- confirms that the optimizer exploits the gap between
+CRI's pastel test samples ($R_1$--$R_8$) and the saturated colors
+that matter most for visual quality.  A regulation requiring all 14
+$R_i$ values above a minimum threshold would close this loophole more
+effectively than any improvement to the averaging formula.
+
+\subsubsection{All-$R_i$ Floor: Effect on Maximum Efficacy}
+\label{sec:allri}
+
+To quantify the efficacy cost of closing the $R_i$ loophole, we add an
+optimization mode that constrains the \emph{worst} of all 14 individual
+$R_i$ scores above a threshold, while maximizing Philips-corrected LER.
+No CRI floor is imposed---the constraint on worst-$R_i$ is more
+demanding than any CRI requirement.
+
+Table~\ref{tab:allri} shows the maximum achievable system efficacy
+(best-production technology, $\times 0.514$) across four CCTs and four
+threshold levels.  The optimizer uses COBYLA with hierarchical resolution
+up to 129 spectral parameters; note that COBYLA cannot guarantee strict
+constraint satisfaction, so some results show worst-$R_i$ slightly below
+the target.  The reported efficacy represents the optimizer's best
+effort at balancing the conflicting demands.
+
+\begin{table}[H]
+\centering
+\caption{Maximum system efficacy (lm/W, best-production $\times 0.514$)
+  when constraining all $R_i \geq$ threshold.  Worst achieved $R_i$ in
+  parentheses.  All cases exceed the EU 98~lm/W floor.}
+\label{tab:allri}
+\small
+\begin{tabular}{r|rr|rr|rr|rr}
+\toprule
+ & \multicolumn{2}{c|}{1800\,K} & \multicolumn{2}{c|}{2100\,K}
+ & \multicolumn{2}{c|}{2200\,K} & \multicolumn{2}{c}{2700\,K} \\
+Target & Sys & (worst) & Sys & (worst) & Sys & (worst) & Sys & (worst) \\
+\midrule
+$\geq$50 & 129 & (44) & 137 & (36) & 135 & (46) & 140 & (48) \\
+$\geq$60 & 129 & (45) & 131 & (48) & 130 & (53) & 134 & (45) \\
+$\geq$70 & 119 & (67) & 132 & (51) & 130 & (54) & 139 & (41) \\
+$\geq$80 & 119 & (68) & 125 & (57) & 127 & (63) & 127 & (67) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent The key finding: \textbf{all 16 combinations pass the EU
+98~lm/W threshold}, including the most demanding case (1800\,K, target
+all-$R_i \geq 80$) which still achieves 119~lm/W system efficacy.
+The efficacy penalty for tightening the color floor from 50 to 80 is
+modest: about 10~lm/W at 1800\,K, 12~lm/W at 2100\,K, and 13~lm/W
+at 2700\,K.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{fig_allri_frontier}
+\caption{Maximum system efficacy vs.\ minimum $R_i$ threshold across
+CCTs.  All data points lie above the EU 98~lm/W floor (dashed).
+1800\,K is the tightest, but still achieves 119~lm/W even at
+target all-$R_i \geq 80$.  Non-monotonicities at 2700\,K are
+COBYLA local-minimum artifacts.}
+\label{fig:allri}
+\end{figure}
+
+\noindent The constraint satisfaction gap (worst achieved $R_i$ below
+target) is itself informative: COBYLA converges to points where further
+improvement in worst-$R_i$ would require unacceptable efficacy loss.
+The gap narrows at 2200\,K and 2700\,K (worst $R_i = 63$--67 vs.\
+target 80), suggesting that multi-start optimization or a different
+solver could close it.  At 1800\,K, the gap is smaller (worst 68 vs.\
+target 80), indicating that 1800\,K is actually \emph{less} difficult
+for uniform color quality than for high CRI $R_a$, because the warm
+chromaticity naturally requires broad-spectrum emission.
+
+The practical implication is clear: regulations that require all 14
+$R_i$ values above a threshold (rather than just the 8-sample average
+$R_a$) would not create an impossibility---they would simply redirect
+the optimizer's effort from gaming the metric toward producing genuinely
+good light.
 
 \section{The \texttt{photopic} Tool}
 
@@ -225,36 +568,173 @@ to Thornton's prime colors:
 \subsection{Convergence: The Spectrum Gets ``Weirder'' with More Freedom}
 
 Figure~\ref{fig:convergence} shows how the optimized spectrum evolves as
-the number of control parameters increases from 2 to 17.
+the number of control parameters increases from 2 to 513.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.95\textwidth]{fig3_convergence.png}
+\includegraphics[width=\textwidth]{fig3_convergence.png}
 \caption{Evolution of the optimal CRI~$\geq$~60 spectrum at 2700K as the
-  optimizer gains more spectral resolution.  With 2 parameters, the spectrum
-  is nearly a tilted blackbody (171~lm/W).  As parameters increase, the
-  optimizer carves out deep nulls between peaks, reaching 437~lm/W at 17
-  parameters.  The three-peak structure emerges clearly by 9 parameters.}
+  optimizer gains more spectral resolution, from 2 control parameters
+  (nearly a tilted blackbody, 170~lm/W) to 513 (1.6\,nm spacing,
+  434~lm/W).  The three-peak structure emerges by 9~parameters and
+  efficacy converges by 33.  Higher resolution adds no visible change.}
 \label{fig:convergence}
 \end{figure}
 
 The progression is illuminating:
 \begin{itemize}
-\item \textbf{2 parameters} (171~lm/W): Can only tilt the spectrum.  Shifts power
+\item \textbf{2 parameters} (170~lm/W): Can only tilt the spectrum.  Shifts power
   toward green.  Still smooth, CRI~$=$~98.
 \item \textbf{3 parameters} (262~lm/W): First sign of spectral sculpting.  Blue
   and deep red suppressed.
-\item \textbf{5 parameters} (362~lm/W): Three-peak structure begins to emerge.
+\item \textbf{5 parameters} (364~lm/W): Three-peak structure begins to emerge.
   Deep null around 500~nm.
-\item \textbf{9 parameters} (394~lm/W): Clear three peaks with valleys between.
-  CRI drops to 79.
-\item \textbf{17 parameters} (437~lm/W): Fully developed spiky spectrum.
+\item \textbf{9 parameters} (391~lm/W): Clear three peaks with valleys between.
+  CRI drops to 78.
+\item \textbf{17--33 parameters} (434~lm/W): Fully developed spiky spectrum.
   Deep nulls, sharp peaks.  CRI just satisfies the $\geq$60 floor.
+\item \textbf{65--513 parameters}: No visible change.  Efficacy stable at
+  434~lm/W to four significant figures.
 \end{itemize}
 
 The optimizer, given enough degrees of freedom, always converges to a
 three-peak solution.  \textbf{This is Thornton's prime-color theorem,
-rediscovered numerically.}
+rediscovered numerically.}  The convergence by 33~parameters
+($\sim$12\,nm spacing) is notable: the optimal peaks are broad enough
+that finer spectral resolution provides no benefit.
+
+\subsubsection{Trust Region and Optimizer Artifacts}
+
+However, the convergence is partly an artifact of the COBYLA trust
+region schedule.  The hierarchical solver halves the trust region
+radius (rhobeg) at each subdivision level: starting at 4 for 2
+parameters, it reaches $\sim$0.008 at 513~parameters.  At high
+resolution, this is too small for the optimizer to restructure the
+spectrum --- it can only make tiny local adjustments, so the peak
+shape is effectively frozen from level 4--5 onward.
+
+To test this, we ran 513 parameters with a minimum trust region
+of 2.0, preventing the radius from shrinking below this floor.
+The result (Figure~\ref{fig:rhobeg}) is striking: the optimizer
+finds a \emph{higher} efficacy (473 vs.\ 434~lm/W) but produces a
+noisy, spiky spectrum with $\sim$29 peaks scattered across
+500--650\,nm.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{fig_rhobeg_comparison.png}
+\caption{Left: standard hierarchical result at 33 parameters (3
+  clean peaks, 443~lm/W).  Right: 513 parameters with trust region
+  clamped at $\geq$2.0 (29 noisy peaks, 473~lm/W).  The higher
+  efficacy is an artifact --- the optimizer exploits fine-grained
+  oscillations that happen to satisfy CRI\,$\geq$\,60 while
+  concentrating power near the $V(\lambda)$ peak.  The result is
+  physically meaningless: no real light source would have this
+  spectrum, and $R_9$ degrades further to $-54$.}
+\label{fig:rhobeg}
+\end{figure}
+
+\noindent This reveals a tension in the optimizer design:
+\begin{itemize}
+\item Too-small trust region: the optimizer cannot explore, and the
+  solution is locked into whatever shape was established at low
+  resolution.
+\item Too-large trust region: the optimizer thrashes, producing noisy
+  spectra that game the CRI metric without converging to a proper
+  local minimum.
+\end{itemize}
+The clean three-peak solution at 33~parameters is not necessarily
+the global optimum --- but the noisy 473~lm/W solution, while
+technically feasible, is not a meaningful result.  The right
+approach is likely a parameterization that directly represents
+peak positions and widths, eliminating the mismatch between
+spectral resolution and optimizer dynamics.
+
+\subsubsection{Gaussian Peak Parameterization}
+
+To test whether the peak widths are dictated by the CRI constraint
+or imposed by the grid resolution, we implemented an alternative
+parameterization: $K$ Gaussian peaks, each defined by center
+wavelength $\mu_k$, width $\sigma_k$, and amplitude $A_k$, for a
+total of $3K$ free parameters.  The spectrum is
+$S(\lambda) = \sum_{k=1}^{K} A_k \exp\!\bigl(-(\lambda - \mu_k)^2
+/ (2\sigma_k^2)\bigr)$,
+evaluated on the same 391-point grid and fed to the same
+CRI/CCT/efficacy constraints.
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{fig_gauss_vs_grid.png}
+\caption{Grid vs.\ Gaussian parameterization at 2700\,K.
+  Top row: CRI\,$\geq$\,60.  The Gaussian parameterization (9~DOF)
+  finds narrower peaks and achieves 454~lm/W vs.\ the grid's
+  434~lm/W, confirming that the grid imposes unnecessary peak width.
+  Bottom row: CRI\,$\geq$\,95.  Three Gaussians cannot produce the
+  broad spectrum required and achieve only 337~lm/W vs.\ the grid's
+  388~lm/W --- more peaks ($K \geq 5$) would be needed.}
+\label{fig:gauss-vs-grid}
+\end{figure}
+
+\noindent At CRI\,$\geq$\,60, the Gaussian peaks are measurably
+narrower than the grid peaks (blue $\sigma = 14$ vs.\ 15\,nm,
+green 12 vs.\ 13\,nm, red 5 vs.\ 8\,nm), and the Gaussian
+achieves 5\% higher efficacy.  This shows that the peak widths in
+the grid parameterization are \emph{not} purely dictated by CRI ---
+the grid resolution and the hierarchical warm-start impose some
+minimum width.  However, the widths are close enough (within
+$\sim$10\% for blue and green) that the CRI constraint is the
+dominant factor.
+
+At CRI\,$\geq$\,95, three Gaussians are insufficient: the
+constraint forces broad coverage across the visible spectrum,
+which a sum of 3 peaks cannot approximate well.  The grid
+parameterization, with its 129 independent amplitude values, has
+the flexibility to sculpt a near-continuous spectrum and achieves
+51~lm/W more.
+
+\subsubsection{The Limits of Thornton's Prime-Color Approach}
+
+This result exposes a practical limit to Thornton's three-band
+theory.  At moderate CRI ($\leq$80), three narrow phosphor bands
+suffice and in fact outperform a broad spectrum --- fewer
+conversion steps means lower losses.  But at CRI\,$\geq$\,95,
+the spectrum must cover enough of the visible range to render all
+8 CRI test samples faithfully, and three bands cannot do this.
+
+In a real phosphor-converted LED, each additional phosphor
+carries costs that our single-phosphor Stokes model does not
+capture:
+\begin{itemize}
+\item \textbf{Compounded quantum efficiency.}  Each phosphor
+  conversion step loses $\sim$10\% of photons (QE $\approx 0.90$).
+  A second phosphor re-absorbing and re-emitting drops to
+  $0.90^2 = 0.81$; a third to $0.73$.
+
+\item \textbf{Parasitic reabsorption.}  Multiple phosphors in
+  the same package absorb each other's emission.  A red phosphor
+  ($\sim$630\,nm) can absorb green phosphor emission
+  ($\sim$540\,nm), converting it with additional Stokes loss
+  rather than letting it exit the package.
+
+\item \textbf{Manufacturing complexity.}  Tuning 4--5 phosphor
+  ratios to hit a chromaticity target with acceptable bin-to-bin
+  variation is harder than tuning 2--3, increasing yield loss
+  and cost.
+\end{itemize}
+
+\noindent The Philips cost model used in our Pareto sweeps
+(Section~\ref{sec:philips}) treats each wavelength independently:
+$C(\lambda) = \lambda / (\lambda_\mathrm{pump} \cdot \mathrm{QE})$.
+This correctly captures the Stokes penalty for a single phosphor
+conversion from the 450\,nm pump, but it does not account for
+cascaded conversions or reabsorption losses.  The real-world
+efficacy penalty for moving from CRI\,$\geq$\,80 to
+CRI\,$\geq$\,95 is therefore \emph{larger} than our optimization
+predicts, because the broader spectrum requires more phosphors
+with compounding losses.  Thornton's three-band approach, by
+minimizing the number of conversion steps, avoids these
+penalties --- but at the cost of being unable to satisfy demanding
+color-fidelity requirements.
 
 \subsection{The R9 Problem}
 
@@ -279,12 +759,13 @@ CRI floor increases.
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.85\textwidth]{fig2_cri_comparison.png}
-\caption{Optimal spectra at 2700K for different CRI constraints.
+\includegraphics[width=\textwidth]{fig2_cri_comparison.png}
+\caption{Optimal spectra at 2700K for CRI constraints from 60 to 98.
   As CRI requirements increase, the spectrum must broaden to render more
   colors faithfully, reducing the maximum achievable efficacy.  The
   three-peak structure persists but the peaks must widen and the valleys
-  cannot be as deep.}
+  cannot be as deep.  Note how $R_9$ transitions from negative (reds
+  rendered incorrectly) to positive as CRI increases.}
 \label{fig:comparison}
 \end{figure}
 
@@ -367,6 +848,12 @@ are rendered at only one-fifth of their reference fidelity.  To achieve
 California JA8's $R_9 \geq 50$ requirement, CRI must be pushed above 90,
 reducing achievable efficacy to $\sim$399~lm/W.
 
+%% EDITORIAL NOTE: This figure and the sweep figures below currently plot
+%% LER (radiation-only lm/W) on the x-axis.  Next iteration should plot
+%% system (wall-plug) efficacy at three technology levels (best prod x0.514,
+%% best lab x0.670, DOE limit x0.813) with vertical lines at EU 98 and
+%% DOE 125 lm/W thresholds --- matching the treatment in the tables and
+%% in the new Rf sweep plots.
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.80\textwidth]{fig6_r9_vs_efficacy.png}
@@ -440,43 +927,35 @@ Their spectral power distributions, with 3--5 peaks and deep valleys, are
 the market's practical approximation to the mathematically optimal solution
 computed here.
 
-Table~\ref{tab:regulations} compares the major regulatory frameworks.
-The EU sets CRI~$\geq$~80 with no $R_9$ requirement; our optimizer
-shows that this permits $R_9 = 21$ (Table~\ref{tab:tradeoff}).  The US
-DOE 2028 standard requires $\sim$125~lm/W system efficacy but imposes no
-color quality floor at all.  Only California JA8 mandates $R_9 \geq 50$
-together with CRI~$\geq$~90.
-
-\begin{table}[H]
-\centering
-\caption{Regulatory landscape for general-service lamps (2025--2026).}
-\label{tab:regulations}
-\begin{tabular}{lcccc}
-\toprule
-& EU 2019/2020 & US DOE 2022 & US DOE 2028 & CA Title~24 JA8 \\
-\midrule
-Min system efficacy$^*$ & $\sim$98 & 45 & 125 & 45 \\
-Min CRI ($R_a$)         & 80 & --- & --- & 90 \\
-Min $R_9$               & --- & --- & --- & 50 \\
-CCT range               & any & any & any & 2700--4000~K \\
-\bottomrule
-\multicolumn{5}{l}{\small $^*$lm/W for an 800~lm non-directional lamp.}
-\end{tabular}
-\end{table}
+As detailed in Section~\ref{sec:scope}, the EU sets CRI~$\geq$~80
+with no $R_9$ requirement; our optimizer shows that this permits $R_9 = 21$
+(Table~\ref{tab:tradeoff}).  The US DOE~2028 standard requires
+$\sim$125~lm/W system efficacy but imposes no color quality floor at all.
+Only California JA8 mandates $R_9 \geq 50$ together with CRI~$\geq$~90.
 
 \subsection{Comparison with Thornton's Work}
 
-Thornton arrived at his prime-color wavelengths (450, 540, 610~nm) through
-a combination of psychophysical experiments and engineering intuition in the
-1970s~\cite{thornton1971,thornton1972cdi,thornton1972three}.  The
-\texttt{photopic} optimizer, starting from first principles (Planck's law,
-CIE color matching functions, von~Kries adaptation), converges to the same
-wavelengths.  This provides independent numerical confirmation of Thornton's
-insight.
+It is important to acknowledge that Thornton was doing essentially the same
+optimization we do.  His 1971 paper~\cite{thornton1971} describes
+systematic variation of three-line spectra, evaluating CRI and a combined
+figure of merit at each configuration --- this \emph{is} constrained
+optimization, carried out with the computing resources of the early 1970s.
+Walter~\cite{walter1978} made the optimization explicit, applying nonlinear
+programming to a 31-variable discretized spectrum.
 
-The deeper significance is that the prime-color wavelengths are not arbitrary
---- they are the eigenvectors of the human visual system's color discrimination
-capacity, weighted by luminous sensitivity.
+But we are asking a fundamentally different question.  Thornton asked:
+\emph{What is the best white light?}  He found the prime-color wavelengths
+and proposed better phosphor blends.  We ask: \emph{What happens when
+efficiency regulations push lamp spectra toward Thornton's optimum ---
+and keep pushing?}  Thornton's three-peak structure is the \emph{destination}
+that regulatory pressure drives light sources toward.  Our contribution is
+to trace that trajectory quantitatively: as the efficacy floor rises through
+the range mandated by current and proposed regulations, we show how the
+optimal spectrum evolves, where color fidelity breaks down, which color
+samples are sacrificed first, and whether the regulatory metrics (CRI, TM-30)
+actually detect the degradation.  Modern hardware lets us explore up to 129
+degrees of freedom, sweep broad constraint ranges, and map entire Pareto
+frontiers --- turning Thornton's insight into a detailed engineering forecast.
 
 \subsection{What the Regulations Should Do}
 
@@ -708,23 +1187,21 @@ may be superior to four.
 
 \subsection{Relationship to Our Results}
 
-Our \texttt{photopic} optimizer, approaching the problem from yet another
-direction --- continuous piecewise-linear log-amplitude perturbation of a
-blackbody, optimized by COBYLA --- independently converges to essentially
-the same spectral structure.  The three-peak topology that dominates our
-results at low CRI floors (437~lm/W at CRI~$\geq$~60) corresponds to
-Thornton's prime colors, while the broadening and addition of a fourth
-peak at higher CRI floors (CRI~$\geq$~90 and above) matches Walter's
-four-band result.  The wavelength positions we find ($\sim$450, $\sim$540,
-$\sim$610~nm) agree with Thornton to within the resolution of our spectral
-parameterization.
+Our \texttt{photopic} optimizer uses a different parameterization ---
+continuous piecewise-linear log-amplitude perturbation of a blackbody,
+optimized by COBYLA --- but solves the same problem Thornton and Walter
+posed.  The three-peak topology that dominates our results at low CRI
+floors (437~lm/W at CRI~$\geq$~60) corresponds to Thornton's prime
+colors, while the broadening and addition of a fourth peak at higher CRI
+floors (CRI~$\geq$~90 and above) matches Walter's four-band result.  The
+wavelength positions we find ($\sim$450, $\sim$540, $\sim$610~nm) agree
+with Thornton to within the resolution of our spectral parameterization.
 
-The consistency across three independent methods --- Thornton's
-parametric three-line analysis, Walter's unconstrained nonlinear
-programming, and our hierarchical COBYLA optimization --- provides strong
-evidence that the prime-color structure is a genuine feature of the
-CRI/efficacy optimization landscape, not an artifact of any particular
-numerical method.
+That three independent implementations of the same optimization --- spanning
+five decades and very different computational resources --- converge to the
+same spectral structure is strong evidence that the prime-color peaks are a
+genuine feature of the CRI/efficacy landscape, not an artifact of any
+particular numerical method or parameterization.
 
 \section{The Deficiencies of CRI and the Legislative Paradox}
 
@@ -822,72 +1299,86 @@ LER'' replaces the radiant power denominator with the cost-weighted integral:
                                {\int S(\lambda)\, C(\lambda)\, d\lambda}
 \end{equation}
 
-We use this corrected efficacy as the constraint in a new optimization
-mode: \textbf{maximize $R_9$} (saturated red rendering) subject to
-$\text{CRI}(R_a) \geq \text{floor}$, $\text{CCT} \in [T_0-50, T_0+50]$,
-$D_{uv} \leq 0.012$, and $\eta_{\text{Phil}} \geq E_{\min}$.
-The CRI constraint uses a double-sided ``pin'' ($R_a \in [\text{floor},
-\text{floor}+2]$) to prevent the optimizer from spending efficacy budget
-on CRI headroom rather than $R_9$.
+We now invert the optimization problem.  Sections~2--3 maximized
+\emph{efficacy} subject to a CRI floor; here we fix the efficacy floor and
+ask: \textbf{what is the best possible $R_9$ (saturated red rendering) that
+a spectrum can achieve?}  $R_9$ is not merely unconstrained --- it is the
+\emph{optimization objective}.  The constraints are
+$\text{CRI}(R_a) \in [\text{floor}, \text{floor}+2]$ (pinned to prevent
+the optimizer from spending efficacy budget on CRI headroom rather than
+$R_9$), $\text{CCT} \in [T_0-50, T_0+50]$, $D_{uv} \leq 0.012$, and
+$\eta_{\text{Phil}} \geq E_{\min}$.  By sweeping $E_{\min}$ we trace the
+Pareto frontier of $R_9$ vs.\ system efficacy.
 
 \subsection{CRI\,$\geq$\,80 Sweep}
 
 Table~\ref{tab:cri80-sweep} shows the results of sweeping the Philips
 efficacy floor from 200 to 320\,lm/W at 2700\,K with CRI pinned
-to $80 \pm 2$.
+to $80 \pm 2$.  To connect these numbers to real bulbs, the three
+rightmost columns translate Philips LER to wall-plug system efficacy
+using the production loss chain from Table~\ref{tab:losses}.
 
 \begin{table}[H]
 \centering
-\caption{Maximum $R_9$ vs.\ Philips-corrected efficacy floor at 2700\,K,
-  CRI\,$\geq$\,80.  All results at 129 spectral parameters.
-  LER is the raw luminous efficacy of radiation.}
+\caption{Maximum $R_9$ vs.\ efficacy at 2700\,K, CRI\,$\geq$\,80.
+  All results at 129 spectral parameters.
+  System efficacy columns apply the loss chain from Table~\ref{tab:losses}:
+  best production ($\times 0.514$), best lab ($\times 0.670$),
+  DOE limit ($\times 0.813$).}
 \label{tab:cri80-sweep}
-\begin{tabular}{rrrrrr}
+\begin{tabular}{rrrr|rrr}
 \toprule
-$E_{\min}$ (Phil) & CRI & $R_9$ & LER & CCT & $D_{uv}$ \\
+$E_{\min}$ (Phil) & CRI & $R_9$ & LER
+  & \multicolumn{3}{c}{System efficacy (lm/W)} \\
+  & & & & Best prod & Best lab & DOE lim \\
 \midrule
-200 & 81.1 & 99.2 & 297 & 2663 & 0.010 \\
-210 & 81.8 & 97.3 & 309 & 2670 & 0.011 \\
-220 & 81.4 & 98.5 & 323 & 2703 & 0.011 \\
-230 & 82.5 & 98.5 & 335 & 2701 & 0.011 \\
-240 & 80.0 & 97.8 & 349 & 2700 & 0.010 \\
-250 & 80.0 & 96.1 & 362 & 2691 & 0.012 \\
-255 & 82.2 & 89.7 & 364 & 2750 & 0.012 \\
-260 & 82.0 & 89.0 & 370 & 2750 & 0.012 \\
-265 & 82.2 & 88.2 & 377 & 2750 & 0.012 \\
+200 & 81.1 & 99.2 & 297 & 103 & 134 & 163 \\
+210 & 81.8 & 97.3 & 309 & 108 & 141 & 171 \\
+220 & 81.4 & 98.5 & 323 & 113 & 147 & 179 \\
+230 & 82.5 & 98.5 & 335 & 118 & 154 & 187 \\
+240 & 80.0 & 97.8 & 349 & 123 & 161 & 195 \\
+250 & 80.0 & 96.1 & 362 & 129 & 168 & 203 \\
+255 & 82.2 & 89.7 & 364 & 131 & 171 & 207 \\
+260 & 82.0 & 89.0 & 370 & 134 & 174 & 211 \\
+265 & 82.2 & 88.2 & 377 & 136 & 178 & 215 \\
 \midrule
-270 & 82.1 & 47.1 & 385 & 2650 & 0.012 \\
-275 & 81.9 & 40.2 & 391 & 2650 & 0.013 \\
-280 & 81.2 & 44.7 & 397 & 2650 & 0.015 \\
-285 & 81.6 & 35.0 & 404 & 2648 & 0.015 \\
-290 & 80.2 & 32.7 & 410 & 2646 & 0.016 \\
+270 & 82.1 & 47.1 & 385 & 139 & 181 & 220 \\
+275 & 81.9 & 40.2 & 391 & 141 & 184 & 224 \\
+280 & 81.2 & 44.7 & 397 & 144 & 188 & 228 \\
+285 & 81.6 & 35.0 & 404 & 147 & 191 & 232 \\
+290 & 80.2 & 32.7 & 410 & 149 & 194 & 236 \\
 \midrule
-295 & 76.6 & 29.1 & 415 & 2644 & 0.018 \\
-300 & 76.1 & 25.2 & 425 & 2646 & 0.016 \\
-305 & 72.3 & 29.7 & 428 & 2651 & 0.020 \\
-310 & 69.9 & 25.4 & 431 & 2724 & 0.022 \\
-315 & 67.9 & 23.6 & 435 & 2762 & 0.023 \\
-320 & 66.2 & 16.3 & 439 & 2762 & 0.023 \\
+295 & 76.6 & 29.1 & 415 & 152 & 198 & 240 \\
+300 & 76.1 & 25.2 & 425 & 154 & 201 & 244 \\
+305 & 72.3 & 29.7 & 428 & 157 & 204 & 248 \\
+310 & 69.9 & 25.4 & 431 & 159 & 208 & 252 \\
+315 & 67.9 & 23.6 & 435 & 162 & 211 & 256 \\
+320 & 66.2 & 16.3 & 439 & 164 & 214 & 260 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 The results reveal three distinct regimes, separated by horizontal rules
-in the table:
+in the table.  The system efficacy columns make the regulatory relevance
+concrete:
 
 \begin{enumerate}
-\item \textbf{Comfortable region} ($E_{\min} \leq 265$):
+\item \textbf{Comfortable region} (system $\leq$136\,lm/W best-prod):
   $R_9 > 88$, CRI\,$\approx$\,80--82.  The efficacy budget is generous
   enough for the optimizer to produce spectra with excellent red rendering.
-  The spectrum remains relatively smooth with broad red content.
+  This regime comfortably covers the EU~2019/2020 requirement (98\,lm/W)
+  and extends past the US~DOE~2028 target (125\,lm/W).
 
-\item \textbf{$R_9$ cliff} ($E_{\min} = 270$--$290$):
+\item \textbf{$R_9$ cliff} (system 139--149\,lm/W best-prod):
   $R_9$ collapses from 88 to 33.  The optimizer can still satisfy
   CRI\,$\geq$\,80 (since $R_9$ is not part of $R_a$), but cannot
   afford the red phosphor power needed for saturated red fidelity.
   This is the regime where the CRI loophole is most actively exploited.
+  At best-lab technology, this cliff corresponds to 181--194\,lm/W ---
+  well beyond current regulations, but within the range that
+  next-generation standards may target.
 
-\item \textbf{Constraint infeasible} ($E_{\min} \geq 295$):
+\item \textbf{Constraint infeasible} (system $\geq$152\,lm/W best-prod):
   Even CRI\,$=$\,80 becomes unachievable.  The optimizer violates the
   CRI constraint (dropping to 66--77) and the chromaticity tolerance
   ($D_{uv}$ exceeds 0.012).  At these extreme efficacies, no
@@ -902,66 +1393,117 @@ $R_9$ loophole --- but also reduces the achievable efficacy range.
 
 \begin{table}[H]
 \centering
-\caption{Maximum $R_9$ vs.\ Philips-corrected efficacy floor at 2700\,K,
-  CRI\,$\geq$\,95.  All results at 129 spectral parameters.}
+\caption{Maximum $R_9$ vs.\ efficacy at 2700\,K, CRI\,$\geq$\,95.
+  All results at 129 spectral parameters.  System efficacy columns
+  as in Table~\ref{tab:cri80-sweep}.}
 \label{tab:cri95-sweep}
-\begin{tabular}{rrrrrr}
+\begin{tabular}{rrrr|rrr}
 \toprule
-$E_{\min}$ (Phil) & CRI & $R_9$ & LER & CCT & $D_{uv}$ \\
+$E_{\min}$ (Phil) & CRI & $R_9$ & LER
+  & \multicolumn{3}{c}{System efficacy (lm/W)} \\
+  & & & & Best prod & Best lab & DOE lim \\
 \midrule
-200 & 96.3 & 99.4 & 290 & 2776 & 0.002 \\
-210 & 97.0 & 98.2 & 304 & 2746 & 0.002 \\
-220 & 97.0 & 97.5 & 318 & 2745 & 0.003 \\
-230 & 95.0 & 97.1 & 331 & 2750 & 0.005 \\
-240 & 95.0 & 96.5 & 344 & 2750 & 0.005 \\
-250 & 95.1 & 94.9 & 358 & 2750 & 0.007 \\
-255 & 95.0 & 85.7 & 365 & 2663 & 0.005 \\
-260 & 94.0 & 92.4 & 370 & 2751 & 0.009 \\
-265 & 94.7 & 92.5 & 377 & 2750 & 0.006 \\
+200 & 96.3 & 99.4 & 290 & 103 & 134 & 163 \\
+210 & 97.0 & 98.2 & 304 & 108 & 141 & 171 \\
+220 & 97.0 & 97.5 & 318 & 113 & 147 & 179 \\
+230 & 95.0 & 97.1 & 331 & 118 & 154 & 187 \\
+240 & 95.0 & 96.5 & 344 & 123 & 161 & 195 \\
+250 & 95.1 & 94.9 & 358 & 129 & 168 & 203 \\
+255 & 95.0 & 85.7 & 365 & 131 & 171 & 207 \\
+260 & 94.0 & 92.4 & 370 & 134 & 174 & 211 \\
+265 & 94.7 & 92.5 & 377 & 136 & 178 & 215 \\
 \midrule
-270 & 90.5 & 85.0 & 380 & 2706 & 0.010 \\
-275 & 87.9 & 83.1 & 385 & 2700 & 0.013 \\
-280 & 93.3 & 58.8 & 396 & 2752 & 0.008 \\
-285 & 85.8 & 76.5 & 396 & 2691 & 0.015 \\
-290 & 84.2 & 61.7 & 400 & 2679 & 0.014 \\
-295 & 85.2 & 66.7 & 408 & 2748 & 0.016 \\
-300 & 79.6 & 54.0 & 410 & 2657 & 0.018 \\
-305 & 79.5 & 52.8 & 416 & 2681 & 0.018 \\
+270 & 90.5 & 85.0 & 380 & 139 & 181 & 220 \\
+275 & 87.9 & 83.1 & 385 & 141 & 184 & 224 \\
+280 & 93.3 & 58.8 & 396 & 144 & 188 & 228 \\
+285 & 85.8 & 76.5 & 396 & 147 & 191 & 228 \\
+290 & 84.2 & 61.7 & 400 & 149 & 194 & 236 \\
+295 & 85.2 & 66.7 & 408 & 152 & 198 & 240 \\
+300 & 79.6 & 54.0 & 410 & 154 & 201 & 244 \\
+305 & 79.5 & 52.8 & 416 & 157 & 204 & 248 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 Compared to the CRI\,$\geq$\,80 sweep, the CRI\,$\geq$\,95 results show:
 \begin{itemize}
-\item The $R_9$ cliff occurs at a similar efficacy ($\sim$270 Phil\,lm/W)
+\item The $R_9$ cliff occurs at a similar system efficacy
+  ($\sim$139\,lm/W best-prod, or $\sim$181\,lm/W best-lab)
   but is less severe: $R_9$ drops from 92 to 85 rather than from 88 to 47.
   The broader spectra required by CRI\,$\geq$\,95 provide some red content
   ``for free'' as a byproduct of the fidelity constraint.
-\item Constraint infeasibility sets in earlier: by $E_{\min} = 280$,
-  the optimizer can no longer reliably achieve CRI\,$=$\,95 (dropping to
-  84--93).  The nonconvex optimization landscape also produces
-  non-monotonic behavior (e.g., $R_9 = 58.8$ at 280 but 76.5 at 285),
+\item Constraint infeasibility sets in earlier: by 144\,lm/W system
+  (best-prod), the optimizer can no longer reliably achieve CRI\,$=$\,95
+  (dropping to 84--93).  The nonconvex optimization landscape also produces
+  non-monotonic behavior (e.g., $R_9 = 58.8$ at 280 Phil but 76.5 at 285),
   reflecting different local optima.
-\item The feasible range is narrower: useful results span
-  200--265 Phil\,lm/W for CRI\,$\geq$\,95 vs.\ 200--290 for
+\item The feasible range is narrower: useful results span up to
+  136\,lm/W system (best-prod) for CRI\,$\geq$\,95 vs.\ 149\,lm/W for
   CRI\,$\geq$\,80.
 \end{itemize}
 
 \subsection{The $R_9$ Cliff: Policy Implications}
 
 Both sweeps confirm the central finding of this report: there exists a
-critical Philips-corrected efficacy threshold ($\sim$265--270\,lm/W at
-2700\,K) above which saturated red rendering degrades sharply.  Applying
-the production loss chain from Table~\ref{tab:losses} (best production:
-$\times 0.514$), this corresponds to a system efficacy of
-$\sim$135--140\,lm/W --- squarely in the range of current and near-future
-regulatory floors.
+critical wall-plug efficacy threshold above which saturated red rendering
+degrades sharply.  At best-production technology, the $R_9$ cliff occurs
+at $\sim$136--139\,lm/W system --- only $\sim$40\% above the EU~2019/2020
+requirement of 98\,lm/W, and just above the US~DOE~2028 target of
+125\,lm/W.  With best-lab technology, the same cliff moves to
+$\sim$178--181\,lm/W system.
 
-Regulators who set only a CRI\,$\geq$\,80 floor are implicitly permitting
-$R_9$ values as low as 33--47 (Table~\ref{tab:cri80-sweep}), representing
-severely compromised red rendering.  Even CRI\,$\geq$\,95 permits
-$R_9$ to drop below 60 at high efficacy.  Only explicit $R_9$ mandates
---- as in California JA8 --- can close this loophole.
+The message for regulators is stark: a bulb that passes CRI\,$\geq$\,80
+at 140\,lm/W system can have $R_9$ as low as 33--47
+(Table~\ref{tab:cri80-sweep}), meaning saturated reds look dramatically
+wrong.  Even CRI\,$\geq$\,95 permits $R_9$ below 60 at the same
+efficacy.  Only explicit $R_9$ mandates --- as in California JA8's
+$R_9 \geq 50$ --- can close this loophole.
+
+\subsection{The Cheapest EU-Compliant Lamp}
+
+The preceding analysis examines the Pareto frontier abstractly.  But there
+is a concrete question with immediate market relevance: \emph{what does
+the cheapest lamp look like that meets all EU~2019/2020 requirements?}
+
+The EU Ecodesign regulation~(2019/2020) requires system efficacy
+$\gtrsim$98\,lm/W and CRI\,$\geq$\,80 for general lighting, with no
+constraint on~$R_9$ or any TM-30 metric.  For a lamp manufacturer
+minimizing bill-of-materials cost, the dominant cost driver is the
+number of LED chips and the amount of phosphor needed to produce the
+rated lumen output.  Higher luminous efficacy means fewer chips and less
+phosphor for the same lumens, so \emph{minimizing cost is approximately
+equivalent to maximizing efficacy} subject to the regulatory floor.
+
+Our optimizer answers this directly.  From Table~\ref{tab:tradeoff},
+the maximum-efficacy spectrum at CRI\,$\geq$\,80 and 2700\,K achieves
+412\,lm/W LER with:
+\begin{itemize}
+\item CRI\,$=$\,83 (just clearing the floor)
+\item $R_9 = +21$ (saturated reds rendered at one-fifth fidelity)
+\item Worst $R_i = 70$
+\item A three-peak topology with deep spectral valleys
+\end{itemize}
+
+\noindent Applying the Philips cost model and production loss chain
+(Table~\ref{tab:losses}), this corresponds to roughly 140\,lm/W
+system at best-production technology --- comfortably above the
+98\,lm/W EU floor.  The manufacturer has \emph{headroom} and would
+likely operate below the theoretical limit, but the spectrum that
+the cost incentive drives toward is clear: suppress power everywhere
+except near Thornton's three prime wavelengths.
+
+The $R_9 = 21$ is the telling number.  A consumer buying this lamp would
+find that red fabrics, red paint, and skin tones under warm light all look
+washed out compared to the incandescent it replaces.  The lamp passes every
+EU test.  The CRI score of 83 might even appear on the packaging as a
+quality indicator.  But the subjective experience is poor --- and the
+regulation provides no mechanism for the consumer to know this in advance.
+
+Under TM-30, this same spectrum would show reduced $R_f$ (since the
+99-sample metric is harder to game) and a characteristically distorted
+$R_g$ gamut shape.  Whether TM-30 adoption would change the cost-optimized
+design point is precisely the question the Rf~sweeps in subsequent sections
+are designed to answer.
 
 \section{Grid-Based Integration Optimization}
 \label{sec:grid}
@@ -1021,9 +1563,12 @@ The pre-tabulated weight vectors include:
 \end{itemize}
 
 Each ``integration'' becomes a vector dot product in $\mathbb{R}^{391}$
---- a tight loop of 391 multiply-accumulates with no function calls,
-no adaptive refinement overhead, and no M3/Scheme boundary crossings
-beyond the initial spectrum sampling.
+--- a tight loop of 391 multiply-accumulates.  The speedup comes from
+eliminating Romberg's adaptive refinement: where the adaptive method
+evaluates the integrand at 50--200 points with convergence testing per
+integration, the grid method does a single fixed-length dot product.
+(The M3 Romberg code is compiled native code and runs fast; the win
+is algorithmic, not a language-boundary issue.)
 
 \subsection{Pure-Scheme Blackbody}
 
@@ -1036,9 +1581,9 @@ B_\lambda(T,\lambda) = \frac{2hc^2}{\lambda^5}
   \cdot \frac{1}{\exp(hc/\lambda k_B T) - 1}
 \end{equation}
 where $h$, $c$, and $k_B$ are defined as Scheme constants.  This
-eliminates the M3/Scheme call overhead for the reference illuminant
-and keeps the entire grid-mode calculation in pure Scheme except for
-the initial spectrum sampling.
+avoids 391 individual M3 function calls for the reference blackbody,
+though the dominant savings come from the dot-product integration
+method rather than from reducing cross-language calls.
 
 \subsection{Implementation}
 
@@ -1250,7 +1795,7 @@ comprises approximately 370~lines of Scheme code plus tabular data:
 
 \begin{enumerate}
 \item \textbf{99 CES reflectance spectra and CIE 1964 $10^\circ$ CMFs}
-  (\file{ces99.scm}, $\sim$4300 lines): Extracted from the
+  (\texttt{ces99.scm}, $\sim$4300 lines): Extracted from the
   \texttt{colour-science} library~\cite{colour-science} (which
   provides the CIE 2017 dataset) and tabulated at 1\,nm resolution.
   The file also contains the CIE D-illuminant basis functions
@@ -1301,18 +1846,450 @@ evaluation, consistent with the pre-implementation estimate.
 The 99~CES weight vectors are pre-tabulated at startup alongside
 the existing 14~TCS vectors.
 
+\section{TM-30 $R_f$ Maximization Sweeps}
+\label{sec:rf-sweeps}
+
+With the TM-30 implementation in place (Section~\ref{sec:tm30}), we
+can now directly test the central hypothesis: does the ``CRI loophole''
+--- three narrow peaks that game 8~test color samples --- survive under
+TM-30's 99-sample color fidelity metric~$R_f$?
+
+\subsection{Experimental Design}
+
+We replicate the $R_9$ Pareto sweeps of Section~\ref{sec:philips} with
+the objective function changed from ``maximize $R_9$'' to
+``maximize~$R_f$'', keeping the same Philips phosphor-converted LED cost
+model.  The optimizer sweeps Philips-corrected luminous efficacy floors
+from 200 to 320~lm/W, finding the spectrum that maximizes $R_f$ at each
+threshold while maintaining CRI$\,\geq\,$80 (the EU regulatory floor)
+or CRI$\,\geq\,$95 (high-quality lighting).
+
+The x-axis in our plots shows \emph{system (wall-plug) efficacy},
+converting Philips LER via the production loss chain
+(Table~\ref{tab:losses}):
+\begin{itemize}
+\item Best production: $\times 0.514$ (current top-bin parts)
+\item Best lab: $\times 0.670$ (demonstrated lab results)
+\item DOE limit: $\times 0.813$ (theoretical ceiling)
+\end{itemize}
+
+\subsection{Results: CRI\,$\geq$\,80}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig_maxRf_frontier_cri80_philips.pdf}
+\caption{Maximum TM-30~$R_f$ vs.\ system efficacy at CRI$\,\geq\,$80,
+  2700K.  The upper panel shows $R_f$ (color fidelity); the lower panel
+  shows $R_g$ (color gamut).  Three curves correspond to three production
+  technology levels.  Vertical lines mark EU~2019/2020 (98~lm/W) and
+  DOE~2028 (125~lm/W) regulatory thresholds.}
+\label{fig:rf-frontier-80}
+\end{figure}
+
+Figure~\ref{fig:rf-frontier-80} reveals a striking contrast with the
+$R_9$ sweeps.  While $R_9$ plummets from $\sim$90 to negative values
+across the same efficacy range (Section~\ref{sec:philips}), $R_f$
+\emph{barely degrades}: from $\sim$89 at 103~lm/W system efficacy
+to $\sim$86 at 139~lm/W --- a drop of only 3~points.
+
+The gamut index $R_g$ tells the complementary story.  Below
+$\sim$134~lm/W system efficacy, $R_g \approx 89$--90 (moderate
+under-saturation).  Above that threshold, $R_g$ jumps to $\sim$100--103,
+indicating that the optimizer has found spectra that distort hue-bin
+saturation rather than fidelity.  These are the same three-peak spectra
+that produce catastrophic $R_9$ values --- TM-30 flags them via $R_g$
+rather than via $R_f$.
+
+\subsection{Results: CRI\,$\geq$\,95}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig_maxRf_frontier_cri95_philips.pdf}
+\caption{Maximum TM-30~$R_f$ vs.\ system efficacy at CRI$\,\geq\,$95,
+  2700K.  The tighter CRI constraint forces broader spectra, yielding
+  higher $R_f$ ($\sim$98 at low efficacy) with a gradual decline to
+  $\sim$92 at 139~lm/W.}
+\label{fig:rf-frontier-95}
+\end{figure}
+
+At CRI$\,\geq\,$95, $R_f$ starts near 98 and declines smoothly to
+$\sim$92.5 at 270~Philips~lm/W (139~lm/W best-production system
+efficacy).  This is far more graceful than the corresponding $R_9$
+trajectory, which drops from 84 to 64 over the same range.  The tight
+CRI constraint already forces broad-enough spectra that the 99-sample
+TM-30 metric tracks CRI closely.
+
+\subsection{Combined Comparison}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{fig_maxRf_frontier_both.pdf}
+\caption{Combined view: maximum $R_f$ vs.\ system efficacy for both
+  CRI$\,\geq\,$80 (blue) and CRI$\,\geq\,$95 (red) at 2700K.
+  CRI$\,\geq\,$95 curves sit $\sim$6--10~points higher in $R_f$
+  across all technology levels.}
+\label{fig:rf-frontier-both}
+\end{figure}
+
+Figure~\ref{fig:rf-frontier-both} overlays both CRI constraints.
+Key observations:
+
+\begin{enumerate}
+\item \textbf{TM-30 $R_f$ is remarkably robust to efficacy pressure.}
+  Even at CRI$\,\geq\,$80, the worst $R_f$ observed is 86 --- compared
+  to $R_9$ values well below zero at the same operating point.
+
+\item \textbf{The ``CRI loophole'' is invisible to $R_f$.}  The
+  three-peak spectra that achieve CRI=80 with $R_9 < 0$ still score
+  $R_f \geq 86$.  This is because $R_f$ averages over 99 samples:
+  even if a few hue bins are poorly rendered, the overall fidelity
+  remains high.
+
+\item \textbf{$R_g$ exposes what $R_f$ cannot.}  The gamut jump at high
+  efficacy (from $\sim$89 to $\sim$103) reveals spectral distortion that
+  $R_f$ alone would miss.  This supports the TM-30 recommendation to
+  report both $R_f$ and $R_g$ together, not $R_f$ alone.
+
+\item \textbf{CRI$\,\geq\,$95 narrows the gap.}  With tight CRI, the
+  optimizer cannot find loophole spectra, so $R_f$ tracks CRI closely
+  ($R_f \approx 0.97 \times \text{CRI}$).
+\end{enumerate}
+
+These results confirm that replacing CRI with TM-30~$R_f$ in regulations
+would not, by itself, prevent the efficacy-driven spectral distortion
+documented in earlier sections.
+
+\subsection{Per-Hue-Bin Analysis: Why Averages Hide the Problem}
+
+Both $R_f$ and $R_g$ are aggregate metrics --- $R_f$ averages fidelity
+over 99~samples, $R_g$ averages gamut area over 16~hue bins.  As such,
+they are susceptible to the same averaging artifact that makes CRI~$R_a$
+a poor indicator: localized failures in specific hue regions are diluted
+by acceptable performance elsewhere.
+
+TM-30 provides per-hue-bin fidelity values $\Delta R_{f,hj}$ across
+16~bins (where $\Delta R_{f,hj} = 0$ is perfect fidelity).  Examining
+these reveals the distortion pattern that $R_f$ alone conceals:
+
+\begin{itemize}
+\item \textbf{Low efficacy} (200~Philips~lm/W, CRI$\,\geq\,$80):
+  All 16~bins are uniformly negative ($-0.02$ to $-0.10$), indicating
+  mild desaturation across the board.  The worst bin (h14, red--purple)
+  is $-0.103$.  The average $R_f = 89$ is a fair summary because the
+  errors are uniform.
+
+\item \textbf{High efficacy} (270~Philips~lm/W, CRI$\,\geq\,$80):
+  The pattern \emph{reverses sign} in some bins.  Green--cyan bins
+  (h7--h9) shift to $+0.05$ to $+0.09$ (oversaturated), while red
+  bins (h1, h14--h16) shift to $-0.03$ to $-0.09$ (desaturated).
+  Because positive and negative errors \emph{cancel in the average},
+  $R_f$ reports~86 --- only 3~points worse than the uniform case.
+  But specific object colors are rendered very differently from the
+  reference illuminant: greens too vivid, reds washed out.
+\end{itemize}
+
+This sign-flip pattern is invisible to any averaged metric, whether
+CRI~$R_a$ (8~samples) or TM-30~$R_f$ (99~samples).  A regulation
+based on the \emph{worst} per-hue-bin value --- $\min_j R_{f,hj}$ ---
+would be far harder to game, since the optimizer cannot compensate for
+one bad bin by improving another.
+
+\paragraph{The vindication of $R_9$.}
+This analysis retroactively explains why $R_9$ (CRI special test color
+TCS09, ``strong red,'' Munsell~4.5\,R\,4/13) is such an effective
+canary for spectral distortion.  The red region is precisely where
+three-peak spectra fail worst: the gap between the blue pump at 450~nm
+and the red peak at 610~nm leaves deep reds and red--purples with
+insufficient spectral support.  TCS09's reflectance straddles this
+gap, making it maximally sensitive to the specific distortion mode
+that efficacy-driven optimization produces.
+
+As a single additional number alongside $R_a$, $R_9$ may be
+more informative than $R_f$ --- it tests the \emph{weakest point}
+of the spectrum rather than averaging over regions where the spectrum
+performs adequately.  California's JA8 standard, which requires
+$R_9 \geq 50$ alongside $R_a \geq 90$, appears well-targeted:
+it directly constrains the failure mode that efficacy pressure creates,
+without requiring the full TM-30 apparatus.
+
+The ideal regulatory approach would combine both strategies:
+TM-30's per-hue-bin breakdown (for comprehensive coverage) with a
+hard floor on the worst bin (to prevent the averaging loophole).
+Until TM-30 achieves widespread regulatory adoption, $R_9$ remains
+a pragmatic and effective stopgap.
+
+\section{Physiological Analysis: LMS Cone Excitation}
+\label{sec:lms}
+
+The colorimetric metrics analyzed so far---CRI, TM-30 $R_f$/$R_g$, and
+individual $R_i$ scores---are all based on the CIE tristimulus framework,
+which integrates spectral information through color matching functions.
+These functions are \emph{linear} combinations of the true cone responses,
+preserving chromaticity but discarding information about the spectral
+distribution of cone stimulation.  This section goes deeper: we compute
+the actual L, M, S cone excitations for several illuminants and analyze
+how the spectral structure of LED light differs from blackbody radiation
+at the level of individual photoreceptor channels.
+
+\subsection{Method}
+
+We use the Hunt-Pointer-Estevez (HPE) chromatic adaptation matrix
+to transform CIE~1931 $\bar{x}(\lambda)$, $\bar{y}(\lambda)$,
+$\bar{z}(\lambda)$ color matching functions into cone fundamentals:
+\[
+\begin{pmatrix} L \\ M \\ S \end{pmatrix}
+= \mathbf{M}_{\text{HPE}}
+\begin{pmatrix} X \\ Y \\ Z \end{pmatrix},
+\quad
+\mathbf{M}_{\text{HPE}} =
+\begin{pmatrix}
+ 0.38971 &  0.68898 & -0.07868 \\
+-0.22981 &  1.18340 &  0.04641 \\
+ 0       &  0       &  1
+\end{pmatrix}
+\]
+This physiologically-based transform (used in CIECAM97s) gives
+cone-like responses that are appropriate for chromatic adaptation
+modeling.
+
+Von Kries adaptation is applied by normalizing each cone channel
+to the 2700~K blackbody white point:
+$L_a = L / L_{\text{ref}}$, and similarly for $M_a$ and $S_a$.
+After adaptation, a perfect blackbody match gives $(L_a, M_a, S_a) = (1, 1, 1)$.
+Any deviation reveals a cone-level mismatch that the visual system
+may detect, even when tristimulus values (and hence CRI) are well-matched.
+
+We quantify the deviation using the root-mean-square cone contrast
+(RMSCC):
+\[
+\text{RMSCC} = \sqrt{\frac{1}{3}\left[
+\left(\frac{\Delta L}{L}\right)^2 +
+\left(\frac{\Delta M}{M}\right)^2 +
+\left(\frac{\Delta S}{S}\right)^2
+\right]}
+\]
+
+\subsection{Illuminants Compared}
+
+All illuminants are normalized to equal luminous flux ($Y = 1000$):
+
+\begin{enumerate}
+\item \textbf{2700~K Planckian radiator} --- the reference.
+\item \textbf{Waveform Lighting Centric Home A19} --- a commercial
+  CRI~95+, $R_9 = 91$ LED (digitized from published SPD, adjusted
+  to match datasheet chromaticity $x = 0.4598$, $y = 0.4106$).
+\item \textbf{CRI\,$\geq$\,80 max-efficacy} --- our optimized spectrum
+  with no $R_9$ constraint (highest LER).
+\item \textbf{CRI\,$\geq$\,95 max-efficacy} --- same with tighter CRI.
+\item \textbf{CRI\,$\geq$\,80, Phil.\ 250} --- Philips-corrected at
+  250~lm/W (achievable system efficacy $\sim$129~lm/W).
+\item \textbf{CRI\,$\geq$\,95, Phil.\ 250} --- same with tighter CRI.
+\end{enumerate}
+
+\subsection{Results: Von Kries Cone Contrast}
+
+\begin{table}[h]
+\centering
+\small
+\caption{Von Kries adapted cone responses relative to 2700~K blackbody.
+$\Delta L/L$, $\Delta M/M$, $\Delta S/S$ are percentage deviations of
+each cone channel from the blackbody reference.}
+\label{tab:lms-contrast}
+\begin{tabular}{lrrrrr}
+\toprule
+Source & $\Delta L/L$ & $\Delta M/M$ & $\Delta S/S$ & RMSCC \\
+\midrule
+2700~K Blackbody     & $0.00$\%   & $0.00$\%   & $0.00$\%    & $0.00$\% \\
+Waveform A19         & $-0.50$\%  & $+0.35$\%  & $-3.71$\%   & $2.17$\% \\
+CRI 80 (max eff.)    & $-0.32$\%  & $+0.22$\%  & $-54.89$\%  & $31.69$\% \\
+CRI 95 (max eff.)    & $-0.42$\%  & $+0.29$\%  & $-47.04$\%  & $27.16$\% \\
+CRI 80, Phil.\ 250   & $-0.48$\%  & $+0.33$\%  & $-50.35$\%  & $29.07$\% \\
+CRI 95, Phil.\ 250   & $-0.68$\%  & $+0.47$\%  & $-25.14$\%  & $14.52$\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:lms-contrast} reveals a dramatic finding.  The L and M
+cone deviations are tiny ($<1$\%) for all illuminants---these long- and
+medium-wavelength cones see similar signals from any spectrum that
+matches the 2700~K chromaticity.  But the \textbf{S cone tells a
+completely different story}: the efficacy-optimized spectra have
+\textbf{45--55\% less S-cone stimulation} than the blackbody reference.
+
+The commercial Waveform LED achieves only 3.7\% S-cone deficit---a
+testament to its broad phosphor emission.  To put this in context: the
+just-noticeable difference (JND) for the S-cone channel is typically
+5--10\%, much larger than for L or M cones, because S cones comprise
+only $\sim$6\% of the cone mosaic and are absent from the central
+fovea~\cite{curcio1991}.  The Waveform's 3.7\% S-cone deficit is
+therefore \textbf{at or below the threshold of visibility} for direct
+illuminant comparison on a neutral surface---consistent with the
+perceptual near-equivalence that high-CRI commercial LEDs achieve.
+
+The visibility of this deficit depends critically on the viewing
+condition.  In \emph{successive} comparison (one source at a time,
+adapted to each in turn), the S-cone JND after adaptation is 5--10\%,
+and 3.7\% would be near or below threshold.  But in \emph{simultaneous} comparison---both sources visible in the
+same visual field, as when an incandescent and an LED illuminate
+adjacent patches of the same wall---the situation changes dramatically.
+Chromatic adaptation still occurs, but the visual system adapts to a
+\emph{single} compromise state (roughly the spatial average of the
+visual field), not independently to each illuminant.  Neither patch is
+individually ``normalized away'' by adaptation; instead, both are
+rendered through the same adapted gain, and their difference survives
+as a spatial color signal.  Simultaneous chromatic discrimination
+thresholds along the S-cone axis are approximately
+0.5--1\%~\cite{krauskopf1992}, an order of magnitude lower than the
+successive threshold, because the task is now spatial comparison rather
+than comparison against color memory.  The Waveform's 3.7\% S-cone
+deficit is therefore \textbf{4--8$\times$ the simultaneous JND}, and
+should be \textbf{clearly visible} as a subtle color difference between
+the two patches of wall.  The incandescent side would appear slightly
+warmer (more yellowish-pink), the LED side slightly more neutral,
+driven primarily by the S-cone channel.
+
+Two additional mechanisms amplify the effect on real surfaces:
+\begin{itemize}
+\item \emph{Deep red surface reflectance.}  Wall paint is not spectrally
+  flat; if the wall has any reflectance above 650~nm (as most warm-toned
+  paints do), the blackbody's 5.2\% deep-red L-cone contribution
+  vs.\ the LED's 2.4\% creates an additional L/M ratio difference that
+  depends on the specific surface.
+\item \emph{Spectral metamerism.}  Surfaces with structured reflectance
+  (wood, textiles, skin) may look quite different under the two
+  illuminants even when the illuminants match on a neutral target.
+\end{itemize}
+
+The efficacy-optimized spectra produce S-cone deficits of
+25--55\%---\textbf{far above any visibility threshold}, whether
+simultaneous or successive.  Even the ``best'' case (CRI~95,
+Philips 250~lm/W, 25\% deficit) is dozens of JNDs.  These spectra
+would look unmistakably different from incandescent, despite matching
+CRI and chromaticity: the S cone is being starved.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.85\textwidth]{fig_lms_contrast}
+\caption{Von Kries adapted cone contrast versus 2700~K blackbody.
+The S-cone deficit (blue bars) completely dominates.  The Waveform
+LED is nearly invisible; the optimized spectra show 25--55\%
+S-cone deficiency.}
+\label{fig:lms-contrast}
+\end{figure}
+
+Figure~\ref{fig:lms-bands} breaks down each cone's excitation by
+wavelength band, revealing how differently the illuminants distribute
+their spectral energy within each cone channel.  The S-cone panel
+is most diagnostic: blackbody provides roughly equal contributions
+from the violet (420--460~nm) and blue (460--500~nm) bands, while
+LEDs concentrate S-cone stimulation in whichever band contains their
+pump emission.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{fig_lms_bands}
+\caption{Cone excitation broken down by wavelength band (stacked bars).
+The L and M cone distributions are broadly similar across sources,
+but the S cone distribution (right panel) varies dramatically:
+blackbody provides balanced violet+blue, while LEDs concentrate
+S-cone stimulation in the pump band.}
+\label{fig:lms-bands}
+\end{figure}
+
+\subsection{Deep Red Contribution}
+
+A key spectral difference between incandescent and LED sources is
+the deep red region ($>650$~nm).  The 2700~K blackbody derives
+\textbf{5.2\% of its L-cone excitation} from wavelengths above 650~nm,
+and a small but non-zero contribution from $>700$~nm.  By contrast:
+
+\begin{itemize}
+\item The Waveform LED gets 2.4\% of L-cone from $>650$~nm (half the BB).
+\item The efficacy-optimized spectra get $<0.5$\% --- essentially zero
+  deep red contribution.
+\item No LED spectrum provides \emph{any} power above 700~nm, while
+  the blackbody's Rayleigh-Jeans tail extends indefinitely.
+\end{itemize}
+
+This deep red deficit affects the rendering of surfaces with significant
+long-wavelength reflectance (wood, skin, brick, certain textiles).
+Even after von Kries adaptation normalizes the overall L-cone gain,
+surfaces that selectively reflect $>650$~nm light will appear
+systematically desaturated under LED illumination.
+
+\subsection{Cone-Weighted Spectral Distribution}
+
+Figure~\ref{fig:lms-cone-signal} reveals \emph{where} in the spectrum
+each cone gets its signal.  For the L and M cones, the blackbody and
+LED distributions are broadly similar (both peak around 560--580~nm),
+but the blackbody's deep red tail (shaded region $>650$~nm) provides
+a contribution that no LED replicates.
+
+The most striking difference is in the S cone: the blackbody provides
+a broad, smooth signal from 400--500~nm, while the LED concentrates
+its S-cone stimulation in the narrow 450~nm pump band.  Even though
+the chromaticity matches (the integrated S response can be tuned
+by adjusting pump intensity), the \emph{spectral distribution}
+within the S-cone sensitivity range is fundamentally different.
+This difference becomes visible when viewing surfaces with structured
+blue reflectance---such as certain dyes, minerals, or artworks---where
+the narrow pump cannot substitute for the broadband blue of a
+thermal source.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.85\textwidth]{fig_lms_cone_signal}
+\caption{Cone-weighted spectral signal (illuminant SPD $\times$ cone
+sensitivity) for blackbody and Waveform LED.  The deep red region
+($>650$~nm, shaded) contributes only to the L cone under blackbody
+illumination.  The S-cone panel shows the Waveform's narrow pump
+versus the blackbody's broad blue distribution.}
+\label{fig:lms-cone-signal}
+\end{figure}
+
+\subsection{Implications}
+
+This analysis reveals a fundamental limitation of all colorimetric
+metrics (CRI, TM-30, individual $R_i$): they evaluate color rendering
+through tristimulus integration, which is blind to the spectral
+distribution of cone stimulation within each channel.  Two spectra
+can have identical CRI and identical chromaticity, yet produce
+dramatically different cone excitation patterns.
+
+The S-cone deficit in efficacy-optimized spectra is particularly
+problematic because:
+\begin{enumerate}
+\item The S cone has the broadest relative bandwidth of the three
+  cone types (sensitive from $\sim$400--500~nm), making it most
+  sensitive to the narrowband nature of LED pump emissions.
+\item S-cone contrast is a primary driver of perceived ``naturalness''
+  in warm illumination, as blackbody sources provide rich broadband
+  stimulation across the full S-cone sensitivity range.
+\item No amount of blue pump intensity can replicate the spectral
+  \emph{shape} of thermal blue light within the S-cone response
+  function.
+\end{enumerate}
+
+For the LED lighting industry, this suggests that cone excitation
+analysis should complement traditional colorimetric metrics.  A
+metric based on RMSCC---or at minimum the S-cone contrast
+$\Delta S/S$---would capture the physiological reality that current
+metrics miss.
+
+
 \section{Future Work}
+\label{sec:future}
 
 Several directions for further work remain, building on the results
 reported above:
 
 \begin{enumerate}
-\item \textbf{TM-30 optimization.}  With the TM-30 implementation
-  now complete (Section~\ref{sec:tm30}), the next step is to use
-  $R_f$ and $R_g$ as optimizer constraints, replacing or supplementing
-  the CRI constraints.  Re-running the Pareto sweeps with
-  $R_f \geq 80$ instead of $R_a \geq 80$ would reveal how much of the
-  CRI loophole exploitation survives under a modern color metric.
+\item \textbf{TM-30 as optimizer constraint.}  Section~\ref{sec:rf-sweeps}
+  maximizes $R_f$ as the objective function while constraining CRI.
+  The converse --- constraining $R_f$ while maximizing efficacy ---
+  would reveal what regulations written in TM-30 terms would actually
+  require.  A joint $R_f$/$R_g$ constraint (e.g., $R_f \geq 85$,
+  $R_g \leq 105$) appears from our results to close the CRI loophole.
   The $R_{cs,h_j}$ per-hue-bin metrics could also be used as
   constraints to prevent selective desaturation of specific hue regions.
 
@@ -1338,6 +2315,20 @@ reported above:
   production.  A constraint on melanopic equivalent daylight illuminance
   (M-EDI) could be added to the optimization, capturing the tension
   between visual efficacy and biological impact.
+
+\item \textbf{Optimizer robustness.}  The CCT comparison
+  (Table~\ref{tab:cct-comparison}) reveals non-monotonicities where a
+  tighter CRI constraint yields higher efficacy than a looser one,
+  indicating that COBYLA finds different local minima at different
+  constraint levels.  Three improvements would help:
+  (a)~\emph{neighbor seeding} --- sweep CRI floors in order and use each
+  solution as the starting point for the next, both upward and downward;
+  (b)~\emph{multiple random restarts} per operating point, keeping the
+  best result;
+  (c)~\emph{monotonicity enforcement} --- if a tighter constraint
+  achieved higher efficacy, re-run the looser point seeded from the
+  tighter solution, since relaxing a constraint can never worsen the
+  true optimum.
 \end{enumerate}
 
 \section{Conclusion}
@@ -1473,6 +2464,16 @@ K.~A.~G.~Smet,
 Colour Developers,
 ``colour-science: Colour science for Python,''
 2024. \url{https://github.com/colour-science/colour}. BSD-3-Clause.
+
+\bibitem{krauskopf1992}
+J.~Krauskopf and K.~R. Gegenfurtner,
+``Color discrimination and adaptation,''
+\emph{Vision Research}, vol.~32, no.~11, pp.~2165--2175, 1992.
+
+\bibitem{curcio1991}
+C.~A. Curcio, K.~R. Sloan, R.~E. Kalina, and A.~E. Hendrickson,
+``Human photoreceptor topography,''
+\emph{Journal of Comparative Neurology}, vol.~292, no.~4, pp.~497--523, 1990.
 
 \end{thebibliography}
 

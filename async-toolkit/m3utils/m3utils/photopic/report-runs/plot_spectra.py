@@ -139,18 +139,17 @@ def plot1_blackbody_vs_optimized():
 
 def plot2_cri_comparison():
     """Figure 2: Spectra at different CRI constraints, all at 2700K."""
-    fig, axes = plt.subplots(2, 2, figsize=(12, 9), sharex=True, sharey=True)
-
-    cases = [
-        ('60', axes[0,0]),
-        ('82', axes[0,1]),
-        ('90', axes[1,0]),
-        ('95', axes[1,1]),
-    ]
+    cri_list = ['60', '70', '80', '82', '85', '90', '95', '98']
+    ncols = 4
+    nrows = 2
+    fig, axes = plt.subplots(nrows, ncols, figsize=(16, 8), sharex=True, sharey=True)
 
     # Find available files for each CRI
     plotted = 0
-    for cri_str, ax in cases:
+    for idx, cri_str in enumerate(cri_list):
+        row, col = idx // ncols, idx % ncols
+        ax = axes[row, col]
+
         # Find the highest-dimension .dat file for this CRI
         pattern = os.path.join(RUNDIR, f'w_2700_CRI{cri_str}_R9=-100_*.dat')
         files = sorted(glob.glob(pattern),
@@ -174,13 +173,13 @@ def plot2_cri_comparison():
 
         title = f'CRI $\\geq$ {cri_str}'
         if specs:
-            title += f'\nCRI={specs["cri_ra"]:.0f}, {specs["efficacy"]:.0f} lm/W'
-        ax.set_title(title, fontsize=11)
+            title += f'\nCRI={specs["cri_ra"]:.0f}, {specs["efficacy"]:.0f} lm/W, $R_9$={specs["r9"]:.0f}'
+        ax.set_title(title, fontsize=10)
         ax.set_xlim(380, 770)
         ax.grid(True, alpha=0.3)
         plotted += 1
 
-    for ax in axes[1,:]:
+    for ax in axes[-1,:]:
         ax.set_xlabel('Wavelength (nm)')
     for ax in axes[:,0]:
         ax.set_ylabel('Relative Power')
@@ -195,21 +194,33 @@ def plot2_cri_comparison():
 
 def plot3_convergence():
     """Figure 3: How the spectrum evolves with increasing resolution."""
-    fig, axes = plt.subplots(2, 3, figsize=(14, 8), sharex=True, sharey=True)
-    axes_flat = axes.flatten()
+    # Find all available dimension levels
+    all_dims = [2, 3, 5, 9, 17, 33, 65, 129, 257, 513]
+    dims_list = [d for d in all_dims
+                 if os.path.exists(os.path.join(RUNDIR,
+                     f'w_2700_CRI60_R9=-100_{d}.dat'))]
+    if not dims_list:
+        print("Skipping plot3: no CRI60 data")
+        return
 
-    dims_list = [2, 3, 5, 9, 17, 33]
+    n = len(dims_list)
+    ncols = min(5, n)
+    nrows = (n + ncols - 1) // ncols
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3.5*ncols, 3.5*nrows),
+                             sharex=True, sharey=True)
+    if nrows == 1 and ncols == 1:
+        axes = np.array([[axes]])
+    elif nrows == 1:
+        axes = axes[np.newaxis, :]
+    elif ncols == 1:
+        axes = axes[:, np.newaxis]
 
     plotted = 0
     for i, dims in enumerate(dims_list):
-        ax = axes_flat[i]
+        row, col = i // ncols, i % ncols
+        ax = axes[row, col]
         dat_file = os.path.join(RUNDIR, f'w_2700_CRI60_R9=-100_{dims}.dat')
         res_file = os.path.join(RUNDIR, f'2700_CRI60_R9=-100_{dims}.res')
-
-        if not os.path.exists(dat_file):
-            ax.text(0.5, 0.5, f'{dims} params\n(no data)',
-                   transform=ax.transAxes, ha='center', va='center')
-            continue
 
         wl, power = load_dat(dat_file)
         power_norm = normalize_spectrum(wl, power)
@@ -225,8 +236,14 @@ def plot3_convergence():
         ax.grid(True, alpha=0.3)
         plotted += 1
 
-    for ax in axes[1,:]:
-        ax.set_xlabel('Wavelength (nm)')
+    # Hide empty panels
+    for idx in range(n, nrows*ncols):
+        row, col = idx // ncols, idx % ncols
+        axes[row, col].set_visible(False)
+
+    for ax in axes[-1,:]:
+        if ax.get_visible():
+            ax.set_xlabel('Wavelength (nm)')
     for ax in axes[:,0]:
         ax.set_ylabel('Relative Power')
 

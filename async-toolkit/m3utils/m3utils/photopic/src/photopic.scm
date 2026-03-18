@@ -1388,7 +1388,7 @@
 
 (define (run-max-r9! cct min-cri min-efficacy)
   (set! *min-efficacy* min-efficacy)
-  (run-example-iters! cct min-cri -100 7 specs->max-r9
+  (run-example-iters! cct min-cri -100 *default-iters* specs->max-r9
                       (string-append "_maxR9_eff"
                                      (stringify (round min-efficacy))))
   )
@@ -1396,7 +1396,7 @@
 (define (run-max-r9-philips! cct min-cri min-efficacy)
   (set! *num-constraints* 7)  ;; one extra: CRI upper bound
   (set! *min-efficacy* min-efficacy)
-  (run-example-iters! cct min-cri -100 7 specs->max-r9-philips
+  (run-example-iters! cct min-cri -100 *default-iters* specs->max-r9-philips
                       (string-append "_maxR9P_eff"
                                      (stringify (round min-efficacy))))
   )
@@ -1454,7 +1454,7 @@
 
 (define (run-max-Rf! cct min-cri min-efficacy)
   (set! *min-efficacy* min-efficacy)
-  (run-example-iters! cct min-cri -100 7 specs->max-Rf
+  (run-example-iters! cct min-cri -100 *default-iters* specs->max-Rf
                       (string-append "_maxRf_eff"
                                      (stringify (round min-efficacy))))
   )
@@ -1462,9 +1462,69 @@
 (define (run-max-Rf-philips! cct min-cri min-efficacy)
   (set! *num-constraints* 7)  ;; one extra: CRI upper bound
   (set! *min-efficacy* min-efficacy)
-  (run-example-iters! cct min-cri -100 7 specs->max-Rf-philips
+  (run-example-iters! cct min-cri -100 *default-iters* specs->max-Rf-philips
                       (string-append "_maxRfP_eff"
                                      (stringify (round min-efficacy))))
+  )
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Maximize efficacy subject to ALL R_i >= threshold (R1-R14)
+;;
+;; Uses worst-14 (= min of all 14 Ri values) at specs position 6.
+;; No CRI constraint needed since floor on worst Ri implies CRI floor.
+;;
+
+(define *min-worst-ri* 50)
+
+(define (specs->max-eff-allri specs)
+  (let ((lpm      (caddr specs))
+        (worst-14 (list-ref specs 6))
+        (cct      (caar (cdddr specs)))
+        (Duv      (cadar (cdddr specs)))
+        )
+    (dis specs " worst-14=" worst-14 dnl)
+    (list (- lpm)                            ;; target: maximize efficacy
+          (- worst-14 *min-worst-ri*)        ;; all Ri >= threshold
+          (- cct (- *target-cct* 50))        ;; cct >= target - 50
+          (- (+ *target-cct* 50) cct)        ;; cct <= target + 50
+          (* 1000 (- 0.012 Duv))             ;; Duv <= 0.012
+          )
+        )
+  )
+
+(define (specs->max-eff-allri-philips specs)
+  (let ((worst-14 (list-ref specs 6))
+        (cct      (caar (cdddr specs)))
+        (Duv      (cadar (cdddr specs)))
+        (lpm-philips (if *use-grid*
+                        (grid-philips-lumens-per-watt *current-sgrid*)
+                        (philips-lumens-per-watt w)))
+        )
+    (dis specs " worst-14=" worst-14 " Philips-LER=" lpm-philips dnl)
+    (list (- lpm-philips)                    ;; target: maximize Philips efficacy
+          (- worst-14 *min-worst-ri*)        ;; all Ri >= threshold
+          (- cct (- *target-cct* 50))        ;; cct >= target - 50
+          (- (+ *target-cct* 50) cct)        ;; cct <= target + 50
+          (* 1000 (- 0.012 Duv))             ;; Duv <= 0.012
+          )
+        )
+  )
+
+(define (run-max-eff-allri! cct min-worst-ri)
+  (set! *num-constraints* 4)
+  (set! *min-worst-ri* min-worst-ri)
+  (run-example-iters! cct 0 -100 *default-iters* specs->max-eff-allri
+                      (string-append "_allRi"
+                                     (stringify (round min-worst-ri))))
+  )
+
+(define (run-max-eff-allri-philips! cct min-worst-ri)
+  (set! *num-constraints* 4)
+  (set! *min-worst-ri* min-worst-ri)
+  (run-example-iters! cct 0 -100 *default-iters* specs->max-eff-allri-philips
+                      (string-append "_allRiP"
+                                     (stringify (round min-worst-ri))))
   )
 
 (define (m3-opt-r9 p)
@@ -1513,8 +1573,8 @@
   
   (define (repeat)
 
-    (set! rhobeg (/ rhobeg 2))
-    
+    (set! rhobeg (max (/ rhobeg 2) *rhobeg-min*))
+
     (subdivide-problem!)
     (dis "subdividing cur-dims = " cur-dims dnl)
     (run rhobeg spec-eval)
@@ -1554,11 +1614,203 @@
     )
   )
 
+;; Default iteration count: 7 gives 2→129. Override with -iters N.
+(define *default-iters* 7)
+
+;; Override rhobeg halving: -rhobeg-min N keeps rhobeg >= N at all levels.
+;; Default 0 means standard halving (4, 2, 1, 0.5, ...).
+(define *rhobeg-min* 0)
+
 (define (run-example! cct min-cri min-r9)
   (dis "run-example " min-cri " " min-r9 dnl)
-  (run-example-iters! cct min-cri min-r9 7 specs->target
+  (run-example-iters! cct min-cri min-r9 *default-iters* specs->target
                       (string-append              "_R9="
                                                   (stringify min-r9))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;
+;; Gaussian peak parameterization
+;;
+;; Instead of N-point piecewise-linear grid, represent the spectrum as
+;; a sum of K Gaussian peaks:
+;;   S(lambda) = sum_k A_k * exp(-(lambda - mu_k)^2 / (2 * sigma_k^2))
+;;
+;; Parameters: (mu_1 sigma_1 A_1  mu_2 sigma_2 A_2  ... mu_K sigma_K A_K)
+;; All in nm (not meters) for COBYLA compatibility (similar scales).
+;; Amplitudes are in arbitrary power units.
+;;
+
+(define *gauss-K* 3)          ;; number of Gaussian peaks
+(define *gauss-sgrid* #f)     ;; current Gaussian spectrum grid (391 points)
+(define *gauss-params* #f)    ;; current Gaussian parameter vector (LRVector)
+
+;; Build a 391-point spectrum grid from K Gaussian peaks.
+;; params is a Scheme list: (mu1_nm sigma1_nm A1 mu2_nm sigma2_nm A2 ...)
+(define (gauss-params->grid params)
+  (let ((v (make-vector *grid-n* 0.0)))
+    (let peak-loop ((p params) (k 0))
+      (if (or (null? p) (>= k *gauss-K*))
+          v
+          (let* ((mu-nm    (car p))
+                 (sigma-nm (abs (cadr p)))   ;; force sigma positive
+                 (amp      (abs (caddr p)))  ;; force amplitude non-negative
+                 (mu-m     (* mu-nm 1e-9))
+                 (sigma-m  (* (max sigma-nm 1.0) 1e-9)) ;; floor sigma at 1nm
+                 (inv2s2   (/ 1.0 (* 2.0 sigma-m sigma-m))))
+            (let grid-loop ((i 0) (lam *grid-lo*))
+              (if (< i *grid-n*)
+                  (begin
+                    (let* ((dl  (- lam mu-m))
+                           (g   (* amp (exp (* -1.0 dl dl inv2s2)))))
+                      (vector-set! v i (+ (vector-ref v i) g)))
+                    (grid-loop (+ i 1) (+ lam *grid-step*)))))
+            (peak-loop (cdddr p) (+ k 1)))))))
+
+;; Evaluate specs from Gaussian parameters (Scheme list).
+;; This bypasses ParametricSpectrum entirely.
+(define (gauss-specs-func param-list)
+  (set! *gauss-sgrid* (gauss-params->grid param-list))
+  (set! *current-sgrid* *gauss-sgrid*)
+  (grid-calc-specs *gauss-sgrid*))
+
+;; Version that takes an M3 LRVector (as COBYLA passes), converts to list
+(define (gauss-specs-func-from-vec vec)
+  (let ((param-list (ParametricSpectrum.Vec2Scheme vec)))
+    (ParametricSpectrum.SetVec *gauss-params* vec) ;; keep state in sync
+    (gauss-specs-func param-list)))
+
+;; Objective for Gaussian mode: maximize efficacy subject to CRI/CCT/Duv.
+;; Same constraint structure as specs->target.
+(define (gauss-specs->target specs)
+  (let ((lpm    (caddr specs))
+        (r9     (nth (car (cddddr specs)) 8))
+        (cri    (car specs))
+        (crmin  (cadr specs))
+        (cct    (caar (cdddr specs)))
+        (Duv    (cadar (cdddr specs)))
+        )
+    (dis specs dnl)
+    (list (- lpm)                         ;; target: maximize efficacy
+          (- cri   *min-cri-ra*)          ;; CRI(Ra) >= min
+          (- r9    *min-r9*)              ;; R9 >= min
+          (- crmin (- *min-cri-ra* 10))   ;; worst Ri >= min-10
+          (- cct (- *target-cct* 50))     ;; CCT >= target-50
+          (- (+ *target-cct* 50) cct)     ;; CCT <= target+50
+          (* 1000 (- 0.012 Duv))          ;; Duv <= 0.012
+          )))
+
+;; Write output files for Gaussian mode
+(define (gauss-plot-state pfx)
+  (let* ((nm (string-append
+              (stringify *target-cct*)
+              "_CRI"
+              (stringify *min-cri-ra*)
+              pfx
+              "_gauss" (stringify *gauss-K*)))
+         (wr (FileWr.Open (string-append nm ".res"))))
+
+    (dis (stringify (grid-calc-specs *gauss-sgrid*)) dnl dnl wr)
+    (dis (stringify (ParametricSpectrum.Vec2Scheme *gauss-params*)) dnl wr)
+    (Wr.Close wr)
+
+    ;; write spectrum data file for gnuplot
+    (let ((dwr (FileWr.Open (string-append "w_" nm ".dat")))
+          (norm-sgrid (grid-normalize *gauss-sgrid*)))
+      (let loop ((i 0) (lam *grid-lo*))
+        (if (< i *grid-n*)
+            (begin
+              (Wr.PutText dwr (string-append (stringify (* lam 1e9))
+                                              " "
+                                              (stringify (vector-ref norm-sgrid i))
+                                              dnl))
+              (loop (+ i 1) (+ lam *grid-step*)))
+            (Wr.Close dwr)))))))
+
+;; Default initial peaks for K=3: blue, green, red
+(define (gauss-initial-params K)
+  (cond ((= K 1) '(555.0  25.0 1.0))
+        ((= K 2) '(480.0  20.0 1.0  600.0  20.0 1.0))
+        ((= K 3) '(450.0  20.0 1.0  540.0  20.0 1.0  610.0  20.0 1.0))
+        ((= K 4) '(430.0  15.0 1.0  490.0  15.0 1.0  560.0  15.0 1.0  620.0  15.0 1.0))
+        ((= K 5) '(430.0  15.0 1.0  470.0  15.0 1.0  530.0  15.0 1.0
+                   580.0  15.0 1.0  630.0  15.0 1.0))
+        (else
+         ;; spread K peaks evenly from 420 to 660 nm
+         (let loop ((k 0) (result '()))
+           (if (>= k K)
+               (reverse result)
+               (let ((center (+ 420.0 (* k (/ 240.0 (- K 1))))))
+                 (loop (+ k 1)
+                       (cons 1.0 (cons 20.0 (cons center result))))))))))
+
+;; Main Gaussian optimization driver
+(define (run-gauss! cct min-cri min-r9 K)
+  (set! *gauss-K* K)
+  (set! *target-cct* cct)
+  (set! *min-cri-ra* min-cri)
+  (set! *min-r9* min-r9)
+  (set! *num-constraints* 6)
+
+  (dis "***** GAUSSIAN MODE K=" K " cct=" cct " CRI>=" min-cri
+       " R9>=" min-r9 " *****" dnl)
+
+  ;; Create initial state vector from default peaks
+  (let* ((init-params (gauss-initial-params K))
+         (init-vec    (ParametricSpectrum.Scheme2Vec init-params))
+         (n-params    (* 3 K)))
+
+    (set! *gauss-params* init-vec)
+
+    ;; Build the COBYLA callback.
+    ;; COBYLA passes the state as an LRVector through the M3/Scheme bridge.
+    ;; The lambda receives (*unused* vec) — the first arg is the surrogate.
+    (let ((opt-func
+           (lambda (p)
+             (ParametricSpectrum.Scheme2Vec
+              (gauss-specs->target (gauss-specs-func-from-vec p))))))
+
+      ;; Run COBYLA: rhobeg=10 is ~10nm for centers, ~10nm for sigmas,
+      ;; and ~10 for amplitudes — reasonable starting step.
+      (dis "Starting COBYLA with " n-params " parameters (K=" K " peaks)" dnl)
+      (COBYLA_M3.Minimize *gauss-params*
+                          *num-constraints*
+                          (make-lrvectorfield-obj opt-func)
+                          10.0    ;; rhobeg
+                          0.01    ;; rhoend
+                          3000    ;; maxfun
+                          2       ;; iprint
+                          )
+      (gauss-plot-state "")
+
+      ;; Second pass with tighter convergence
+      (dis "Refining (pass 2)..." dnl)
+      (COBYLA_M3.Minimize *gauss-params*
+                          *num-constraints*
+                          (make-lrvectorfield-obj opt-func)
+                          2.0     ;; rhobeg
+                          0.001   ;; rhoend
+                          3000    ;; maxfun
+                          2       ;; iprint
+                          )
+      (gauss-plot-state "_refined")
+
+      ;; Print final results
+      (let* ((final-params (ParametricSpectrum.Vec2Scheme *gauss-params*))
+             (final-specs  (gauss-specs-func final-params)))
+        (dis dnl "===== GAUSSIAN OPTIMIZATION RESULTS =====" dnl)
+        (dis "K = " K " peaks" dnl)
+        (let print-peaks ((p final-params) (k 1))
+          (if (not (null? p))
+              (begin
+                (dis "Peak " k ": center=" (car p) " nm, sigma=" (cadr p)
+                     " nm, amplitude=" (caddr p) dnl)
+                (print-peaks (cdddr p) (+ k 1)))))
+        (dis "Efficacy = " (caddr final-specs) " lm/W" dnl)
+        (dis "CRI(Ra)  = " (car final-specs) dnl)
+        (dis "CCT      = " (caar (cdddr final-specs)) " K" dnl)
+        (dis "R9       = " (nth (car (cddddr final-specs)) 8) dnl)
+        (dis "=============================================" dnl)
+        ))))
 
 (define pp
   (obj-method-wrap (LibertyUtils.DoParseParams) 'ParseParams.T))
@@ -1571,11 +1823,23 @@
 
 ;; TM-30 toggle: load CES data and initialize CES grid
 ;; Requires -grid to have been set first
+;; Note: MScheme load resolves relative to CWD, not to the loaded file.
+;; Sweep scripts should symlink or copy ces99.scm into CWD, or run from src/.
 (if (pp 'keywordPresent "-tm30")
     (begin
       (set! *compute-tm30* #t)
       (load "ces99.scm")
       (init-ces-grid!)))
+
+;; Override subdivision depth: -iters N (default 7 → 129 params)
+;; 8 → 257, 9 → 513
+(if (pp 'keywordPresent "-iters")
+    (set! *default-iters* (pp 'getNextInt 1 20)))
+
+;; Override minimum rhobeg: -rhobeg-min X (default 0 = standard halving)
+;; Prevents rhobeg from shrinking below X at high subdivision levels.
+(if (pp 'keywordPresent "-rhobeg-min")
+    (set! *rhobeg-min* (pp 'getNextLongReal 0 100)))
 
 (if (pp 'keywordPresent "-run")
     (begin
@@ -1688,6 +1952,46 @@
       (define run-cri     (pp 'getNextLongReal -100 100))
       (define run-eff     (pp 'getNextLongReal    0 700))
       (run-max-Rf-philips! run-cct run-cri run-eff)
+      (exit)
+      )
+    )
+
+;; All-Ri constraint mode: maximize efficacy subject to ALL R1-R14 >= threshold
+;; Usage: photopic -grid -run-allri <cct> <min-worst-ri>
+;;   e.g., photopic -grid -run-allri 1800 50
+(if (pp 'keywordPresent "-run-allri")
+    (begin
+      (define allri-cct  (pp 'getNextLongReal    0 1e6))
+      (define allri-min  (pp 'getNextLongReal -100 100))
+      (run-max-eff-allri! allri-cct allri-min)
+      (exit)
+      )
+    )
+
+;; Philips-corrected version
+;; Usage: photopic -grid -run-allri-philips <cct> <min-worst-ri>
+(if (pp 'keywordPresent "-run-allri-philips")
+    (begin
+      (define allri-cct  (pp 'getNextLongReal    0 1e6))
+      (define allri-min  (pp 'getNextLongReal -100 100))
+      (run-max-eff-allri-philips! allri-cct allri-min)
+      (exit)
+      )
+    )
+
+;; Gaussian peak parameterization mode
+;; Spectrum as sum of K Gaussians: tests whether peak widths from grid
+;; optimizer are intrinsic (CRI-driven) or artifacts of grid parameterization.
+;; Requires -grid flag.
+;; Usage: photopic -grid -run-gauss <cct> <min-cri> <min-r9> <K>
+;;   e.g., photopic -grid -run-gauss 2700 60 -100 3
+(if (pp 'keywordPresent "-run-gauss")
+    (begin
+      (define gauss-cct  (pp 'getNextLongReal      0 1e6))
+      (define gauss-cri  (pp 'getNextLongReal -10000 100))
+      (define gauss-r9   (pp 'getNextLongReal -10000 100))
+      (define gauss-k    (truncate (pp 'getNextLongReal 1 20)))
+      (run-gauss! gauss-cct gauss-cri gauss-r9 gauss-k)
       (exit)
       )
     )

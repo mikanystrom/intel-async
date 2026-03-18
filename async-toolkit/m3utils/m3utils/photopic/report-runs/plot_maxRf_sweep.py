@@ -20,7 +20,6 @@ import os
 import sys
 import glob
 import re
-import ast
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -98,70 +97,42 @@ def load_dat(filename):
     return wavelength_nm, power
 
 
-def parse_scheme_list(s):
-    """Parse a Scheme S-expression list into a Python nested structure.
-
-    Handles nested lists, vectors (#(...)), and numeric atoms.
-    """
-    # Convert Scheme syntax to Python:
-    #   #( -> [   (vector open)
-    #   (  -> [   (list open)
-    #   )  -> ]   (close)
-    s = s.strip()
-    s = s.replace('#(', '[').replace('(', '[').replace(')', ']')
-    try:
-        return ast.literal_eval(s)
-    except (ValueError, SyntaxError):
-        return None
-
 
 def load_res(filename):
     """Parse a .res file to extract key specs including TM-30 data.
 
-    The specs S-expression (from grid-calc-specs with -tm30) has structure:
-      (cri-ra worst-ri efficacy (cct Duv) (ri1..ri14)
-       cri-14 worst-14 sel-avg sel-worst sel-idx
-       (Rf Rg #(Rcs...) (ref-temp-res)))
+    Uses regex extraction of all numeric values. The field layout is:
+      [0]  CRI_Ra  [1] worst_ri  [2] efficacy
+      [3]  CCT     [4] duv
+      [5..18] r1..r14  (r9 is at index 13)
+      [19] avg_ri  [20] worst_ri  [21] avg_ri  [22] worst_ri
+      [23] num_iters
+      [24] Rf  [25] Rg  (TM-30, only if -tm30 was used)
+      [26..41] dfi_1..dfi_16
+      [42] CCT  [43] duv  (from TM-30 reference)
     """
     with open(filename) as f:
         line = f.readline().strip()
 
-    parsed = parse_scheme_list(line)
-    if parsed is None or len(parsed) < 10:
-        # Fallback: regex-based extraction for non-TM30 files
-        nums = re.findall(r'[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?', line)
-        if len(nums) >= 14:
-            return {
-                'cri_ra': float(nums[0]),
-                'worst_ri': float(nums[1]),
-                'efficacy': float(nums[2]),
-                'cct': float(nums[3]),
-                'duv': float(nums[4]),
-                'r9': float(nums[13]),
-                'Rf': None,
-                'Rg': None,
-            }
+    nums = re.findall(r'[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?', line)
+    if len(nums) < 14:
         return None
 
     result = {
-        'cri_ra': float(parsed[0]),
-        'worst_ri': float(parsed[1]),
-        'efficacy': float(parsed[2]),
-        'cct': float(parsed[3][0]) if isinstance(parsed[3], list) else 0,
-        'duv': float(parsed[3][1]) if isinstance(parsed[3], list) else 0,
-        'Rf': None,
-        'Rg': None,
-        'r9': None,
+        'cri_ra':   float(nums[0]),
+        'worst_ri': float(nums[1]),
+        'efficacy': float(nums[2]),
+        'cct':      float(nums[3]),
+        'duv':      float(nums[4]),
+        'r9':       float(nums[13]),
+        'Rf':       None,
+        'Rg':       None,
     }
 
-    # Extract R9 from ri-list (index 4, element 8 = R9)
-    if isinstance(parsed[4], list) and len(parsed[4]) >= 9:
-        result['r9'] = float(parsed[4][8])
-
-    # Extract TM-30 data if present (index 10)
-    if len(parsed) > 10 and isinstance(parsed[10], list) and len(parsed[10]) >= 2:
-        result['Rf'] = float(parsed[10][0])
-        result['Rg'] = float(parsed[10][1])
+    # TM-30 data at indices 24-25 (present when >= 26 numbers)
+    if len(nums) >= 26:
+        result['Rf'] = float(nums[24])
+        result['Rg'] = float(nums[25])
 
     return result
 
@@ -404,26 +375,94 @@ def print_summary_table(results, cri_min, philips=False):
     print(f"\nCSV saved to {csv_path}")
 
 
+def plot_Rf_both_cri(results80, results95):
+    """Plot both CRI>=80 and CRI>=95 Rf curves on one figure."""
+    if len(results80) < 2 and len(results95) < 2:
+        return
+
+    fig, ax = plt.subplots(figsize=(12, 7))
+
+    datasets = [
+        (80,  results80, '#1f77b4', 'solid'),
+        (95,  results95, '#d62728', 'solid'),
+    ]
+
+    for cri, results, base_color, _ in datasets:
+        if len(results) < 2:
+            continue
+
+        phil_lers = np.array([r['ler_philips'] if r['ler_philips'] > 0
+                              else r['eff_threshold'] for r in results])
+        rfs = np.array([r['Rf'] if r['Rf'] is not None else 0 for r in results])
+
+        for mult, tech_label, marker, ls, _ in TECH_LEVELS:
+            sys_effs = phil_lers * mult
+            ax.plot(sys_effs, rfs, color=base_color, marker=marker,
+                    linestyle=ls, markersize=6, linewidth=1.5,
+                    label=f'CRI$\\geq${cri}, {tech_label}',
+                    alpha=0.85)
+
+    # Regulatory threshold lines
+    ax.axvline(x=REG_EU, color='green', linestyle='--', linewidth=1.5,
+               alpha=0.6, label=f'EU 2019/2020: {REG_EU:.0f} lm/W')
+    ax.axvline(x=REG_DOE, color='darkred', linestyle='-.', linewidth=1.5,
+               alpha=0.6, label=f'US DOE 2028: {REG_DOE:.0f} lm/W')
+
+    ax.set_xlabel('System (Wall-Plug) Efficacy (lm/W)', fontsize=13)
+    ax.set_ylabel('Maximum Achievable TM-30 $R_f$', fontsize=13)
+    ax.set_title(
+        'TM-30 Color Fidelity ($R_f$) vs System Efficacy at 2700K\n'
+        'CRI$\\geq$80 (blue) and CRI$\\geq$95 (red) — '
+        'three production technology levels',
+        fontsize=12)
+    ax.legend(fontsize=8, loc='lower left', ncol=2)
+    ax.grid(True, alpha=0.3)
+    ax.set_ylim(bottom=max(0, ax.get_ylim()[0] - 5))
+
+    plt.tight_layout()
+
+    fname = 'fig_maxRf_frontier_both'
+    plt.savefig(os.path.join(RUNDIR, fname + '.pdf'), dpi=150)
+    plt.savefig(os.path.join(RUNDIR, fname + '.png'), dpi=150)
+    print(f"Saved {fname}")
+
+
 if __name__ == '__main__':
     philips = '--philips' in sys.argv
-    args = [a for a in sys.argv[1:] if a != '--philips']
+    do_both = '--both' in sys.argv
+    args = [a for a in sys.argv[1:] if not a.startswith('--')]
     cri_min = int(args[0]) if args else 80
 
     mode = 'Philips-corrected' if philips else 'uncorrected'
-    print(f"Processing max-Rf sweep results for CRI >= {cri_min} ({mode})")
-    results = find_sweep_results(cri_min, philips=philips)
-    print(f"Found {len(results)} result files")
 
-    if not results:
-        print("No results found. Run the sweep first:")
-        if philips:
-            print(f"  ./run-maxRf-sweep-parallel.sh {cri_min}")
-        else:
-            print(f"  ./run-maxRf-sweep.sh")
-        sys.exit(1)
+    if do_both:
+        for cri in [80, 95]:
+            results = find_sweep_results(cri, philips=philips)
+            print(f"CRI>={cri}: found {len(results)} result files")
+            if results:
+                print_summary_table(results, cri, philips=philips)
+                plot_Rf_vs_system_efficacy(results, cri, philips=philips)
+                plot_individual_spectra(results, cri, philips=philips)
 
-    print_summary_table(results, cri_min, philips=philips)
-    plot_Rf_vs_system_efficacy(results, cri_min, philips=philips)
-    plot_individual_spectra(results, cri_min, philips=philips)
+        r80 = find_sweep_results(80, philips=philips)
+        r95 = find_sweep_results(95, philips=philips)
+        if r80 or r95:
+            plot_Rf_both_cri(r80, r95)
+    else:
+        print(f"Processing max-Rf sweep results for CRI >= {cri_min} ({mode})")
+        results = find_sweep_results(cri_min, philips=philips)
+        print(f"Found {len(results)} result files")
+
+        if not results:
+            print("No results found. Run the sweep first:")
+            if philips:
+                print(f"  ./run-maxRf-sweep-parallel.sh {cri_min}")
+            else:
+                print(f"  ./run-maxRf-sweep.sh")
+            sys.exit(1)
+
+        print_summary_table(results, cri_min, philips=philips)
+        plot_Rf_vs_system_efficacy(results, cri_min, philips=philips)
+        plot_individual_spectra(results, cri_min, philips=philips)
 
     print("\nDone.")

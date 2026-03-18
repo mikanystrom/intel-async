@@ -2,6 +2,11 @@
 """
 Plot results of the max-R9 sweep: R9 vs efficacy frontier,
 individual spectrum plots, and Philips-corrected efficacy.
+
+TODO: x-axis should show system (wall-plug) efficacy at three technology
+levels (best prod x0.514, best lab x0.670, DOE limit x0.813) with
+regulatory threshold markers (EU 98, DOE 125 lm/W), matching the
+treatment in the report tables and in plot_maxRf_sweep.py.
 """
 
 import os
