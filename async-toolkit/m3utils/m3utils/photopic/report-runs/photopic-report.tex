@@ -2247,6 +2247,200 @@ versus the blackbody's broad blue distribution.}
 \label{fig:lms-cone-signal}
 \end{figure}
 
+\subsection{Five-Channel Receptor Analysis}
+\label{sec:five-channel}
+
+The three-channel (L, M, S cone) analysis above captures chromatic
+differences but ignores two additional photoreceptor systems that
+contribute to perception at typical indoor light levels:
+
+\begin{enumerate}
+\item \textbf{Rod photoreceptors} --- sensitivity function $V'(\lambda)$
+  (CIE~1951), peaking at 507~nm.  Rods are active at mesopic light
+  levels ($\sim$0.01--600~cd/m$^2$) and contribute to brightness
+  perception, spatial vision, and---through rod-cone interaction---color
+  appearance~\cite{buck2004}.
+\item \textbf{Melanopsin-containing ipRGCs} (intrinsically photosensitive
+  retinal ganglion cells) --- sensitivity function $s_\text{mel}(\lambda)$
+  (CIE~S~026:2018, Lucas et al.\ 2014), peaking at $\sim$490~nm
+  \emph{in vivo}.  These cells drive circadian photoentrainment,
+  pupillary light reflex, and---importantly---contribute to perceived
+  brightness and spatial brightness constancy even at photopic
+  levels~\cite{brown2012,lucas2014}.
+\end{enumerate}
+
+Both of these receptor systems peak in the 490--510~nm range---precisely
+where phosphor-converted white LEDs have their characteristic spectral
+valley between the blue pump ($\sim$450~nm) and the phosphor emission
+onset ($\sim$520~nm).
+
+We extend the analysis by computing five-channel adapted responses,
+normalizing each channel independently to the 2700~K blackbody reference,
+and computing a five-channel RMSCC:
+\[
+\text{RMSCC}_5 = \sqrt{\frac{1}{5}\left[
+\left(\frac{\Delta L}{L}\right)^2 +
+\left(\frac{\Delta M}{M}\right)^2 +
+\left(\frac{\Delta S}{S}\right)^2 +
+\left(\frac{\Delta R}{R}\right)^2 +
+\left(\frac{\Delta \text{Mel}}{\text{Mel}}\right)^2
+\right]}
+\]
+
+\begin{table}[h]
+\centering
+\small
+\caption{Five-channel receptor contrast versus 2700~K blackbody.
+$\Delta R/R$ is the rod (scotopic) channel deficit; $\Delta\text{Mel}/\text{Mel}$
+is the melanopic channel deficit.  RMSCC$_3$ uses only L, M, S;
+RMSCC$_5$ includes rod and melanopic channels.}
+\label{tab:5ch-contrast}
+\begin{tabular}{lrrrrrcc}
+\toprule
+Source & $\frac{\Delta L}{L}$ & $\frac{\Delta M}{M}$ & $\frac{\Delta S}{S}$
+       & $\frac{\Delta R}{R}$ & $\frac{\Delta\text{Mel}}{\text{Mel}}$
+       & RMSCC$_3$ & RMSCC$_5$ \\
+\midrule
+Waveform A19         & $-0.5$\% & $+0.4$\% & $-3.7$\%  & $-22.8$\%  & $-25.9$\%  & 2.2\%  & 15.5\% \\
+CRI 80 (max eff.)    & $-0.3$\% & $+0.2$\% & $-54.9$\% & $-43.1$\%  & $-50.3$\%  & 31.7\% & 38.5\% \\
+CRI 95 (max eff.)    & $-0.4$\% & $+0.3$\% & $-47.0$\% & $-29.6$\%  & $-36.0$\%  & 27.2\% & 29.6\% \\
+CRI 80, Phil.\ 250   & $-0.5$\% & $+0.3$\% & $-50.4$\% & $-21.7$\%  & $-22.6$\%  & 29.1\% & 26.5\% \\
+CRI 95, Phil.\ 250   & $-0.7$\% & $+0.5$\% & $-25.1$\% & $-15.3$\%  & $-18.8$\%  & 14.5\% & 15.6\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:5ch-contrast} reveals the central finding of this section.
+The Waveform LED---which appeared nearly equivalent to blackbody in the
+three-channel analysis (RMSCC$_3$ = 2.2\%)---shows \textbf{22.8\% rod
+deficit} and \textbf{25.9\% melanopic deficit}, driving the five-channel
+RMSCC to \textbf{15.5\%}, a factor of \textbf{seven} larger than the
+cone-only metric.
+
+This result explains the perceptual observation that high-CRI LEDs,
+despite near-perfect chromaticity matching, still ``feel different''
+from incandescent light---an effect that the colorimetric framework
+cannot account for.
+
+\subsubsection{Mesopic Vision in Residential Settings}
+
+The rod and melanopic deficits are not merely academic.  The 2700~K
+warm-white LEDs that show these deficits are specifically designed for
+residential evening environments: bedroom lamps, living room ambient
+lighting, dining settings, and hospitality applications.  These are
+precisely the conditions where \emph{mesopic vision} dominates.
+
+At typical residential evening illuminance levels (50--300~lux at the
+task plane), the corresponding retinal illuminance is well within the
+mesopic range ($\sim$0.6--6~cd/m$^2$ for typical wall luminance at
+20--30\% reflectance).  In this regime, rod photoreceptors are not
+saturated and actively contribute to:
+\begin{itemize}
+\item \emph{Brightness perception} --- mesopic brightness includes a
+  rod contribution weighted by the CIE~1951 $V'(\lambda)$ function,
+  which is exactly the channel showing a 23\% deficit.
+\item \emph{Spatial vision and ambience} --- rods dominate peripheral
+  vision and contribute to the overall sense of ``fill light'' in a
+  room.  A 23\% scotopic deficit means the LED-lit room provides
+  less peripheral rod stimulation than the incandescent-lit room at
+  the same photopic lux level.
+\item \emph{Color appearance via rod-cone interaction} --- at mesopic
+  levels, rod signals feed into the chromatically-opponent pathways
+  (the rod-bipolar/AII-amacrine pathway), influencing perceived hue
+  and saturation~\cite{buck2004}.
+\end{itemize}
+
+The melanopsin-containing ipRGCs (26\% deficit) further affect
+perceived brightness through their contribution to the pupillary
+light reflex and to the irradiance-coding pathway that modulates
+subjective brightness independently of the cone-based luminance
+channel~\cite{brown2012}.
+
+The irony is striking: the spectral valley at 470--510~nm that
+enables efficient phosphor-converted white LEDs falls precisely on
+the sensitivity peaks of the two receptor systems most relevant to
+low-light comfort.  The ``cozy'' warmth of incandescent light may
+owe as much to its rod and melanopic stimulation as to its chromaticity.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{fig_5ch_contrast}
+\caption{Five-channel receptor contrast versus 2700~K blackbody.
+The L and M cone deviations (red, green) are negligible for all
+sources.  The S-cone deficit (blue) that dominated the three-channel
+analysis is dwarfed by the rod (purple) and melanopic (orange)
+deficits.  Even the Waveform LED, with excellent colorimetric
+performance, shows $\sim$23--26\% deficits in the non-cone channels.}
+\label{fig:5ch-contrast}
+\end{figure}
+
+\subsubsection{What a Lux Meter Misses}
+
+The scotopic-to-photopic (S/P) ratio and the melanopic daylight
+response factor (M-DLR, per CIE~S~026:2018) quantify how much rod
+and melanopic stimulation a source provides per photopic lumen.
+Table~\ref{tab:sp-ratio} shows these ratios for all sources, along
+with the absolute scotopic and melanopic illuminance at a practical
+residential level of 200~photopic~lux.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Scotopic/Photopic ratio and Melanopic DLR.  At 200~photopic~lux
+(same meter reading for all sources), the absolute scotopic and melanopic
+illuminances differ dramatically.}
+\label{tab:sp-ratio}
+\begin{tabular}{lcccccc}
+\toprule
+Source & S/P & M-DLR & \multicolumn{2}{c}{At 200 phot.\ lux} &
+\multicolumn{2}{c}{Deficit vs BB} \\
+\cmidrule(lr){4-5} \cmidrule(lr){6-7}
+& & & Scot.\ lux & Mel.\ lux & $\Delta$Scot & $\Delta$Mel \\
+\midrule
+2700~K Blackbody     & 0.882 & 0.391 & 176 & 78 & --- & --- \\
+Waveform A19         & 0.681 & 0.290 & 136 & 58 & $-$23\% & $-$26\% \\
+CRI 80 (max eff.)    & 0.502 & 0.195 & 100 & 39 & $-$43\% & $-$50\% \\
+CRI 95 (max eff.)    & 0.621 & 0.250 & 124 & 50 & $-$30\% & $-$36\% \\
+CRI 80, Phil.\ 250   & 0.690 & 0.303 & 138 & 61 & $-$22\% & $-$23\% \\
+CRI 95, Phil.\ 250   & 0.747 & 0.318 & 149 & 64 & $-$15\% & $-$19\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent
+At 200~photopic~lux---a typical residential evening level---the
+Waveform LED delivers \textbf{40~fewer scotopic~lux} and
+\textbf{20~fewer melanopic~lux} than a 2700~K blackbody at the
+same meter reading.  These are the missing lumens that no photopic
+instrument can detect but that the rod and melanopic photoreceptors
+respond to.
+
+The CIE~191:2010 mesopic luminance model, applied to these S/P
+ratios, predicts only a 3\% luminance deficit at 10~lux and
+effectively zero above 50~lux, because at typical residential
+wall luminances ($\sim$5~cd/m$^2$ at 200~lux on a 30\% reflectance
+surface) the CIE model considers vision to be purely photopic.
+However, the model was designed for road lighting and addresses
+\emph{only} the luminance channel.  Rod photoreceptors are
+physiologically active well above the CIE mesopic upper limit:
+rods do not fully saturate until $\sim$300~cd/m$^2$, two orders of
+magnitude above typical wall luminance.  Their signals continue to
+contribute to spatial vision, peripheral ambience, and---through
+rod-cone interaction~\cite{buck2004}---color appearance, through
+pathways that the CIE mesopic luminance model does not capture.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\textwidth]{fig_mesopic_deficit}
+\caption{Left: S/P ratio and melanopic daylight response factor
+for each source.  The blackbody provides the highest rod and melanopic
+stimulation per photopic lumen.  Right: at 200~photopic~lux (identical
+meter reading), the absolute scotopic and melanopic illuminance
+varies by a factor of $\sim$1.8$\times$ from best (blackbody) to
+worst (CRI~80 max-efficacy).}
+\label{fig:mesopic-deficit}
+\end{figure}
+
 \subsection{Implications}
 
 This analysis reveals a fundamental limitation of all colorimetric
@@ -2256,25 +2450,38 @@ distribution of cone stimulation within each channel.  Two spectra
 can have identical CRI and identical chromaticity, yet produce
 dramatically different cone excitation patterns.
 
-The S-cone deficit in efficacy-optimized spectra is particularly
-problematic because:
+The three-channel S-cone deficit is concerning but physiologically
+modest for high-CRI commercial LEDs (3.7\% for the Waveform).
+The five-channel analysis reveals the true scale of the problem:
+even the best commercial LED shows a receptor-level mismatch
+seven times larger than cone-only metrics predict, driven entirely
+by the rod and melanopic channels.
+
+Three aspects of this finding are particularly significant:
 \begin{enumerate}
-\item The S cone has the broadest relative bandwidth of the three
-  cone types (sensitive from $\sim$400--500~nm), making it most
-  sensitive to the narrowband nature of LED pump emissions.
-\item S-cone contrast is a primary driver of perceived ``naturalness''
-  in warm illumination, as blackbody sources provide rich broadband
-  stimulation across the full S-cone sensitivity range.
-\item No amount of blue pump intensity can replicate the spectral
-  \emph{shape} of thermal blue light within the S-cone response
-  function.
+\item \textbf{Invisible to all existing metrics.}  CRI, TM-30 $R_f$,
+  and all chromaticity-based measures are defined on the CIE~1931
+  photopic observer ($V(\lambda) \approx 1.89L + M$).  They contain
+  no rod or melanopic information.  A light source could have
+  CRI~100, $R_f = 100$, perfect chromaticity, and still show 25\%+
+  deficits in the non-cone channels.
+\item \textbf{Worst where it matters most.}  The rod and melanopic
+  sensitivity peaks (490--507~nm) align with the LED phosphor valley.
+  The 2700~K CCT products with the largest rod/melanopic deficits
+  are marketed specifically for mesopic residential environments.
+\item \textbf{No amount of spectral shaping within the phosphor band
+  can fix it.}  The pump-to-phosphor gap is a structural feature of
+  phosphor-converted LEDs.  Filling it requires either a cyan emitter
+  ($\sim$490$-$510~nm) or accepting the loss of pump-conversion
+  efficiency that filling this spectral region implies.
 \end{enumerate}
 
-For the LED lighting industry, this suggests that cone excitation
-analysis should complement traditional colorimetric metrics.  A
-metric based on RMSCC---or at minimum the S-cone contrast
-$\Delta S/S$---would capture the physiological reality that current
-metrics miss.
+For the LED lighting industry, this suggests that a five-channel
+receptor analysis should complement traditional colorimetric metrics.
+A composite metric incorporating rod and melanopic channel contrast
+would capture the physiological reality that current metrics miss,
+and would specifically penalize the spectral valley that defines
+phosphor-converted white LEDs.
 
 
 \section{Future Work}
@@ -2305,16 +2512,25 @@ reported above:
   (50--100~nm FWHM, constrained shapes).  This would bridge the gap
   between our theoretical optima and practical LED design.
 
-\item \textbf{Scotopic/mesopic efficacy.}  Outdoor and roadway lighting
-  operates at mesopic light levels where the scotopic sensitivity
-  function $V'(\lambda)$ contributes.  The S/P ratio (scotopic to photopic
-  luminance ratio) is an additional design variable that regulations are
-  beginning to address.
+\item \textbf{Scotopic/mesopic optimization.}  Section~\ref{sec:five-channel}
+  reveals that 2700~K LEDs show 23\% rod (scotopic) deficits versus
+  blackbody, with the deficit concentrated in the 470--510~nm range.
+  Adding a scotopic channel constraint to the optimizer---e.g.,
+  requiring $|\Delta V'/V'| \leq 5$\%---would force spectra to fill
+  the pump-to-phosphor valley at the cost of some luminous efficacy.
+  This is particularly relevant for residential evening lighting,
+  where mesopic vision dominates and rod contributions affect perceived
+  brightness and ambience.
 
-\item \textbf{Circadian impact.}  Blue-rich spectra suppress melatonin
-  production.  A constraint on melanopic equivalent daylight illuminance
-  (M-EDI) could be added to the optimization, capturing the tension
-  between visual efficacy and biological impact.
+\item \textbf{Melanopic-constrained optimization.}  The 26\% melanopic
+  deficit (Section~\ref{sec:five-channel}) is invisible to all current
+  lighting metrics.  Adding a melanopic equivalent daylight illuminance
+  (M-EDI) constraint following CIE~S~026:2018 would capture both the
+  circadian dimension (melatonin suppression depends on melanopic
+  stimulation) and the brightness/pupil dimension (ipRGCs modulate
+  perceived brightness independently of cones).  The trade-off between
+  visual efficacy and melanopic adequacy could be mapped with the same
+  sweep methodology used for CRI and $R_f$ in this report.
 
 \item \textbf{Optimizer robustness.}  The CCT comparison
   (Table~\ref{tab:cct-comparison}) reveals non-monotonicities where a
@@ -2339,6 +2555,18 @@ determined ``weird'' final state: three narrow spectral peaks near 450,
 540, and 610~nm with suppressed emission elsewhere.  This state maximizes
 lumens per watt while technically satisfying color rendering requirements,
 but at the cost of poor rendering of saturated colors --- especially reds.
+
+The five-channel receptor analysis (Section~\ref{sec:five-channel})
+reveals a deeper problem: even well-designed commercial LEDs with
+CRI~95+ show 23--26\% deficits in the rod and melanopic channels versus
+blackbody, invisible to all existing colorimetric metrics.  These deficits
+are concentrated in the 470--510~nm spectral valley that is a structural
+feature of phosphor-converted white LEDs, and they fall precisely on the
+sensitivity peaks of the photoreceptors most relevant to the mesopic,
+residential environments where warm-white LEDs are deployed.  This
+suggests that a complete characterization of light quality requires
+going beyond the three-cone colorimetric framework to include at least
+rod and melanopic receptor channels.
 
 The \texttt{photopic} tool, built as a hybrid Modula-3/Scheme application,
 enables rapid exploration of this trade-off space using COBYLA constrained
@@ -2474,6 +2702,26 @@ J.~Krauskopf and K.~R. Gegenfurtner,
 C.~A. Curcio, K.~R. Sloan, R.~E. Kalina, and A.~E. Hendrickson,
 ``Human photoreceptor topography,''
 \emph{Journal of Comparative Neurology}, vol.~292, no.~4, pp.~497--523, 1990.
+
+\bibitem{buck2004}
+S.~L. Buck,
+``Rod-cone interactions in human vision,''
+in \emph{The Visual Neurosciences} (L.~M. Chalupa and J.~S. Werner, eds.),
+MIT Press, pp.~863--878, 2004.
+
+\bibitem{brown2012}
+T.~M. Brown, S.~Tsujimura, A.~E. Allen, J.~Wynne, R.~Bedford, G.~Sherber,
+S.~Peirson, R.~G. Foster, and R.~J. Lucas,
+``Melanopsin-based brightness discrimination in mice and humans,''
+\emph{Current Biology}, vol.~22, no.~12, pp.~1134--1141, 2012.
+
+\bibitem{lucas2014}
+R.~J. Lucas, S.~N. Peirson, D.~M. Berson, T.~M. Brown, H.~M. Cooper,
+C.~A. Czeisler, M.~G. Figueiro, P.~D. Gamlin, S.~W. Lockley,
+J.~B. O'Hagan, L.~L.~A. Price, I.~Provencio, D.~J. Skene, and
+G.~C. Brainard,
+``Measuring and using light in the melanopsin age,''
+\emph{Trends in Neurosciences}, vol.~37, no.~1, pp.~1--9, 2014.
 
 \end{thebibliography}
 

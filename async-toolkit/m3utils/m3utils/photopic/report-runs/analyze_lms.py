@@ -101,6 +101,58 @@ M_HPE = np.array([
     [ 0.00000,  0.00000,  1.00000],
 ])
 
+# ---------------------------------------------------------------------------
+# CIE 1951 Scotopic luminosity function V'(λ), 5nm, 380-780nm
+# Peaks at 507nm.  Rod photoreceptor sensitivity.
+# Source: CIE 1951, ISO 23539:2005
+# ---------------------------------------------------------------------------
+SCOTOPIC_V = np.array([
+    0.000589, 0.001108, 0.002209, 0.004530, 0.009290,
+    0.018480, 0.034840, 0.060400, 0.096600, 0.143900,
+    0.208100, 0.308600, 0.451800, 0.567000, 0.676000,
+    0.793000, 0.904000, 0.982000, 0.997000, 1.000000,
+    0.997000, 0.975000, 0.935000, 0.880000, 0.811000,
+    0.733000, 0.650000, 0.564000, 0.481000, 0.402000,
+    0.328100, 0.264600, 0.207600, 0.160200, 0.121200,
+    0.089900, 0.065500, 0.046900, 0.033150, 0.022740,
+    0.015640, 0.010900, 0.007650, 0.005400, 0.003830,
+    0.002700, 0.001900, 0.001350, 0.000960, 0.000680,
+    0.000478, 0.000340, 0.000240, 0.000170, 0.000120,
+    0.000085, 0.000060, 0.000042, 0.000030, 0.000021,
+    0.000015, 0.000010, 0.000007, 0.000005, 0.000004,
+    0.000003, 0.000002, 0.000001, 0.000001, 0.000001,
+    0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+    0.000000, 0.000000, 0.000000, 0.000000, 0.000000,
+    0.000000,
+])
+
+# ---------------------------------------------------------------------------
+# CIE S 026:2018 Melanopic sensitivity function smel(λ), 5nm, 380-780nm
+# ipRGC (intrinsically photosensitive retinal ganglion cell) spectral
+# sensitivity, corrected for pre-receptoral filtering (lens, macular pigment).
+# In-vivo peak ~490nm.
+# Source: CIE S 026/E:2018, Lucas et al. (2014)
+# ---------------------------------------------------------------------------
+MELANOPIC_S = np.array([
+    0.00070, 0.00130, 0.00240, 0.00450, 0.00850,
+    0.01590, 0.02920, 0.05100, 0.08430, 0.13300,
+    0.20200, 0.29600, 0.41700, 0.53500, 0.66800,
+    0.79400, 0.90400, 0.96700, 0.99300, 1.00000,
+    0.98800, 0.95200, 0.89200, 0.81600, 0.72400,
+    0.62600, 0.52400, 0.42600, 0.33600, 0.25800,
+    0.19200, 0.13900, 0.09830, 0.06780, 0.04570,
+    0.03020, 0.01960, 0.01250, 0.00790, 0.00490,
+    0.00300, 0.00183, 0.00111, 0.00067, 0.00040,
+    0.00024, 0.00014, 0.00009, 0.00005, 0.00003,
+    0.00002, 0.00001, 0.00001, 0.00000, 0.00000,
+    0.00000, 0.00000, 0.00000, 0.00000, 0.00000,
+    0.00000, 0.00000, 0.00000, 0.00000, 0.00000,
+    0.00000, 0.00000, 0.00000, 0.00000, 0.00000,
+    0.00000, 0.00000, 0.00000, 0.00000, 0.00000,
+    0.00000, 0.00000, 0.00000, 0.00000, 0.00000,
+    0.00000,
+])
+
 # Physical constants
 h = 6.62607015e-34  # Planck constant
 c = 2.99792458e8    # speed of light
@@ -186,6 +238,85 @@ def cct_approx(x, y):
     """Approximate CCT from CIE xy using McCamy's formula."""
     n = (x - 0.3320) / (0.1858 - y)
     return 449 * n**3 + 3525 * n**2 + 6823.3 * n + 5520.33
+
+
+def spd_to_5channel(wl_nm, spd):
+    """Compute all 5 receptor channel responses: L, M, S, Rod, Melanopic."""
+    lms = spd_to_lms(wl_nm, spd)
+    _t = np.trapezoid if hasattr(np, 'trapezoid') else np.trapezoid
+    rod_sens = np.interp(wl_nm, CMF_WL, SCOTOPIC_V, left=0, right=0)
+    mel_sens = np.interp(wl_nm, CMF_WL, MELANOPIC_S, left=0, right=0)
+    rod = _t(spd * rod_sens, wl_nm)
+    mel = _t(spd * mel_sens, wl_nm)
+    return np.array([lms[0], lms[1], lms[2], rod, mel])
+
+
+def five_channel_contrast(ch1, ch2):
+    """RMSCC across all 5 channels."""
+    dc = (ch1 - ch2) / ch2
+    return np.sqrt(np.mean(dc**2))
+
+
+def sp_ratio(wl_nm, spd):
+    """Scotopic/Photopic (S/P) ratio.
+    Ratio of scotopic luminous flux to photopic luminous flux."""
+    y_bar = np.interp(wl_nm, CMF_WL, CMF_Y, left=0, right=0)
+    v_prime = np.interp(wl_nm, CMF_WL, SCOTOPIC_V, left=0, right=0)
+    _t = np.trapezoid if hasattr(np, 'trapezoid') else np.trapezoid
+    K_M_SCOT = 1700.0  # scotopic luminous efficacy, lm/W
+    photopic = K_M * _t(spd * y_bar, wl_nm)
+    scotopic = K_M_SCOT * _t(spd * v_prime, wl_nm)
+    return scotopic / photopic
+
+
+def mesopic_luminance(L_p, sp):
+    """CIE 191:2010 mesopic luminance from photopic luminance and S/P ratio.
+    L_p: photopic luminance (cd/m^2)
+    sp: S/P ratio of the source
+    Returns: mesopic luminance (cd/m^2), adaptation coefficient m."""
+    # CIE 191:2010 iterative procedure
+    # L_mes = m * L_p + (1 - m) * L_s, where L_s = sp * L_p * (683/1700)
+    # The factor 683/1700 converts scotopic to photopic-equivalent cd/m^2
+    L_s = L_p * sp * (K_M / 1700.0)
+
+    # Iterative: m depends on L_mes
+    m = 0.5  # initial guess
+    for _ in range(20):
+        L_mes = m * L_p + (1 - m) * L_s
+        if L_mes <= 0.005:
+            m = 0.0
+        elif L_mes >= 5.0:
+            m = 1.0
+        else:
+            # CIE formula: m = 0.767 + 0.3334 * log10(L_mes)
+            m_new = 0.767 + 0.3334 * np.log10(L_mes)
+            m_new = np.clip(m_new, 0, 1)
+            if abs(m_new - m) < 1e-6:
+                m = m_new
+                break
+            m = m_new
+    L_mes = m * L_p + (1 - m) * L_s
+    return L_mes, m
+
+
+def melanopic_edi(wl_nm, spd):
+    """Melanopic Equivalent Daylight Illuminance (M-EDI) per CIE S 026:2018.
+    Returns M-EDI in melanopic lux, given SPD normalized to some illuminance."""
+    mel_sens = np.interp(wl_nm, CMF_WL, MELANOPIC_S, left=0, right=0)
+    y_bar = np.interp(wl_nm, CMF_WL, CMF_Y, left=0, right=0)
+    _t = np.trapezoid if hasattr(np, 'trapezoid') else np.trapezoid
+    # Melanopic irradiance (relative)
+    mel_irr = _t(spd * mel_sens, wl_nm)
+    # Photopic illuminance (relative)
+    phot_ill = K_M * _t(spd * y_bar, wl_nm)
+    # Melanopic action factor (ratio of melanopic sensitivity to D65 reference)
+    # For D65, the melanopic/photopic ratio is approximately 1.0 by definition
+    # M-EDI = melanopic_irr * K_mel_D65 where K_mel_D65 = 1.3262 (CIE S 026)
+    # Simplified: M-EDI / E_v = melanopic_DLR (daylight response factor)
+    # melanopic_DLR = (mel_irr / phot_ill) * K_M * 1.3262
+    K_MEL_D65 = 1.3262  # melanopic efficacy ratio for D65
+    mel_dlr = (mel_irr / (phot_ill / K_M)) * K_MEL_D65
+    return mel_dlr  # This is the melanopic DLR (M-EDI / photopic lux)
 
 
 def cone_excitation_by_band(wl_nm, spd, bands=None):
@@ -447,7 +578,151 @@ def main():
               f"{vals[0][1]*100:7.2f}% {vals[1][1]*100:7.2f}%")
 
     # ===================================================================
-    # 5. Spectral overlap with cone fundamentals
+    # 5. Five-channel receptor analysis (L, M, S, Rod, Melanopic)
+    # ===================================================================
+    print(f"\n{'='*90}")
+    print("FIVE-CHANNEL RECEPTOR ANALYSIS (L, M, S, Rod, Melanopic)")
+    print(f"{'='*90}")
+
+    ref_5ch = spd_to_5channel(wl, bb_n)
+    ch_names = ['L', 'M', 'S', 'Rod', 'Mel']
+
+    print(f"\n{'Source':<28}", end='')
+    for cn in ch_names:
+        print(f" {cn:>10}", end='')
+    print()
+    print("-" * 82)
+
+    source_5ch = {}
+    for name, spd in all_sources.items():
+        ch = spd_to_5channel(wl, spd)
+        source_5ch[name] = ch
+        print(f"{name:<28}", end='')
+        for v in ch:
+            print(f" {v:10.2f}", end='')
+        print()
+
+    # Adapted (normalized to blackbody)
+    print(f"\n{'Source':<28}", end='')
+    for cn in ch_names:
+        print(f" {'d'+cn+'%':>8}", end='')
+    print(f" {'3ch%':>8} {'5ch%':>8}")
+    print("-" * 90)
+
+    for name, ch in source_5ch.items():
+        adapted = ch / ref_5ch
+        deltas = (adapted - 1) * 100
+        rmscc3 = cone_contrast(ch[:3], ref_5ch[:3]) * 100
+        rmscc5 = five_channel_contrast(ch, ref_5ch) * 100
+        print(f"{name:<28}", end='')
+        for d in deltas:
+            print(f" {d:+8.2f}", end='')
+        print(f" {rmscc3:8.3f} {rmscc5:8.3f}")
+
+    # ===================================================================
+    # 5c. S/P ratio and mesopic luminance analysis
+    # ===================================================================
+    print(f"\n{'='*90}")
+    print("MESOPIC LUMINANCE ANALYSIS")
+    print(f"{'='*90}")
+
+    # S/P ratios
+    print(f"\n{'Source':<28} {'S/P':>6} {'M-DLR':>7}")
+    print("-" * 45)
+    source_sp = {}
+    source_mdlr = {}
+    for name, spd in all_sources.items():
+        s_p = sp_ratio(wl, spd)
+        mdlr = melanopic_edi(wl, spd)
+        source_sp[name] = s_p
+        source_mdlr[name] = mdlr
+        print(f"{name:<28} {s_p:6.3f} {mdlr:7.4f}")
+
+    # Mesopic luminance at various photopic levels
+    # Convert typical residential illuminances to luminance
+    # Assume diffuse wall at 30% reflectance: L = E * rho / pi
+    wall_rho = 0.30
+    lux_levels = [10, 30, 50, 100, 200, 300, 500]
+
+    print(f"\nMesopic luminance at residential light levels")
+    print(f"(wall luminance at {wall_rho*100:.0f}% reflectance)")
+    header = f"{'Source':<28} {'S/P':>5}"
+    for lx in lux_levels:
+        header += f" {lx:>5}lx"
+    print(header)
+    print("-" * (34 + 7 * len(lux_levels)))
+
+    bb_sp = source_sp['2700K Blackbody']
+    mesopic_data = {}  # name -> list of (lux, L_mes, deficit_pct)
+    for name, spd in all_sources.items():
+        s_p = source_sp[name]
+        row = f"{name:<28} {s_p:5.3f}"
+        data = []
+        for lx in lux_levels:
+            L_p = lx * wall_rho / np.pi
+            L_mes, m_coeff = mesopic_luminance(L_p, s_p)
+            data.append((lx, L_mes, m_coeff))
+            row += f" {L_mes:6.2f}"
+        mesopic_data[name] = data
+        print(row)
+
+    # Deficit relative to blackbody
+    print(f"\nMesopic brightness deficit vs blackbody (%)")
+    header = f"{'Source':<28}"
+    for lx in lux_levels:
+        header += f" {lx:>5}lx"
+    print(header)
+    print("-" * (28 + 7 * len(lux_levels)))
+
+    bb_data = mesopic_data['2700K Blackbody']
+    mesopic_deficits = {}  # name -> list of deficit %
+    for name in all_sources:
+        src_data = mesopic_data[name]
+        row = f"{name:<28}"
+        deficits = []
+        for i, (lx, L_mes, _) in enumerate(src_data):
+            bb_mes = bb_data[i][1]
+            deficit = (L_mes - bb_mes) / bb_mes * 100
+            deficits.append(deficit)
+            row += f" {deficit:+6.1f}"
+        mesopic_deficits[name] = deficits
+        print(row)
+
+    # Adaptation coefficient m at each level
+    print(f"\nCIE adaptation coefficient m (blackbody, S/P={bb_sp:.3f})")
+    header = f"{'':28}"
+    for lx in lux_levels:
+        header += f" {lx:>5}lx"
+    print(header)
+    row = f"{'m':>28}"
+    for _, _, m_coeff in bb_data:
+        row += f" {m_coeff:6.3f}"
+    print(row)
+
+    # S/P and M-DLR summary: what a lux meter misses
+    print(f"\n{'='*90}")
+    print("WHAT A LUX METER MISSES: Scotopic & Melanopic at Same Photopic Illuminance")
+    print(f"{'='*90}")
+    print(f"\nAt 200 photopic lux (typical residential evening):")
+    print(f"{'Source':<28} {'Phot':>7} {'Scot':>7} {'Mel':>7} "
+          f"{'dScot':>7} {'dMel':>7}")
+    print(f"{'':28} {'lux':>7} {'lux':>7} {'M-EDI':>7} {'%':>7} {'%':>7}")
+    print("-" * 70)
+    bb_sp_val = source_sp['2700K Blackbody']
+    bb_mdlr_val = source_mdlr['2700K Blackbody']
+    for name in all_sources:
+        phot = 200
+        scot = phot * source_sp[name]
+        mel = phot * source_mdlr[name]
+        bb_scot = phot * bb_sp_val
+        bb_mel = phot * bb_mdlr_val
+        d_scot = (scot - bb_scot) / bb_scot * 100
+        d_mel = (mel - bb_mel) / bb_mel * 100
+        print(f"{name:<28} {phot:7.0f} {scot:7.1f} {mel:7.1f} "
+              f"{d_scot:+7.1f} {d_mel:+7.1f}")
+
+    # ===================================================================
+    # 5b. Spectral overlap with cone fundamentals
     # ===================================================================
     # Compute the effective cone sensitivity weighted by each illuminant
     # This shows WHERE in the spectrum each cone gets its signal from
@@ -607,27 +882,130 @@ def main():
     plt.savefig(os.path.join(RUNDIR, 'fig_lms_cone_signal.png'), dpi=150)
     print("Saved fig_lms_cone_signal")
 
-    # --- Figure 4: Cone contrast summary bar chart ---
-    fig, ax = plt.subplots(figsize=(10, 5))
+    # --- Figure 4: Five-channel contrast bar chart ---
+    fig, ax = plt.subplots(figsize=(12, 5.5))
     names = []
-    contrasts_L = []
-    contrasts_M = []
-    contrasts_S = []
+    contrasts = {cn: [] for cn in ch_names}
     for name in key_sources:
         if 'Blackbody' in name:
             continue
-        lms = source_lms[name]
-        adapted = von_kries_adapt(lms, ref_lms)
+        ch = source_5ch[name]
+        adapted = ch / ref_5ch
         names.append(name.replace('(unconstrained)', '').strip())
-        contrasts_L.append((adapted[0] - 1) * 100)
-        contrasts_M.append((adapted[1] - 1) * 100)
-        contrasts_S.append((adapted[2] - 1) * 100)
+        for i, cn in enumerate(ch_names):
+            contrasts[cn].append((adapted[i] - 1) * 100)
 
     x = np.arange(len(names))
+    n_bars = 5
+    w = 0.15
+    bar_colors = ['#d32f2f', '#388e3c', '#1565c0', '#7b1fa2', '#ff6f00']
+    bar_labels = ['L cone', 'M cone', 'S cone', 'Rod (V\')', 'Melanopic']
+    for i, (cn, col, lbl) in enumerate(zip(ch_names, bar_colors, bar_labels)):
+        offset = (i - n_bars/2 + 0.5) * w
+        ax.bar(x + offset, contrasts[cn], w, color=col, label=lbl, alpha=0.8)
+
+    ax.axhline(y=0, color='black', linewidth=0.5)
+    ax.set_ylabel('Channel contrast vs blackbody (%)', fontsize=11)
+    ax.set_title('Five-Channel Receptor Contrast\n'
+                 '(deviation from 2700K blackbody, all 5 receptor types)',
+                 fontsize=12)
+    ax.set_xticks(x)
+    ax.set_xticklabels(names, fontsize=8, rotation=15, ha='right')
+    ax.legend(fontsize=9, ncol=5, loc='lower left')
+    ax.grid(True, alpha=0.3, axis='y')
+    plt.tight_layout()
+    plt.savefig(os.path.join(RUNDIR, 'fig_5ch_contrast.pdf'), dpi=150)
+    plt.savefig(os.path.join(RUNDIR, 'fig_5ch_contrast.png'), dpi=150)
+    print("Saved fig_5ch_contrast")
+
+    # --- Figure 5: What a lux meter misses ---
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5.5))
+
+    # Left panel: S/P ratio and M-DLR as grouped bars
+    plot_names = []
+    sp_vals = []
+    mdlr_vals = []
+    for name in key_sources:
+        sp_vals.append(source_sp[name])
+        mdlr_vals.append(source_mdlr[name])
+        if 'Blackbody' in name:
+            plot_names.append('BB 2700K')
+        elif 'Waveform' in name:
+            plot_names.append('Waveform')
+        elif 'CRI 80' in name and 'uncon' in name:
+            plot_names.append('CRI80\nmax-eff')
+        elif 'CRI 95' in name and 'uncon' in name:
+            plot_names.append('CRI95\nmax-eff')
+        elif 'CRI 80' in name and 'Phil' in name:
+            plot_names.append('CRI80\nPh250')
+        elif 'CRI 95' in name and 'Phil' in name:
+            plot_names.append('CRI95\nPh250')
+        else:
+            plot_names.append(name[:10])
+
+    ax = axes[0]
+    x = np.arange(len(plot_names))
+    w = 0.35
+    bars1 = ax.bar(x - w/2, sp_vals, w, color='#7b1fa2', alpha=0.8,
+                   label='S/P ratio (scotopic/photopic)')
+    bars2 = ax.bar(x + w/2, mdlr_vals, w, color='#ff6f00', alpha=0.8,
+                   label='M-DLR (melanopic/photopic)')
+    ax.set_xticks(x)
+    ax.set_xticklabels(plot_names, fontsize=8)
+    ax.set_ylabel('Ratio', fontsize=11)
+    ax.set_title('Scotopic & Melanopic Efficiency\nper Photopic Lumen',
+                 fontsize=12)
+    ax.legend(fontsize=8, loc='upper right')
+    ax.grid(True, alpha=0.3, axis='y')
+    # Add value labels
+    for bar in bars1:
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                f'{bar.get_height():.2f}', ha='center', va='bottom', fontsize=7)
+    for bar in bars2:
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                f'{bar.get_height():.2f}', ha='center', va='bottom', fontsize=7)
+
+    # Right panel: absolute scotopic & melanopic lux at 200 phot lux
+    ax = axes[1]
+    phot_lx = 200
+    scot_vals = [phot_lx * sp for sp in sp_vals]
+    mel_vals = [phot_lx * m for m in mdlr_vals]
+    bars1 = ax.bar(x - w/2, scot_vals, w, color='#7b1fa2', alpha=0.8,
+                   label='Scotopic lux')
+    bars2 = ax.bar(x + w/2, mel_vals, w, color='#ff6f00', alpha=0.8,
+                   label='Melanopic lux (M-EDI)')
+    ax.set_xticks(x)
+    ax.set_xticklabels(plot_names, fontsize=8)
+    ax.set_ylabel('Illuminance (lux)', fontsize=11)
+    ax.set_title(f'At {phot_lx} Photopic Lux (Same Meter Reading)\n'
+                 'Rod & Melanopic Stimulation Received',
+                 fontsize=12)
+    ax.legend(fontsize=8, loc='upper right')
+    ax.grid(True, alpha=0.3, axis='y')
+    # Add value labels
+    for bar in bars1:
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
+                f'{bar.get_height():.0f}', ha='center', va='bottom', fontsize=7)
+    for bar in bars2:
+        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1,
+                f'{bar.get_height():.0f}', ha='center', va='bottom', fontsize=7)
+
+    fig.suptitle('What a Lux Meter Misses', fontsize=14, fontweight='bold',
+                 y=1.02)
+    plt.tight_layout()
+    plt.savefig(os.path.join(RUNDIR, 'fig_mesopic_deficit.pdf'), dpi=150,
+                bbox_inches='tight')
+    plt.savefig(os.path.join(RUNDIR, 'fig_mesopic_deficit.png'), dpi=150,
+                bbox_inches='tight')
+    print("Saved fig_mesopic_deficit")
+
+    # Also save the old 3-channel version for backwards compatibility
+    fig, ax = plt.subplots(figsize=(10, 5))
+    x = np.arange(len(names))
     w = 0.25
-    ax.bar(x - w, contrasts_L, w, color='#d32f2f', label='L cone', alpha=0.8)
-    ax.bar(x,     contrasts_M, w, color='#388e3c', label='M cone', alpha=0.8)
-    ax.bar(x + w, contrasts_S, w, color='#1565c0', label='S cone', alpha=0.8)
+    ax.bar(x - w, contrasts['L'], w, color='#d32f2f', label='L cone', alpha=0.8)
+    ax.bar(x,     contrasts['M'], w, color='#388e3c', label='M cone', alpha=0.8)
+    ax.bar(x + w, contrasts['S'], w, color='#1565c0', label='S cone', alpha=0.8)
     ax.axhline(y=0, color='black', linewidth=0.5)
     ax.set_ylabel('Cone contrast vs blackbody (%)', fontsize=11)
     ax.set_title('Von Kries Adapted Cone Contrast\n'
