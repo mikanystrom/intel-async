@@ -7,18 +7,21 @@ description_list:
   empty
   cons                      description_list description
 
+mark:
+  empty
+
 description:
-  module                    module_declaration
-  package                   package_declaration
-  interface                 interface_declaration
-  typedef                   typedef_declaration ';'
-  import                    import_declaration ';'
-  dpi_export                dpi_export_declaration ';'
-  dpi_import                dpi_import_declaration ';'
-  timeunit                  timeunit_declaration
-  param                     parameter_declaration ';'
-  localparam                localparam_declaration ';'
-  null                      ';'
+  module                    mark module_declaration
+  package                   mark package_declaration
+  interface                 mark interface_declaration
+  typedef                   mark typedef_declaration ';'
+  import                    mark import_declaration ';'
+  dpi_export                mark dpi_export_declaration ';'
+  dpi_import                mark dpi_import_declaration ';'
+  timeunit                  mark timeunit_declaration
+  param                     mark parameter_declaration ';'
+  localparam                mark localparam_declaration ';'
+  null                      mark ';'
 
 
 package_declaration:
@@ -216,45 +219,51 @@ module_body:
   cons                      module_body module_item
 
 module_item:
-  port_dir_decl             port_direction_declaration ';'
-  net_decl                  net_declaration ';'
-  param_decl                parameter_declaration ';'
-  localparam_decl           localparam_declaration ';'
-  assign_stmt               continuous_assign ';'
-  always_block              always_construct
-  initial_block             T_INITIAL statement
-  final_block               T_FINAL statement
-  generate_block            generate_region
-  genvar_decl               T_GENVAR genvar_id_list ';'
-  ident_item                T_IDENT ident_item_tail
-  typedef_item              typedef_declaration ';'
-  import_item               import_declaration ';'
-  function_item             function_declaration
-  task_item                 task_declaration
-  attribute                 T_ATTRIBUTE module_item
-  dpi_export                dpi_export_declaration ';'
-  dpi_import                dpi_import_declaration ';'
-  extern_item               extern_declaration ';'
-  timeunit_item             timeunit_declaration
-  assert_mod                T_ASSERT T_PROPERTY '(' property_expr ')' opt_assert_else
-  assume_mod                T_ASSUME T_PROPERTY '(' property_expr ')' opt_assert_else
-  cover_mod                 T_COVER T_PROPERTY '(' property_expr ')' ';'
-  assert_imm_mod            T_ASSERT '#' T_NUMBER '(' expression ')' opt_assert_else
-  assert_final_mod          T_ASSERT T_FINAL '(' expression ')' opt_assert_else
-  assume_imm_mod            T_ASSUME '#' T_NUMBER '(' expression ')' opt_assert_else
-  assume_final_mod          T_ASSUME T_FINAL '(' expression ')' opt_assert_else
-  cover_imm_mod             T_COVER '#' T_NUMBER '(' expression ')' ';'
-  cover_final_mod           T_COVER T_FINAL '(' expression ')' ';'
-  labeled_assert            T_IDENT ':' T_ASSERT T_PROPERTY '(' property_expr ')' opt_assert_else
-  labeled_assume            T_IDENT ':' T_ASSUME T_PROPERTY '(' property_expr ')' opt_assert_else
-  labeled_cover             T_IDENT ':' T_COVER T_PROPERTY '(' property_expr ')' ';'
-  labeled_assert_imm        T_IDENT ':' T_ASSERT '#' T_NUMBER '(' expression ')' opt_assert_else
-  labeled_assume_imm        T_IDENT ':' T_ASSUME '#' T_NUMBER '(' expression ')' opt_assert_else
-  labeled_cover_imm         T_IDENT ':' T_COVER '#' T_NUMBER '(' expression ')' ';'
-  if_gen                    T_IF '(' expression ')' generate_block opt_gen_else
-  for_gen                   T_FOR '(' genvar_init ';' expression ';' genvar_step ')' generate_block
-  case_item                 case_keyword '(' expression ')' case_item_list T_ENDCASE
-  begin_block               T_BEGIN opt_block_name generate_body T_END opt_end_name
+  port_dir_decl             mark port_direction_declaration ';'
+  net_decl                  mark net_declaration ';'
+  param_decl                mark parameter_declaration ';'
+  localparam_decl           mark localparam_declaration ';'
+  assign_stmt               mark continuous_assign ';'
+  always_block              mark always_construct
+  initial_block             mark T_INITIAL statement
+  final_block               mark T_FINAL statement
+  generate_block            mark generate_region
+  genvar_decl               mark T_GENVAR genvar_id_list ';'
+  ident_item                mark T_IDENT ident_item_tail
+  typedef_item              mark typedef_declaration ';'
+  import_item               mark import_declaration ';'
+  function_item             mark function_declaration
+  task_item                 mark task_declaration
+  attribute                 mark T_ATTRIBUTE module_item
+  dpi_export                mark dpi_export_declaration ';'
+  dpi_import                mark dpi_import_declaration ';'
+  extern_item               mark extern_declaration ';'
+  timeunit_item             mark timeunit_declaration
+  assert_mod                mark T_ASSERT T_PROPERTY '(' property_expr ')' opt_assert_else
+  assume_mod                mark T_ASSUME T_PROPERTY '(' property_expr ')' opt_assert_else
+  cover_mod                 mark T_COVER T_PROPERTY '(' property_expr ')' ';'
+  assert_imm_mod            mark T_ASSERT '#' T_NUMBER '(' expression ')' opt_assert_else
+  assert_final_mod          mark T_ASSERT T_FINAL '(' expression ')' opt_assert_else
+  assume_imm_mod            mark T_ASSUME '#' T_NUMBER '(' expression ')' opt_assert_else
+  assume_final_mod          mark T_ASSUME T_FINAL '(' expression ')' opt_assert_else
+  cover_imm_mod             mark T_COVER '#' T_NUMBER '(' expression ')' ';'
+  cover_final_mod           mark T_COVER T_FINAL '(' expression ')' ';'
+  labeled_assert            mark T_IDENT ':' T_ASSERT T_PROPERTY '(' property_expr ')' opt_assert_else
+  labeled_assume            mark T_IDENT ':' T_ASSUME T_PROPERTY '(' property_expr ')' opt_assert_else
+  labeled_cover             mark T_IDENT ':' T_COVER T_PROPERTY '(' property_expr ')' ';'
+  labeled_assert_imm        mark T_IDENT ':' T_ASSERT '#' T_NUMBER '(' expression ')' opt_assert_else
+  labeled_assume_imm        mark T_IDENT ':' T_ASSUME '#' T_NUMBER '(' expression ')' opt_assert_else
+  labeled_cover_imm         mark T_IDENT ':' T_COVER '#' T_NUMBER '(' expression ')' ';'
+  if_gen                    mark T_IF '(' expression ')' generate_block opt_gen_else
+  for_gen                   mark T_FOR '(' genvar_init ';' expression ';' genvar_step ')' generate_block
+  case_item                 mark case_keyword '(' expression ')' case_item_list T_ENDCASE
+  begin_block               mark T_BEGIN opt_block_name generate_body T_END opt_end_name
+  annotation                T_ANNOTATION module_item
+  translate_off             mark T_TRANSLATE_OFF translate_off_body T_TRANSLATE_ON
+
+translate_off_body:
+  empty
+  cons                      translate_off_body module_item
 
 ident_item_tail:
   inst_hash                 '#' '(' arg_list ')' inst_list ';'

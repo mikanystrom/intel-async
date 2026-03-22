@@ -1,7 +1,7 @@
 %source sv.t sv.y
 %import svLexExt svParse
 %module {
-IMPORT Text;
+IMPORT Text, Fmt;
 
 PROCEDURE Seq(a, b : TEXT) : TEXT =
   BEGIN
@@ -20,11 +20,19 @@ PROCEDURE Wrap2(tag, a, b : TEXT) : TEXT =
   BEGIN
     RETURN "(" & tag & " " & a & " " & b & ")"
   END Wrap2;
+
+PROCEDURE WrapLine(self: T; line, body : TEXT) : TEXT =
+  BEGIN
+    IF self.noLines THEN RETURN body END;
+    RETURN "(@ " & line & " " & body & ")"
+  END WrapLine;
 }
 %interface {
 }
 %public {
   scmResult : TEXT;
+  lexer     : svLexExt.T;
+  noLines   : BOOLEAN := FALSE;
 }
 
 source_text: { val : TEXT; cnt : INTEGER; }
@@ -34,17 +42,20 @@ description_list: { val : TEXT; cnt : INTEGER; }
   empty  { $$.val := "" }
   cons   { $$.val := Seq($1, $2) }
 
+mark: { val : TEXT; cnt : INTEGER; }
+  empty  { $$.val := Fmt.Int(self.lexer.curLine) }
+
 description: { val : TEXT; cnt : INTEGER; }
-  module     { $$.val := $1 }
-  package    { $$.val := $1 }
-  interface  { $$.val := $1 }
-  typedef    { $$.val := $1 }
-  import     { $$.val := $1 }
-  dpi_export { $$.val := $1 }
-  dpi_import { $$.val := $1 }
-  timeunit   { $$.val := $1 }
-  param      { $$.val := $1 }
-  localparam { $$.val := $1 }
+  module     { $$.val := WrapLine(self, $1, $2) }
+  package    { $$.val := WrapLine(self, $1, $2) }
+  interface  { $$.val := WrapLine(self, $1, $2) }
+  typedef    { $$.val := WrapLine(self, $1, $2) }
+  import     { $$.val := WrapLine(self, $1, $2) }
+  dpi_export { $$.val := WrapLine(self, $1, $2) }
+  dpi_import { $$.val := WrapLine(self, $1, $2) }
+  timeunit   { $$.val := WrapLine(self, $1, $2) }
+  param      { $$.val := WrapLine(self, $1, $2) }
+  localparam { $$.val := WrapLine(self, $1, $2) }
   null       { $$.val := "" }
 
 package_declaration: { val : TEXT; cnt : INTEGER; }
@@ -240,46 +251,52 @@ module_body: { val : TEXT; cnt : INTEGER; }
   cons   { $$.val := Seq($1, $2) }
 
 module_item: { val : TEXT; cnt : INTEGER; }
-  port_dir_decl   { $$.val := $1 }
-  net_decl        { $$.val := $1 }
-  param_decl      { $$.val := $1 }
-  localparam_decl { $$.val := $1 }
-  assign_stmt     { $$.val := $1 }
-  always_block    { $$.val := $1 }
-  initial_block   { $$.val := Wrap("initial", $1) }
-  final_block     { $$.val := Wrap("final", $1) }
-  generate_block  { $$.val := $1 }
-  genvar_decl     { $$.val := "(genvar " & $1 & ")" }
-  ident_item      { $$.val := "(ident-item " & $1 & " " & $2 & ")" }
-  typedef_item    { $$.val := $1 }
-  import_item     { $$.val := $1 }
-  function_item   { $$.val := $1 }
-  task_item       { $$.val := $1 }
-  attribute       { $$.val := $2 }
-  dpi_export      { $$.val := $1 }
-  dpi_import      { $$.val := $1 }
-  extern_item     { $$.val := $1 }
-  timeunit_item   { $$.val := $1 }
-  assert_mod      { $$.val := "(assert-property " & $1 & " " & $2 & ")" }
-  assume_mod      { $$.val := "(assume-property " & $1 & " " & $2 & ")" }
-  cover_mod       { $$.val := "(cover-property " & $1 & ")" }
-  assert_imm_mod  { $$.val := "(assert-deferred " & $1 & " " & $2 & " " & $3 & ")" }
-  assert_final_mod { $$.val := "(assert-final " & $1 & " " & $2 & ")" }
-  assume_imm_mod  { $$.val := "(assume-deferred " & $1 & " " & $2 & " " & $3 & ")" }
-  assume_final_mod { $$.val := "(assume-final " & $1 & " " & $2 & ")" }
-  cover_imm_mod   { $$.val := "(cover-deferred " & $1 & " " & $2 & ")" }
-  cover_final_mod { $$.val := "(cover-final " & $1 & ")" }
-  labeled_assert  { $$.val := "(labeled " & $1 & " (assert-property " & $2 & " " & $3 & "))" }
-  labeled_assume  { $$.val := "(labeled " & $1 & " (assume-property " & $2 & " " & $3 & "))" }
-  labeled_cover   { $$.val := "(labeled " & $1 & " (cover-property " & $2 & "))" }
-  labeled_assert_imm { $$.val := "(labeled " & $1 & " (assert-deferred " & $2 & " " & $3 & " " & $4 & "))" }
-  labeled_assume_imm { $$.val := "(labeled " & $1 & " (assume-deferred " & $2 & " " & $3 & " " & $4 & "))" }
-  labeled_cover_imm  { $$.val := "(labeled " & $1 & " (cover-deferred " & $2 & " " & $3 & "))" }
+  port_dir_decl   { $$.val := WrapLine(self, $1, $2) }
+  net_decl        { $$.val := WrapLine(self, $1, $2) }
+  param_decl      { $$.val := WrapLine(self, $1, $2) }
+  localparam_decl { $$.val := WrapLine(self, $1, $2) }
+  assign_stmt     { $$.val := WrapLine(self, $1, $2) }
+  always_block    { $$.val := WrapLine(self, $1, $2) }
+  initial_block   { $$.val := WrapLine(self, $1, Wrap("initial", $2)) }
+  final_block     { $$.val := WrapLine(self, $1, Wrap("final", $2)) }
+  generate_block  { $$.val := WrapLine(self, $1, $2) }
+  genvar_decl     { $$.val := WrapLine(self, $1, "(genvar " & $2 & ")") }
+  ident_item      { $$.val := WrapLine(self, $1, "(ident-item " & $2 & " " & $3 & ")") }
+  typedef_item    { $$.val := WrapLine(self, $1, $2) }
+  import_item     { $$.val := WrapLine(self, $1, $2) }
+  function_item   { $$.val := WrapLine(self, $1, $2) }
+  task_item       { $$.val := WrapLine(self, $1, $2) }
+  attribute       { $$.val := WrapLine(self, $1, $3) }
+  dpi_export      { $$.val := WrapLine(self, $1, $2) }
+  dpi_import      { $$.val := WrapLine(self, $1, $2) }
+  extern_item     { $$.val := WrapLine(self, $1, $2) }
+  timeunit_item   { $$.val := WrapLine(self, $1, $2) }
+  assert_mod      { $$.val := WrapLine(self, $1, "(assert-property " & $2 & " " & $3 & ")") }
+  assume_mod      { $$.val := WrapLine(self, $1, "(assume-property " & $2 & " " & $3 & ")") }
+  cover_mod       { $$.val := WrapLine(self, $1, "(cover-property " & $2 & ")") }
+  assert_imm_mod  { $$.val := WrapLine(self, $1, "(assert-deferred " & $2 & " " & $3 & " " & $4 & ")") }
+  assert_final_mod { $$.val := WrapLine(self, $1, "(assert-final " & $2 & " " & $3 & ")") }
+  assume_imm_mod  { $$.val := WrapLine(self, $1, "(assume-deferred " & $2 & " " & $3 & " " & $4 & ")") }
+  assume_final_mod { $$.val := WrapLine(self, $1, "(assume-final " & $2 & " " & $3 & ")") }
+  cover_imm_mod   { $$.val := WrapLine(self, $1, "(cover-deferred " & $2 & " " & $3 & ")") }
+  cover_final_mod { $$.val := WrapLine(self, $1, "(cover-final " & $2 & ")") }
+  labeled_assert  { $$.val := WrapLine(self, $1, "(labeled " & $2 & " (assert-property " & $3 & " " & $4 & "))") }
+  labeled_assume  { $$.val := WrapLine(self, $1, "(labeled " & $2 & " (assume-property " & $3 & " " & $4 & "))") }
+  labeled_cover   { $$.val := WrapLine(self, $1, "(labeled " & $2 & " (cover-property " & $3 & "))") }
+  labeled_assert_imm { $$.val := WrapLine(self, $1, "(labeled " & $2 & " (assert-deferred " & $3 & " " & $4 & " " & $5 & "))") }
+  labeled_assume_imm { $$.val := WrapLine(self, $1, "(labeled " & $2 & " (assume-deferred " & $3 & " " & $4 & " " & $5 & "))") }
+  labeled_cover_imm  { $$.val := WrapLine(self, $1, "(labeled " & $2 & " (cover-deferred " & $3 & " " & $4 & "))") }
 
-  if_gen          { $$.val := "(if-generate " & $1 & " " & $2 & " " & $3 & ")" }
-  for_gen         { $$.val := "(for-generate " & $1 & " " & $2 & " " & $3 & " " & $4 & ")" }
-  case_item       { $$.val := "(" & $1 & " " & $2 & " " & $3 & ")" }
-  begin_block     { $$.val := "(begin " & $1 & " " & $2 & " " & $3 & ")" }
+  if_gen          { $$.val := WrapLine(self, $1, "(if-generate " & $2 & " " & $3 & " " & $4 & ")") }
+  for_gen         { $$.val := WrapLine(self, $1, "(for-generate " & $2 & " " & $3 & " " & $4 & " " & $5 & ")") }
+  case_item       { $$.val := WrapLine(self, $1, "(" & $2 & " " & $3 & " " & $4 & ")") }
+  begin_block     { $$.val := WrapLine(self, $1, "(begin " & $2 & " " & $3 & " " & $4 & ")") }
+  annotation      { $$.val := "(annotation " & $1 & " " & $2 & ")" }
+  translate_off   { $$.val := WrapLine(self, $1, "(translate_off " & $3 & ")") }
+
+translate_off_body: { val : TEXT; cnt : INTEGER; }
+  empty  { $$.val := "" }
+  cons   { $$.val := Seq($1, $2) }
 
 ident_item_tail: { val : TEXT; cnt : INTEGER; }
   inst_hash        { $$.val := "(instance (params " & $1 & ") " & $2 & ")" }

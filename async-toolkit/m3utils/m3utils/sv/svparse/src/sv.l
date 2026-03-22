@@ -146,6 +146,13 @@ T_IDENT         {IDENT}|"\\"[^ \t\r\n]+
 
 T_ATTRIBUTE     "(*"([^*]|"*"[^)])*"*)"
 
+T_LINE_COMMENT  "//"[^\n]*"\n"
+T_BLOCK_COMMENT "/*"([^*]|"*"+[^*/])*"*"+"/"
+
+T_ANNOTATION    "__ANNOTATION__"
+T_TRANSLATE_OFF "__TRANSLATE_OFF__"
+T_TRANSLATE_ON  "__TRANSLATE_ON__"
+
 char            {%char}
-skip            ([ \t\r\n]|("/*"([^*]|"*"+[^*/])*"*"+"/")|("//"[^\n]*"\n"))*
+skip            [ \t\r\n]*
 ERROR           [^]

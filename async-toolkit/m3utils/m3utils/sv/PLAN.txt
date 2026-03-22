@@ -75,368 +75,466 @@ Mika Nystroem, March 2026
       program ("svfe")
 
 
-3.  LANGUAGE SCOPE
-
-    The SystemVerilog language is enormous (IEEE 1800-2017 is over
-    1300 pages).  We take it in three phases, each producing a
-    working tool.
-
-    PHASE 1 -- Core RTL
-    -------------------
-
-    The minimum viable parser.  Enough to parse typical
-    synthesizable Verilog/SystemVerilog modules.
-
-    Constructs:
-
-      module / endmodule          ANSI and non-ANSI port styles
-      input, output, inout        Port directions
-      logic, wire, reg            Net and variable types
-      [N:M]                       Packed bit ranges
-      assign                      Continuous assignments
-      always @(...)               Classic sensitivity lists
-      always_comb                 Combinational blocks
-      always_ff                   Sequential (flip-flop) blocks
-      always_latch                Latch blocks
-      if / else                   Conditional statements
-      case, casez, casex          Case statements
-      unique case, priority case  SV case qualifiers
-      begin / end                 Block grouping
-      = (blocking)                Blocking assignment
-      <= (non-blocking)           Non-blocking assignment
-      parameter, localparam       Compile-time constants
-      Module instantiation        Named and positional ports, .*
-      Operators                   All Verilog operators:
-                                    Arithmetic: + - * / % **
-                                    Logical:    && || !
-                                    Bitwise:    & | ^ ~ ~& ~| ~^
-                                    Shift:      << >> <<< >>>
-                                    Relational: == != < > <= >=
-                                    Identity:   === !==
-                                    Ternary:    ? :
-                                    Concat:     { }
-                                    Replication: {N{expr}}
-                                    Part select: [+:] [-:]
-      Number literals             Verilog format: 8'hFF, 32'd0,
-                                    4'b1010, 'h3F, unsized, x/z
-      Strings                     "hello"
-      Comments                    // and /* */
-      Preprocessor                `define, `include, `ifdef,
-                                  `ifndef, `else, `endif,
-                                  `timescale, `default_nettype
-
-    With this phase we can parse the sim1588 Verilog files and
-    most single-module synthesizable designs.
-
-    PHASE 2 -- Extended Synthesis
-    -----------------------------
-
-    Adds the SystemVerilog type system and hierarchy features
-    needed for real multi-file ASIC designs.
-
-    Constructs:
-
-      package / endpackage        Package declarations
-      import pkg::item            Package imports
-      typedef                     Type aliases
-      enum                        Enumerated types
-      struct packed               Packed structures
-      union packed                Packed unions (if needed)
-      interface / endinterface    Interface declarations
-      modport                     Interface modports
-      generate / endgenerate      Generate blocks
-      genvar                      Generate variables
-      for generate                Parameterized replication
-      if generate                 Conditional instantiation
-      function / endfunction      Functions (automatic)
-      task / endtask              Tasks (combinational only)
-      for, while, repeat          Bounded loops
-      $clog2, $bits, $size        Synthesizable system functions
-      $signed, $unsigned          Signedness casts
-      Type casting                type'(expr)
-      Multi-dimensional arrays    logic [7:0] mem [0:255]
-      Signed arithmetic           signed, unsigned qualifiers
-      .* port connections         Implicit port connections
-
-    After this phase we can parse most production RTL codebases.
-
-    PHASE 3 -- Linting and Elaboration
-    -----------------------------------
-
-    Adds Scheme-based analysis passes.  The parser remains the
-    same; the new work is in Scheme scripts that process the
-    S-expression AST.
-
-    Capabilities:
-
-      Parameter resolution        Evaluate parameters, propagate
-      Constant folding            Compute constant expressions
-      Module hierarchy            Build instantiation tree
-      Width inference             Infer and check bit widths
-      Lint checks:
-        - Undriven signals        Outputs/wires never assigned
-        - Multi-driven nets       Multiple drivers on same signal
-        - Width mismatches        Operand width disagreements
-        - Latch inference         always_comb with incomplete assigns
-        - Unused declarations     Declared but never read
-        - Missing resets          always_ff without reset
-        - Blocking in always_ff   Blocking assigns in sequential blocks
-        - Non-blocking in comb    Non-blocking in combinational blocks
-      Gate decomposition          Map RTL to gate-level netlist
-        - AND, OR, NOT, XOR, MUX, DFF, LATCH primitives
-        - Technology-independent netlist output
-        - Suitable for silicon compilation algorithms
-
-
-4.  EXCLUDED CONSTRUCTS (verification-only)
-
-    These are not in the synthesis subset and will not be parsed:
-
-      class / endclass            OOP (UVM testbenches)
-      constraint                  Constrained random
-      covergroup / coverpoint     Functional coverage
-      program / endprogram        Testbench programs
-      initial                     Simulation-only initialization
-      fork / join / join_any      Parallel threads
-      real, shortreal, time       Non-synthesizable types
-      string (as variable)        Dynamic strings
-      force / release             Simulation overrides
-      #delay                      Time delays
-      @ event control (complex)   Dynamic event expressions
-      DPI (import "DPI-C")        Foreign function interface
-      bind                        Verification binding
-      sequence / property         SVA sequences and properties
-                                    (except possibly for linting)
-      chandle                     C handle type
-      mailbox, semaphore          Verification synchronization
-
-
-5.  KEY DESIGN DECISIONS
-
-    5.1  S-expression output first
-
-    Like cspfe --scm, the parser's primary output is S-expressions.
-    This is consumed by Scheme for all downstream processing.
-    Example output for a simple module:
-
-      (module "counter"
-        (ports
-          (port input logic (range 0 0) "clk")
-          (port input logic (range 0 0) "rst_n")
-          (port output logic (range 7 0) "count"))
-        (items
-          (always_ff (posedge "clk" negedge "rst_n")
-            (if (not (id "rst_n"))
-              (non-blocking (id "count") (literal 8 0))
-              (non-blocking (id "count")
-                (+ (id "count") (literal 32 1)))))))
-
-    5.2  Preprocessor as a separate pass
-
-    Unlike CSP, SystemVerilog needs a C-like preprocessor for
-    `define, `include, `ifdef.  This will be implemented as a
-    reader wrapper that sits between file I/O and the lexer,
-    expanding macros and processing conditionals before tokens
-    reach the parser.
-
-    5.3  LR(1) conflict resolution
-
-    The parserlib IMPLEMENTATION_GUIDE (in the cm3 tree at
-    caltech-parser/parserlib/IMPLEMENTATION_GUIDE.md) documents
-    several patterns critical for this project:
-
-    - Explicit precedence climbing: use separate nonterminals
-      for each operator precedence level (cond_or_expr,
-      and_expr, shift_expr, add_expr, mul_expr, unary_expr, ...)
-      rather than %left/%right directives.  This avoids
-      shift/reduce conflict surprises when adding new constructs.
-      The CSP grammar uses 10 expression levels this way.
+APPENDIX A: DESIGN-ANNOTATION SUPPORT
+======================================
+
+Based on: /Users/mika/sky2-git/docs/svfe_wishlist.md
+
+Three features: (1) source line numbers in AST, (2) annotation
+comment tokens, (3) translate_off/on handling.
+
+
+Architecture Context
+--------------------
+
+The svfe lexer is generated by klex from sv.l, producing a DFA.  The
+parser is generated by kyacc from sv.y, producing an LALR automaton.
+Extensions (.e files processed by kext) inject Modula-3 semantic
+actions.
 
-    - Statement suffix disambiguation: parse the lvalue first,
-      then branch on the suffix (assignment operator, port
-      connection, etc.).  This avoids conflicts from multiple
-      statement forms starting with lvalue:
+Key constraint: the skip rule in sv.l is a single DFA pattern
+matching whitespace + block comments + line comments.  It consumes
+ALL comments including annotations.  We cannot simply add a
+higher-priority T_ANNOTATION rule because skip's Kleene star
+produces a longer match.
+
+Key constraint: $N in semantic actions gives the .val field (TEXT)
+of the Nth value-carrying child.  ConstTokens (keywords) are skipped
+in $N numbering.  There is no built-in way to access a child's line
+number through $N.
+
+
+A.1  LEXER LINE TRACKING
+-------------------------
 
-        statement:
-          lval    lvalue stmt_suffix
-        stmt_suffix:
-          blocking      '=' expression
-          nonblocking   T_LEQ expression
-          ...
+Goal: every token returned by the lexer carries an accurate source
+line number, accessible via self.curLine on the lexer object.
+
+Approach: override the get() method in svLexExt.e.  After calling
+the parent svLex.T.get(self), count newlines in the skip region
+(between the end of the previous token and the start of the current
+token) by seeking through the Rd.
 
-    - $n numbering skips constant tokens: in semantic actions
-      $1, $2 refer only to nonconstant symbols (%token and
-      nonterminals), not to %const or %char tokens.
+Files changed:
+  svparse/src/svLexExt.e
 
-    The IEEE SystemVerilog grammar has well-known LR conflicts:
+Changes:
 
-      - The declaration/expression ambiguity: is "foo bar" a
-        type declaration or a function call?  Resolved by treating
-        user-defined type names as identifiers in the grammar and
-        disambiguating in semantic actions (the extension file).
+  1. Add %public section:
+
+       %public {
+         curLine : INTEGER := 1;
+         prevEnd : INTEGER := 0;
+       }
+
+  2. Add %overrides section:
+
+       %overrides {
+         get := MyGet;
+       }
+
+  3. Add MyGet procedure in %module:
+
+       PROCEDURE MyGet(self: T): Token RAISES {Rd.EndOfFile} =
+         VAR
+           tok    : Token;
+           rd     := self.getRd();
+           curPos : INTEGER;
+           tokLen : INTEGER;
+           skipEnd: INTEGER;
+         BEGIN
+           tok := svLex.T.get(self);
+           curPos := Rd.Index(rd);
+           tokLen := Text.Length(self.getText());
+           skipEnd := curPos - tokLen;
+           (* Count newlines in the skip region *)
+           IF skipEnd > self.prevEnd THEN
+             Rd.Seek(rd, self.prevEnd);
+             FOR i := self.prevEnd TO skipEnd - 1 DO
+               IF Rd.GetChar(rd) = '\n' THEN
+                 INC(self.curLine)
+               END
+             END
+           END;
+           Rd.Seek(rd, curPos);
+           self.prevEnd := curPos;
+           RETURN tok
+         END MyGet;
+
+     This counts newlines in whitespace+comments between tokens,
+     giving curLine = line of the first character of the returned
+     token.
+
+     Works because Main.m3 uses FileRd.Open (not SeekRdClass),
+     so SeekRd.DiscardPrevious is a no-op and backward seeks are
+     safe.
+
+
+A.2  SPLIT COMMENT HANDLING + NEW TOKEN TYPES
+----------------------------------------------
+
+Goal: make annotation comments and translate_off/on directives
+visible to the parser as distinct tokens, while still skipping
+regular comments.
+
+Approach: split the monolithic skip rule so that line comments
+become explicit tokens whose extension handlers decide
+skip-or-emit.
+
+Files changed:
+  svparse/src/sv.l
+  svparse/src/sv.t
+  svparse/src/svLexExt.e
+
+--- sv.l changes ---
+
+Replace:
+  skip  ([ \t\r\n]|("/*"(...)*"*"+"/")|("//"[^\n]*"\n"))*
+
+With:
+  T_LINE_COMMENT   "//"[^\n]*"\n"
+  T_BLOCK_COMMENT  "/*"([^*]|"*"+[^*/])*"*"+"/"
+  skip             [ \t\r\n]*
+
+(skip now matches only whitespace; comments are explicit tokens.)
+
+Add dummy patterns for virtual tokens (never matched by DFA,
+but need codes allocated by klex for the parser to reference):
+  T_ANNOTATION     "__ANNOTATION__"
+  T_TRANSLATE_OFF  "__TRANSLATE_OFF__"
+  T_TRANSLATE_ON   "__TRANSLATE_ON__"
+
+--- sv.t changes ---
+
+Add to %token line:
+  T_LINE_COMMENT T_BLOCK_COMMENT T_ANNOTATION
+  T_TRANSLATE_OFF T_TRANSLATE_ON
+
+--- svLexExt.e changes ---
+
+Add token type declarations and handlers:
+
+  T_LINE_COMMENT: {}
+  T_LINE_COMMENT {
+    VAR
+      text := $;
+      len  := Text.Length(text);
+      i    : INTEGER;
+      kw   : TEXT;
+    BEGIN
+      i := 2;
+      WHILE i < len AND (Text.GetChar(text, i) = ' '
+                         OR Text.GetChar(text, i) = '\t') DO
+        INC(i)
+      END;
+      IF i < len AND Text.GetChar(text, i) = '@' THEN
+        RETURN NEW(T_ANNOTATION, val := text)
+      END;
+      kw := "synopsys";
+      IF i + Text.Length(kw) <= len
+         AND Text.Equal(
+               Text.Sub(text, i, Text.Length(kw)), kw) THEN
+        INC(i, Text.Length(kw));
+        WHILE i < len AND (Text.GetChar(text, i) = ' '
+                           OR Text.GetChar(text, i) = '\t') DO
+          INC(i)
+        END;
+        IF StartsWith(Text.Sub(text, i), "translate_off") THEN
+          RETURN NEW(T_TRANSLATE_OFF, val := text)
+        ELSIF StartsWith(Text.Sub(text, i), "translate_on") THEN
+          RETURN NEW(T_TRANSLATE_ON, val := text)
+        END
+      END;
+      RETURN NIL   (* regular comment -- skip *)
+    END
+  }
+
+  T_BLOCK_COMMENT: {}
+  T_BLOCK_COMMENT { RETURN NIL }
+
+  T_ANNOTATION: { val : TEXT }
+  T_TRANSLATE_OFF: { val : TEXT }
+  T_TRANSLATE_ON: { val : TEXT }
 
-      - The "dangling else" ambiguity: standard %right precedence.
+When handlers return NIL, the generated Get() loop continues
+scanning (same as skip).  When they return a real token, it
+reaches the parser.
 
-      - Port declaration complexity: ANSI vs non-ANSI styles.
+Line counting note: MyGet wraps the entire svLex.T.get(self)
+call, which loops internally over skip and NIL-returning tokens.
+All newlines in skipped comments are counted in the skip region
+between prevEnd and the start of the finally-returned token.
 
-    Verilator's working YACC grammar (verilog.y, ~500 rules) is
-    our practical reference for how to resolve these in a real
-    LR(1) parser.
 
-    5.4  Verilator number format
+A.3  LINE NUMBERS IN THE AST
+------------------------------
 
-    Verilog numbers like 8'hFF are unusual.  The lexer must
-    recognize the full format:
+Goal: key AST nodes (module_item, description level) carry source
+line numbers as (@ LINE ...) wrappers.
 
-      [size] ' [s|S] base digits
+Approach: add a `mark` epsilon production that captures curLine at
+the point where the parser commits to a module_item or description.
 
-    where base is b/B, o/O, d/D, h/H.  The size part is optional.
-    X and Z digits must be recognized.  This is handled in the
-    lexer (sv.l) with appropriate regex patterns.
+In LALR parsing, an epsilon production at the start of every
+alternative reduces BEFORE the first real token is shifted.  At
+that point, the lookahead token has already been fetched, so
+curLine reflects that token's line -- exactly the first token of
+the construct.
 
-    5.5  Standalone parser
+Files changed:
+  svparse/src/sv.y
+  svparse/src/svParseExt.e
+  svparse/src/Main.m3
 
-    The parser uses only the CM3 parserlib infrastructure.  It does
-    not depend on Verilator, Yosys, slang, or any other tool at
-    runtime.  Those tools are references for grammar design and
-    test validation.
+--- svParseExt.e changes ---
 
+  1. Add lexer reference in %public:
 
-6.  REFERENCE MATERIALS
+       %public {
+         scmResult : TEXT;
+         lexer     : svLexExt.T;
+       }
 
-    Standards:
+  2. Add imports in %module:
 
-      IEEE 1800-2017              SystemVerilog standard (Annex A
-                                    contains the formal BNF)
-      IEEE 1364.1-2002            Verilog RTL synthesis standard
-                                    (withdrawn but defines baseline)
+       IMPORT Fmt, svLexExt;
 
-    Open-source grammars:
+  3. Add mark production action:
 
-      Verilator verilog.y/l       Working YACC/flex grammar, ~500
-                                    rules, handles real-world SV
-      ANTLR4 Sv.g4                Full IEEE 1800-2017 grammar by
-        (miguel-guerrero)           Miguel Guerrero, derived from
-                                    Annex A
-      Rochus Keller Verilog.ebnf  LL(1)-oriented EBNF, clean
-      Sigasi SV EBNF              IEEE 1800-2012 browsable grammar
+       mark: { val : TEXT; cnt : INTEGER; }
+         empty  { $$.val := Fmt.Int(self.lexer.curLine) }
 
-    Open-source implementations:
+  4. Add WrapLine helper in %module:
 
-      Verilator                   C++ simulator, mature SV parser
-      slang                       Complete SV compiler library (C++)
-      Verible                     SV developer tools (CHIPS Alliance)
-      sv-parser (dalance)         Rust, IEEE 1800-2017 compliant
-      Surelog/UHDM                SV preprocessor/parser/elaborator
-      Yosys                       Open-source synthesis (Verilog)
-      yosys-slang                 SV synthesis via slang frontend
+       PROCEDURE WrapLine(line, body : TEXT) : TEXT =
+         BEGIN
+           RETURN "(@ " & line & " " & body & ")"
+         END WrapLine;
 
-    Papers:
+  5. Update module_item actions.  Every alternative gets mark as
+     first symbol; $N indices shift by +1.
 
-      Sutherland, "Synthesizable SystemVerilog", SNUG 2013
-        Comprehensive guide to synthesis-supported constructs.
+     BEFORE:
+       port_dir_decl   { $$.val := $1 }
+       always_block    { $$.val := $1 }
+       ...
 
-      Cummings, "Synthesizable Finite State Machine Design
-        Techniques Using the New SystemVerilog 3.0 Enhancements",
-        SNUG 2003.
+     AFTER:
+       port_dir_decl   { $$.val := WrapLine($1, $2) }
+       always_block    { $$.val := WrapLine($1, $2) }
+       ...
 
-      Cummings, "Nonblocking Assignments in Verilog Synthesis,
-        Coding Styles that Kill", SNUG 2000.
+  6. Similarly update description actions.
 
-      Cummings, "Full Parallel Case and Full Case with Don't
-        Cares", SNUG 1999.
+--- sv.y changes ---
 
+  1. Add mark production:
 
-7.  TEST STRATEGY
+       mark:
+         empty
 
-    7.1  Existing tests (in-tree)
+  2. Insert mark before every alternative in module_item:
 
-    The sim1588/verilog/ directory contains real SV files:
+     BEFORE:
+       module_item:
+         port_dir_decl    port_direction_declaration ';'
+         net_decl         net_declaration ';'
+         always_block     always_construct
+         ...
 
-      tsu.sv              Timestamping unit (447 lines)
-      vern_calc.sv        Vernier calculator (649 lines)
-      tsu_pkg.vh          Package definitions
-      sim/tsu_tb*.sv      Testbenches
+     AFTER:
+       module_item:
+         port_dir_decl    mark port_direction_declaration ';'
+         net_decl         mark net_declaration ';'
+         always_block     mark always_construct
+         ...
 
-    Also: ecc/*.sv (ECC modules, up to 9000+ lines),
-    spice/ringosc/verilog/*.sv, pg/pgtool/src/*.sv.
+  3. Insert mark before every alternative in description.
 
-    7.2  External tests
+--- Main.m3 changes ---
 
-    We will validate against open-source RTL:
+  Set the lexer reference on the parser before parsing:
 
-      - OpenTitan (lowRISC): Large ASIC-quality SV codebase
-      - RISC-V cores (e.g. PicoRV32, VexRiscv SV ports)
-      - CHIPS Alliance test suites
-      - Verilator test suite (publicly available)
+    parser.lexer := lexer;
 
-    7.3  Validation method
 
-    For each test file:
-      1. Parse with svfe, check exit status
-      2. Compare against Verilator (verilator --lint-only)
-      3. Verify S-expression output round-trips correctly
-      4. Scheme-based structural checks on the AST
+A.4  ANNOTATION GRAMMAR PRODUCTIONS
+-------------------------------------
 
+Goal: annotation comments (// @keyword ...) wrap the next
+module_item in the AST.
 
-8.  ESTIMATED SCOPE
+Files changed:
+  svparse/src/sv.y
+  svparse/src/svParseExt.e
 
-    Phase 1:  sv.t (~50 tokens), sv.l (~120 lines),
-              sv.y (~250 rules), extensions (~400 lines),
-              Main.m3 (~60 lines).
-              Comparable to cspfe in total size.
+--- sv.y ---
 
-    Phase 2:  ~100 additional grammar rules, extended type
-              and extension code.
+Add to module_item alternatives:
 
-    Phase 3:  Primarily Scheme code for analysis passes.
-              M3 changes limited to Scheme stub generation.
+  annotation       T_ANNOTATION module_item
 
+Multiple annotations stack via recursion: a second T_ANNOTATION
+matches inside the recursive module_item.
 
-9.  DEVELOPMENT WORKFLOW
+Note: no mark before T_ANNOTATION -- T_ANNOTATION is a real
+token (not epsilon), and the line is already in the annotation
+text.
 
-    Following the parserlib IMPLEMENTATION_GUIDE's recommended
-    iteration pattern:
+--- svParseExt.e ---
 
-    Step 1.  Write sv.t and sv.l.  Build with just Token("sv")
-             and Lexer("sv","sv") in the m3makefile.  Write a
-             minimal Main.m3 that calls svTok.Test(lexer) to
-             verify tokenization against sample SV files.
+Add to module_item:
 
-    Step 2.  Add the sv.y grammar.  Start with a skeleton
-             handling module/endmodule and port declarations.
-             Build with Parser("sv","sv") added.  kyacc reports
-             LR(1) conflicts at build time -- resolve these
-             before proceeding.
+  annotation  { $$.val := "(annotation " & $1 & " " & $2 & ")" }
 
-    Step 3.  Add minimal svLexExt.e and svParseExt.e with
-             empty semantic actions.  Build and test with
-             parse().discard() on sample files.
+$1 = T_ANNOTATION.val (full comment text including "// @...").
+$2 = module_item.val (the annotated construct, with its own
+     (@ LINE ...) wrapper from mark).
 
-    Step 4.  Add semantic actions incrementally -- first for
-             module declarations, then always blocks, then
-             expressions, then the remaining constructs.
-             Test after each major grammar section.
 
-    Step 5.  Add S-expression output and Scheme integration.
+A.5  TRANSLATE_OFF/ON GRAMMAR PRODUCTIONS
+------------------------------------------
 
-    Testing uses the shell-script pattern from cspfe: generate
-    temporary .sv files, run svfe, check exit codes and output.
-    Cross-validate against Verilator (verilator --lint-only).
+Goal: items between // synopsys translate_off and translate_on
+are grouped in a (translate_off ...) AST node.
 
+Files changed:
+  svparse/src/sv.y
+  svparse/src/svParseExt.e
 
-10. DIRECTORY PLACEMENT
+--- sv.y ---
 
-    The new package lives at:
+Add to module_item alternatives:
 
-      m3utils/sv/svgrammar/      (library: svgrammar)
-      m3utils/sv/svparse/        (program: svfe)
-      m3utils/sv/src/            (program: svpc, later)
-      m3utils/sv/doc/
+  translate_off  mark T_TRANSLATE_OFF translate_off_body T_TRANSLATE_ON
 
-    The m3overrides file will need new entries:
+Add new production:
 
-      override("svgrammar", TOP & "/sv")
-      override("svparse",   TOP & "/sv")
+  translate_off_body:
+    empty
+    cons           translate_off_body module_item
 
-    The Makefile REGSUBS list will need svparse added.
+--- svParseExt.e ---
+
+  translate_off_body: { val : TEXT; cnt : INTEGER; }
+    empty  { $$.val := "" }
+    cons   { $$.val := Seq($1, $2) }
+
+  In module_item:
+    translate_off
+      { $$.val := WrapLine($1, "(translate_off " & $2 & ")") }
+
+  $1 = mark.val (line number).
+  $2 = translate_off_body.val.
+  T_TRANSLATE_OFF and T_TRANSLATE_ON are skipped in $N numbering
+  since they are value-carrying %tokens (not ConstTokens) -- hmm,
+  actually they ARE value-carrying, so they DO count.  Need to
+  verify $N mapping at implementation time.  If they count:
+  $1=mark, $2=T_TRANSLATE_OFF.val, $3=translate_off_body.val.
+
+
+A.6  `line DIRECTIVE SUPPORT
+-----------------------------
+
+Goal: correct line numbers when macro expansion changes line
+counts.
+
+Problem: svpp preserves line counts for directive lines (emits
+blanks) and for multi-line macro INVOCATIONS (pads output to
+match source line count).  But when a single-line macro
+invocation expands to MULTIPLE output lines, svpp emits all of
+them, shifting every subsequent line.  Example:
+
+  Source line 10:  `EXPAND_TO_FIVE_LINES(x)
+  Output lines 10-14: five lines of expanded code
+  Source line 11 now appears at output line 15.
+
+So `line directives are needed NOW, not just for future include
+inlining.
+
+--- svpp changes ---
+
+After expanding macros (line 811 in Main.m3), when outLines >
+srcLines, emit a `line directive to resynchronize:
+
+  (* After the output loop at line 825 *)
+  IF outLines > srcLines THEN
+    (* Line count shifted -- emit resync directive.
+       Next source line number = current source line + srcLines *)
+    EmitLine("`line " & Fmt.Int(nextSourceLine)
+             & " \"" & filename & "\" 0")
+  END;
+
+This requires tracking the current source line number through
+the Preprocess loop (add a lineNo counter incremented for each
+source line consumed).
+
+Also emit `line at `include boundaries (even though includes
+currently don't inline content, this prepares for that).
+
+--- svfe (svLexExt.e) ---
+
+The T_DIRECTIVE token already matches `line directives.  In
+MyGet, after getting a T_DIRECTIVE token, check if it starts
+with `line.  If so, parse line number and filename, update
+self.curLine and self.curFile, and recurse to get the real next
+token.
+
+  Add to %public:
+    curFile : TEXT := "";
+
+  In MyGet, after tok := svLex.T.get(self):
+    TYPECASE tok OF
+    | T_DIRECTIVE(d) =>
+      IF IsLineDirective(d.val) THEN
+        ParseLineDirective(self, d.val);
+        RETURN MyGet(self)
+      END
+    ELSE END;
+
+--- svpp ---
+
+svpp preserves line counts for directives and multi-line macro
+invocations, but NOT when a macro expands to more lines than
+the invocation.  See A.6 for the fix: emit `line directives
+after such expansions to resynchronize.
+
+
+A.7  BACKWARD COMPATIBILITY
+-----------------------------
+
+Optional: add --no-lines flag to Main.m3 to suppress (@ N ...)
+wrappers.
+
+  In svParseExt.e %public: noLines : BOOLEAN := FALSE;
+  In WrapLine: IF self.noLines THEN RETURN body END;
+  In Main.m3: parse --no-lines and set parser.noLines.
+
+
+BUILD AND TEST
+--------------
+
+Build:
+  cd svparse/src && cm3 -override
+
+Test against rtl/sky2c_sram_arb.sv (271 lines, annotated):
+  1. always_comb at ~line 138 has (annotation "// @implements
+     GRANT_ONEHOT.SCAN, FAIRNESS.BASE" ...)
+  2. assert properties at lines 246-267 inside (translate_off ...)
+  3. every module_item has (@ N ...) with correct original line
+
+
+SUMMARY OF FILE CHANGES
+------------------------
+
+  sv.l           split skip; add comment tokens + dummy patterns
+  sv.t           add 5 new %token entries
+  sv.y           add mark, annotation, translate_off productions;
+                 insert mark in module_item and description
+  svLexExt.e     add curLine tracking (override get), comment
+                 handlers, `line recognition
+  svParseExt.e   add lexer ref, mark/annotation/translate_off
+                 actions, WrapLine helper, Fmt import
+  Main.m3        set parser.lexer, optional --no-lines flag
+
+Estimated: ~300 lines of changes across 6 files.

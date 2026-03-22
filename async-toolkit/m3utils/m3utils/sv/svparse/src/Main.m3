@@ -32,6 +32,8 @@ BEGIN
         doLex := TRUE;
       ELSIF Text.Equal(arg, "--scm") THEN
         doScm := TRUE;
+      ELSIF Text.Equal(arg, "--no-lines") THEN
+        parser.noLines := TRUE;
       ELSIF Text.Equal(arg, "--name") THEN
         INC(i);
         IF i < Params.Count THEN modName := Params.Get(i) END;
@@ -42,13 +44,15 @@ BEGIN
     INC(i);
   END;
   IF fname = NIL THEN
-    Wr.PutText(stderr, "usage: svfe [--lex] [--scm] [--name NAME] <file.sv>\n");
+    Wr.PutText(stderr, "usage: svfe [--lex] [--scm] [--no-lines] [--name NAME] <file.sv>\n");
     Wr.Flush(stderr);
   ELSE
     IF modName = NIL THEN modName := BaseName(fname) END;
     TRY
       rd := FileRd.Open(fname);
+      lexer.curFile := fname;
       EVAL lexer.setRd(rd);
+      parser.lexer := lexer;
       IF doLex THEN
         svTok.Test(lexer);
       ELSE

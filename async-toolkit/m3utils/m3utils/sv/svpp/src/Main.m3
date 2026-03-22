@@ -11,7 +11,7 @@ MODULE Main;
 *)
 
 IMPORT Rd, Wr, FileRd, Stdio, Text, TextList, Params,
-       TextRefTbl, OSError, Pathname, FS, BoolSeq;
+       TextRefTbl, OSError, Pathname, FS, BoolSeq, Fmt;
 
 <*FATAL ANY*>
 
@@ -679,10 +679,19 @@ PROCEDURE Preprocess(filename: TEXT; emit := TRUE) =
     incName     : TEXT;
     incPath     : TEXT;
 
+  VAR srcLineNo : INTEGER := 0;
+
   PROCEDURE DoEmitLine(t: TEXT) =
     BEGIN IF emit THEN EmitLine(t) END END DoEmitLine;
   PROCEDURE DoEmitBlank() =
     BEGIN IF emit THEN EmitBlank() END END DoEmitBlank;
+  PROCEDURE DoEmitLineDirective() =
+    BEGIN
+      IF emit THEN
+        EmitLine("`line " & Fmt.Int(srcLineNo + 1)
+                 & " \"" & filename & "\" 0")
+      END
+    END DoEmitLineDirective;
 
   BEGIN
     (* Guard against circular includes *)
@@ -699,6 +708,7 @@ PROCEDURE Preprocess(filename: TEXT; emit := TRUE) =
     WHILE cur # NIL DO
       line := cur.line;
       cur := cur.next;
+      INC(srcLineNo);
       trimmed := TrimLeft(line);
 
       (* Check for directive *)
@@ -722,6 +732,7 @@ PROCEDURE Preprocess(filename: TEXT; emit := TRUE) =
                           & " " & cur.line;
             END;
             cur := cur.next;
+            INC(srcLineNo);
             DoEmitBlank();
           END;
           IF IsActive() THEN ParseDefine(Trim(fullRest)) END;
@@ -806,6 +817,7 @@ PROCEDURE Preprocess(filename: TEXT; emit := TRUE) =
             WHILE HasUnclosedMacroArgs(joined) AND cur # NIL DO
               joined := joined & "\n" & cur.line;
               cur := cur.next;
+              INC(srcLineNo);
               INC(srcLines);
             END;
             expanded := ExpandMacros(joined);
@@ -823,10 +835,15 @@ PROCEDURE Preprocess(filename: TEXT; emit := TRUE) =
                   p := nl + 1;
                 END
               END;
-              (* Pad with blanks to match source line count *)
-              WHILE outLines < srcLines DO
-                DoEmitBlank();
-                INC(outLines);
+              IF outLines < srcLines THEN
+                (* Pad with blanks to match source line count *)
+                WHILE outLines < srcLines DO
+                  DoEmitBlank();
+                  INC(outLines);
+                END
+              ELSIF outLines > srcLines THEN
+                (* Expansion grew: emit `line to resync *)
+                DoEmitLineDirective()
               END
             END
           END
