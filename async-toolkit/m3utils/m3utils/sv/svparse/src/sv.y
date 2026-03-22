@@ -22,6 +22,7 @@ description:
   param                     mark parameter_declaration ';'
   localparam                mark localparam_declaration ';'
   null                      mark ';'
+  annotation                T_ANNOTATION description
 
 
 package_declaration:

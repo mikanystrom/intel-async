@@ -57,6 +57,7 @@ description: { val : TEXT; cnt : INTEGER; }
   param      { $$.val := WrapLine(self, $1, $2) }
   localparam { $$.val := WrapLine(self, $1, $2) }
   null       { $$.val := "" }
+  annotation { $$.val := "(annotation " & $1 & " " & $2 & ")" }
 
 package_declaration: { val : TEXT; cnt : INTEGER; }
   x  { $$.val := "(package " & $1 & " " & $2 & " " & $3 & ")" }
