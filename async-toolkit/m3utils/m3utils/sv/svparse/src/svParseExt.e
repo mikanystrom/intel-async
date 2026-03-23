@@ -26,6 +26,42 @@ PROCEDURE WrapLine(self: T; line, body : TEXT) : TEXT =
     IF self.noLines THEN RETURN body END;
     RETURN "(@ " & line & " " & body & ")"
   END WrapLine;
+
+PROCEDURE QuoteAnnotation(val: TEXT) : TEXT =
+  VAR
+    len := Text.Length(val);
+    i   : INTEGER := 0;
+    result : TEXT := "";
+    ch  : CHAR;
+  BEGIN
+    (* Skip leading "//" *)
+    IF len >= 2 AND Text.GetChar(val, 0) = '/'
+                 AND Text.GetChar(val, 1) = '/' THEN
+      i := 2
+    END;
+    (* Skip leading whitespace *)
+    WHILE i < len AND (Text.GetChar(val, i) = ' '
+                       OR Text.GetChar(val, i) = '\t') DO
+      INC(i)
+    END;
+    (* Strip trailing whitespace/newline *)
+    WHILE len > i AND (Text.GetChar(val, len-1) = '\n'
+                       OR Text.GetChar(val, len-1) = '\r'
+                       OR Text.GetChar(val, len-1) = ' '
+                       OR Text.GetChar(val, len-1) = '\t') DO
+      DEC(len)
+    END;
+    (* Build quoted string, escaping backslash and double-quote *)
+    FOR j := i TO len - 1 DO
+      ch := Text.GetChar(val, j);
+      IF ch = '\"' OR ch = '\\' THEN
+        result := result & "\\" & Text.FromChar(ch)
+      ELSE
+        result := result & Text.FromChar(ch)
+      END
+    END;
+    RETURN "\"" & result & "\""
+  END QuoteAnnotation;
 }
 %interface {
 }
@@ -57,7 +93,7 @@ description: { val : TEXT; cnt : INTEGER; }
   param      { $$.val := WrapLine(self, $1, $2) }
   localparam { $$.val := WrapLine(self, $1, $2) }
   null       { $$.val := "" }
-  annotation { $$.val := "(annotation " & $1 & " " & $2 & ")" }
+  annotation { $$.val := "(annotation " & QuoteAnnotation($1) & " " & $2 & ")" }
 
 package_declaration: { val : TEXT; cnt : INTEGER; }
   x  { $$.val := "(package " & $1 & " " & $2 & " " & $3 & ")" }
@@ -292,7 +328,7 @@ module_item: { val : TEXT; cnt : INTEGER; }
   for_gen         { $$.val := WrapLine(self, $1, "(for-generate " & $2 & " " & $3 & " " & $4 & " " & $5 & ")") }
   case_item       { $$.val := WrapLine(self, $1, "(" & $2 & " " & $3 & " " & $4 & ")") }
   begin_block     { $$.val := WrapLine(self, $1, "(begin " & $2 & " " & $3 & " " & $4 & ")") }
-  annotation      { $$.val := "(annotation " & $1 & " " & $2 & ")" }
+  annotation      { $$.val := "(annotation " & QuoteAnnotation($1) & " " & $2 & ")" }
   translate_off   { $$.val := WrapLine(self, $1, "(translate_off " & $3 & ")") }
 
 translate_off_body: { val : TEXT; cnt : INTEGER; }
@@ -521,7 +557,7 @@ statement: { val : TEXT; cnt : INTEGER; }
   force_stmt      { $$.val := "(force " & $1 & " " & $2 & ")" }
   void_cast      { $$.val := Wrap("void-cast", $1) }
   null_stmt      { $$.val := "(null)" }
-  annotation     { $$.val := "(annotation " & $1 & " " & $2 & ")" }
+  annotation     { $$.val := "(annotation " & QuoteAnnotation($1) & " " & $2 & ")" }
 
 opt_block_name: { val : TEXT; cnt : INTEGER; }
   yes    { $$.val := $1 }
