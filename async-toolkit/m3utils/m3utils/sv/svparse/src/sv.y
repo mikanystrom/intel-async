@@ -1,5 +1,15 @@
 %start source_text
 
+%right single_prop_iff_expr
+%right T_SVA_IFF
+%right single_prop_implies_kw_expr
+%right T_SVA_IMPLIES_KW
+%right single_prop_until_expr
+%right T_SVA_UNTIL T_SVA_S_UNTIL T_SVA_UNTIL_WITH T_SVA_S_UNTIL_WITH
+%left single_prop_or_expr
+%left T_OR
+%left T_AND T_SVA_INTERSECT
+
 source_text:
   x                         description_list
 
@@ -492,6 +502,7 @@ statement:
   force_stmt                T_FORCE lvalue '=' expression ';'
   void_cast                 T_VOID '\'' '(' expression ')' ';'
   null_stmt                 ';'
+  annotation                T_ANNOTATION statement
 
 opt_block_name:
   yes                       ':' T_IDENT
@@ -510,9 +521,114 @@ opt_assert_else:
   bare                      ';'
 
 property_expr:
-  expr                      expression
-  clocked                   sensitivity expression
-  clocked_disable           sensitivity T_IDENT T_IDENT '(' expression ')' expression
+  bare                      prop_temporal_expr
+  clocked                   sensitivity prop_temporal_expr
+  clocked_disable           sensitivity T_SVA_DISABLE T_SVA_IFF '(' expression ')' prop_temporal_expr
+
+prop_temporal_expr:
+  single                    prop_iff_expr
+  nexttime                  T_SVA_NEXTTIME prop_temporal_expr
+  nexttime_n                T_SVA_NEXTTIME '[' expression ']' prop_temporal_expr
+  s_nexttime                T_SVA_S_NEXTTIME prop_temporal_expr
+  s_nexttime_n              T_SVA_S_NEXTTIME '[' expression ']' prop_temporal_expr
+  always_prop               T_ALWAYS prop_temporal_expr
+  always_range              T_ALWAYS '[' expression ':' expression ']' prop_temporal_expr
+  s_always_range            T_SVA_S_ALWAYS '[' expression ':' expression ']' prop_temporal_expr
+  eventually_prop           T_SVA_EVENTUALLY prop_temporal_expr
+  eventually_range          T_SVA_EVENTUALLY '[' expression ':' expression ']' prop_temporal_expr
+  s_eventually_prop         T_SVA_S_EVENTUALLY prop_temporal_expr
+  s_eventually_range        T_SVA_S_EVENTUALLY '[' expression ':' expression ']' prop_temporal_expr
+  if_prop                   T_IF '(' expression ')' prop_temporal_expr prop_opt_else
+  case_prop                 T_CASE '(' expression ')' prop_case_item_list T_ENDCASE
+  accept_on                 T_SVA_ACCEPT_ON '(' expression ')' prop_temporal_expr
+  reject_on                 T_SVA_REJECT_ON '(' expression ')' prop_temporal_expr
+  sync_accept_on            T_SVA_SYNC_ACCEPT_ON '(' expression ')' prop_temporal_expr
+  sync_reject_on            T_SVA_SYNC_REJECT_ON '(' expression ')' prop_temporal_expr
+
+prop_iff_expr:
+  single                    prop_implies_kw_expr
+  iff                       prop_implies_kw_expr T_SVA_IFF prop_iff_expr
+
+prop_implies_kw_expr:
+  single                    prop_until_expr
+  implies_kw                prop_until_expr T_SVA_IMPLIES_KW prop_implies_kw_expr
+
+prop_until_expr:
+  single                    prop_or_expr
+  until                     prop_or_expr T_SVA_UNTIL prop_until_expr
+  s_until                   prop_or_expr T_SVA_S_UNTIL prop_until_expr
+  until_with                prop_or_expr T_SVA_UNTIL_WITH prop_until_expr
+  s_until_with              prop_or_expr T_SVA_S_UNTIL_WITH prop_until_expr
+
+prop_or_expr:
+  single                    prop_and_expr
+  or                        prop_or_expr T_OR prop_and_expr
+
+prop_and_expr:
+  single                    prop_not_expr
+  and                       prop_and_expr T_AND prop_not_expr
+  intersect                 prop_and_expr T_SVA_INTERSECT prop_not_expr
+
+prop_not_expr:
+  single                    prop_impl_expr
+  not                       T_NOT prop_not_expr
+
+prop_impl_expr:
+  single                    prop_unary_expr
+  implies                   seq_within_expr T_SVA_IMPLIES prop_temporal_expr
+  nimplies                  seq_within_expr T_SVA_NIMPLIES prop_temporal_expr
+  fimplies                  seq_within_expr T_SVA_FIMPLIES prop_temporal_expr
+  fnimplies                 seq_within_expr T_SVA_FNIMPLIES prop_temporal_expr
+
+prop_unary_expr:
+  single                    seq_within_expr
+  strong                    T_SVA_STRONG '(' seq_within_expr ')'
+  weak                      T_SVA_WEAK '(' seq_within_expr ')'
+  first_match               T_SVA_FIRST_MATCH '(' seq_within_expr ')'
+  paren                     '(' prop_iff_expr ')'
+
+prop_opt_else:
+  yes                       T_ELSE prop_temporal_expr
+  empty
+
+prop_case_item_list:
+  single                    prop_case_item
+  cons                      prop_case_item_list prop_case_item
+
+prop_case_item:
+  exprs                     case_expr_list ':' prop_temporal_expr ';'
+  default_colon             T_DEFAULT ':' prop_temporal_expr ';'
+  default_bare              T_DEFAULT prop_temporal_expr ';'
+
+seq_within_expr:
+  single                    seq_throughout_expr
+  within                    seq_within_expr T_SVA_WITHIN seq_throughout_expr
+
+seq_throughout_expr:
+  single                    seq_concat_expr
+  throughout                seq_concat_expr T_SVA_THROUGHOUT seq_throughout_expr
+
+seq_concat_expr:
+  single                    seq_base_expr
+  delay                     seq_concat_expr T_DELAY T_NUMBER seq_base_expr
+  delay_range               seq_concat_expr T_DELAY '[' expression ':' expression ']' seq_base_expr
+  delay_star                seq_concat_expr T_DELAY T_SVA_LBRACK_STAR ']' seq_base_expr
+  delay_plus                seq_concat_expr T_DELAY T_SVA_LBRACK_PLUS ']' seq_base_expr
+  init_delay                T_DELAY T_NUMBER seq_base_expr
+  init_delay_range          T_DELAY '[' expression ':' expression ']' seq_base_expr
+  init_delay_star           T_DELAY T_SVA_LBRACK_STAR ']' seq_base_expr
+  init_delay_plus           T_DELAY T_SVA_LBRACK_PLUS ']' seq_base_expr
+
+seq_base_expr:
+  single                    expression
+  rep_star                  expression T_SVA_LBRACK_STAR ']'
+  rep_star_range            expression T_SVA_LBRACK_STAR expression ']'
+  rep_star_range2           expression T_SVA_LBRACK_STAR expression ':' expression ']'
+  rep_plus                  expression T_SVA_LBRACK_PLUS ']'
+  rep_goto                  expression T_SVA_LBRACK_ARROW expression ']'
+  rep_goto_range            expression T_SVA_LBRACK_ARROW expression ':' expression ']'
+  rep_nonconsec             expression T_SVA_LBRACK_EQ expression ']'
+  rep_nonconsec_range       expression T_SVA_LBRACK_EQ expression ':' expression ']'
 
 case_keyword:
   case                      T_CASE
@@ -876,6 +992,7 @@ primary_expr:
   struct_lit_default        '\'' '{' T_DEFAULT ':' expression '}'
   unsigned_kw               T_UNSIGNED
   signed_kw                 T_SIGNED
+  dollar                    '$'
 
 stream_slice:
   number                    T_NUMBER

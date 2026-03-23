@@ -521,6 +521,7 @@ statement: { val : TEXT; cnt : INTEGER; }
   force_stmt      { $$.val := "(force " & $1 & " " & $2 & ")" }
   void_cast      { $$.val := Wrap("void-cast", $1) }
   null_stmt      { $$.val := "(null)" }
+  annotation     { $$.val := "(annotation " & $1 & " " & $2 & ")" }
 
 opt_block_name: { val : TEXT; cnt : INTEGER; }
   yes    { $$.val := $1 }
@@ -539,9 +540,114 @@ opt_assert_else: { val : TEXT; cnt : INTEGER; }
   bare   { $$.val := "()" }
 
 property_expr: { val : TEXT; cnt : INTEGER; }
-  expr              { $$.val := $1 }
+  bare              { $$.val := $1 }
   clocked           { $$.val := $1 & " " & $2 }
-  clocked_disable   { $$.val := $1 & " (disable-iff " & $4 & ") " & $5 }
+  clocked_disable   { $$.val := $1 & " (disable-iff " & $2 & ") " & $3 }
+
+prop_temporal_expr: { val : TEXT; cnt : INTEGER; }
+  single            { $$.val := $1 }
+  nexttime          { $$.val := "(nexttime " & $1 & ")" }
+  nexttime_n        { $$.val := "(nexttime [" & $1 & "] " & $2 & ")" }
+  s_nexttime        { $$.val := "(s_nexttime " & $1 & ")" }
+  s_nexttime_n      { $$.val := "(s_nexttime [" & $1 & "] " & $2 & ")" }
+  always_prop       { $$.val := "(sva-always " & $1 & ")" }
+  always_range      { $$.val := "(sva-always [" & $1 & ":" & $2 & "] " & $3 & ")" }
+  s_always_range    { $$.val := "(s_always [" & $1 & ":" & $2 & "] " & $3 & ")" }
+  eventually_prop   { $$.val := "(eventually " & $1 & ")" }
+  eventually_range  { $$.val := "(eventually [" & $1 & ":" & $2 & "] " & $3 & ")" }
+  s_eventually_prop { $$.val := "(s_eventually " & $1 & ")" }
+  s_eventually_range { $$.val := "(s_eventually [" & $1 & ":" & $2 & "] " & $3 & ")" }
+  if_prop           { $$.val := "(if " & $1 & " " & $2 & " " & $3 & ")" }
+  case_prop         { $$.val := "(case " & $1 & " " & $2 & ")" }
+  accept_on         { $$.val := "(accept_on " & $1 & " " & $2 & ")" }
+  reject_on         { $$.val := "(reject_on " & $1 & " " & $2 & ")" }
+  sync_accept_on    { $$.val := "(sync_accept_on " & $1 & " " & $2 & ")" }
+  sync_reject_on    { $$.val := "(sync_reject_on " & $1 & " " & $2 & ")" }
+
+prop_iff_expr: { val : TEXT; cnt : INTEGER; }
+  single            { $$.val := $1 }
+  iff               { $$.val := "(iff " & $1 & " " & $2 & ")" }
+
+prop_implies_kw_expr: { val : TEXT; cnt : INTEGER; }
+  single            { $$.val := $1 }
+  implies_kw        { $$.val := "(implies " & $1 & " " & $2 & ")" }
+
+prop_until_expr: { val : TEXT; cnt : INTEGER; }
+  single            { $$.val := $1 }
+  until             { $$.val := "(until " & $1 & " " & $2 & ")" }
+  s_until           { $$.val := "(s_until " & $1 & " " & $2 & ")" }
+  until_with        { $$.val := "(until_with " & $1 & " " & $2 & ")" }
+  s_until_with      { $$.val := "(s_until_with " & $1 & " " & $2 & ")" }
+
+prop_or_expr: { val : TEXT; cnt : INTEGER; }
+  single            { $$.val := $1 }
+  or                { $$.val := "(sva-or " & $1 & " " & $2 & ")" }
+
+prop_and_expr: { val : TEXT; cnt : INTEGER; }
+  single            { $$.val := $1 }
+  and               { $$.val := "(sva-and " & $1 & " " & $2 & ")" }
+  intersect         { $$.val := "(intersect " & $1 & " " & $2 & ")" }
+
+prop_not_expr: { val : TEXT; cnt : INTEGER; }
+  single            { $$.val := $1 }
+  not               { $$.val := "(not " & $1 & ")" }
+
+prop_impl_expr: { val : TEXT; cnt : INTEGER; }
+  single            { $$.val := $1 }
+  implies           { $$.val := "(|-> " & $1 & " " & $2 & ")" }
+  nimplies          { $$.val := "(|=> " & $1 & " " & $2 & ")" }
+  fimplies          { $$.val := "(#-# " & $1 & " " & $2 & ")" }
+  fnimplies         { $$.val := "(#=# " & $1 & " " & $2 & ")" }
+
+prop_unary_expr: { val : TEXT; cnt : INTEGER; }
+  single            { $$.val := $1 }
+  strong            { $$.val := "(strong " & $1 & ")" }
+  weak              { $$.val := "(weak " & $1 & ")" }
+  first_match       { $$.val := "(first_match " & $1 & ")" }
+  paren             { $$.val := $1 }
+
+prop_opt_else: { val : TEXT; cnt : INTEGER; }
+  yes               { $$.val := $1 }
+  empty             { $$.val := "()" }
+
+prop_case_item_list: { val : TEXT; cnt : INTEGER; }
+  single            { $$.val := $1 }
+  cons              { $$.val := $1 & " " & $2 }
+
+prop_case_item: { val : TEXT; cnt : INTEGER; }
+  exprs             { $$.val := "(" & $1 & " " & $2 & ")" }
+  default_colon     { $$.val := "(default " & $1 & ")" }
+  default_bare      { $$.val := "(default " & $1 & ")" }
+
+seq_within_expr: { val : TEXT; cnt : INTEGER; }
+  single            { $$.val := $1 }
+  within            { $$.val := "(within " & $1 & " " & $2 & ")" }
+
+seq_throughout_expr: { val : TEXT; cnt : INTEGER; }
+  single            { $$.val := $1 }
+  throughout        { $$.val := "(throughout " & $1 & " " & $2 & ")" }
+
+seq_concat_expr: { val : TEXT; cnt : INTEGER; }
+  single            { $$.val := $1 }
+  delay             { $$.val := "(## " & $2 & " " & $1 & " " & $3 & ")" }
+  delay_range       { $$.val := "(##[" & $2 & ":" & $3 & "] " & $1 & " " & $4 & ")" }
+  delay_star        { $$.val := "(##[*] " & $1 & " " & $2 & ")" }
+  delay_plus        { $$.val := "(##[+] " & $1 & " " & $2 & ")" }
+  init_delay        { $$.val := "(## " & $1 & " " & $2 & ")" }
+  init_delay_range  { $$.val := "(##[" & $1 & ":" & $2 & "] " & $3 & ")" }
+  init_delay_star   { $$.val := "(##[*] " & $1 & ")" }
+  init_delay_plus   { $$.val := "(##[+] " & $1 & ")" }
+
+seq_base_expr: { val : TEXT; cnt : INTEGER; }
+  single            { $$.val := $1 }
+  rep_star          { $$.val := "(rep* " & $1 & ")" }
+  rep_star_range    { $$.val := "(rep* " & $1 & " " & $2 & ")" }
+  rep_star_range2   { $$.val := "(rep* " & $1 & " " & $2 & ":" & $3 & ")" }
+  rep_plus          { $$.val := "(rep+ " & $1 & ")" }
+  rep_goto          { $$.val := "(rep-> " & $1 & " " & $2 & ")" }
+  rep_goto_range    { $$.val := "(rep-> " & $1 & " " & $2 & ":" & $3 & ")" }
+  rep_nonconsec     { $$.val := "(rep= " & $1 & " " & $2 & ")" }
+  rep_nonconsec_range { $$.val := "(rep= " & $1 & " " & $2 & ":" & $3 & ")" }
 
 case_keyword: { val : TEXT; cnt : INTEGER; }
   case           { $$.val := "case" }
@@ -899,6 +1005,7 @@ primary_expr: { val : TEXT; cnt : INTEGER; }
   struct_lit_default  { $$.val := "(struct-lit-default " & $1 & ")" }
   unsigned_kw         { $$.val := "unsigned" }
   signed_kw           { $$.val := "signed" }
+  dollar              { $$.val := "$" }
 
 stream_slice: { val : TEXT; cnt : INTEGER; }
   number  { $$.val := $1 }
