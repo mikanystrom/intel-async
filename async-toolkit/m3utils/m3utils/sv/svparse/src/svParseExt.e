@@ -555,6 +555,7 @@ statement: { val : TEXT; cnt : INTEGER; }
   cover_property_stmt  { $$.val := "(cover-property " & $1 & ")" }
   cover_sequence_stmt  { $$.val := "(cover-sequence " & $1 & ")" }
   restrict_property_stmt { $$.val := "(restrict-property " & $1 & ")" }
+  expect_property_stmt { $$.val := "(expect-property " & $1 & " " & $2 & ")" }
   delay_stmt     { $$.val := "(delay " & $1 & " " & $2 & ")" }
   event_ctrl_stmt { $$.val := "(event-ctrl " & $1 & " " & $2 & ")" }
   foreach_stmt    { $$.val := "(foreach " & $1 & " " & $2 & " " & $3 & ")" }

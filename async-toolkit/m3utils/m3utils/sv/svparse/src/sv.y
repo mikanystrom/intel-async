@@ -500,6 +500,7 @@ statement:
   cover_property_stmt       T_COVER T_PROPERTY '(' property_expr ')' ';'
   cover_sequence_stmt       T_COVER T_SEQUENCE '(' property_expr ')' ';'
   restrict_property_stmt    T_RESTRICT T_PROPERTY '(' property_expr ')' ';'
+  expect_property_stmt      T_EXPECT T_PROPERTY '(' property_expr ')' opt_assert_else
   delay_stmt                '#' expression statement
   event_ctrl_stmt           sensitivity statement
   foreach_stmt              T_FOREACH '(' hierarchical_id '[' foreach_var_list ']' ')' statement
