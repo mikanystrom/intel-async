@@ -311,6 +311,8 @@ module_item: { val : TEXT; cnt : INTEGER; }
   assert_mod      { $$.val := WrapLine(self, $1, "(assert-property " & $2 & " " & $3 & ")") }
   assume_mod      { $$.val := WrapLine(self, $1, "(assume-property " & $2 & " " & $3 & ")") }
   cover_mod       { $$.val := WrapLine(self, $1, "(cover-property " & $2 & ")") }
+  cover_seq_mod   { $$.val := WrapLine(self, $1, "(cover-sequence " & $2 & ")") }
+  restrict_mod    { $$.val := WrapLine(self, $1, "(restrict-property " & $2 & ")") }
   assert_imm_mod  { $$.val := WrapLine(self, $1, "(assert-deferred " & $2 & " " & $3 & " " & $4 & ")") }
   assert_final_mod { $$.val := WrapLine(self, $1, "(assert-final " & $2 & " " & $3 & ")") }
   assume_imm_mod  { $$.val := WrapLine(self, $1, "(assume-deferred " & $2 & " " & $3 & " " & $4 & ")") }
@@ -328,6 +330,8 @@ module_item: { val : TEXT; cnt : INTEGER; }
   for_gen         { $$.val := WrapLine(self, $1, "(for-generate " & $2 & " " & $3 & " " & $4 & " " & $5 & ")") }
   case_item       { $$.val := WrapLine(self, $1, "(" & $2 & " " & $3 & " " & $4 & ")") }
   begin_block     { $$.val := WrapLine(self, $1, "(begin " & $2 & " " & $3 & " " & $4 & ")") }
+  property_decl   { $$.val := WrapLine(self, $1, "(property-decl " & $2 & " " & $3 & " " & $4 & ")") }
+  sequence_decl   { $$.val := WrapLine(self, $1, "(sequence-decl " & $2 & " " & $3 & " " & $4 & ")") }
   annotation      { $$.val := "(annotation " & QuoteAnnotation($1) & " " & $2 & ")" }
   translate_off   { $$.val := WrapLine(self, $1, "(translate_off " & $3 & ")") }
 
@@ -549,6 +553,8 @@ statement: { val : TEXT; cnt : INTEGER; }
   cover_deferred       { $$.val := "(cover-deferred " & $1 & " " & $2 & ")" }
   cover_final          { $$.val := "(cover-final " & $1 & ")" }
   cover_property_stmt  { $$.val := "(cover-property " & $1 & ")" }
+  cover_sequence_stmt  { $$.val := "(cover-sequence " & $1 & ")" }
+  restrict_property_stmt { $$.val := "(restrict-property " & $1 & ")" }
   delay_stmt     { $$.val := "(delay " & $1 & " " & $2 & ")" }
   event_ctrl_stmt { $$.val := "(event-ctrl " & $1 & " " & $2 & ")" }
   foreach_stmt    { $$.val := "(foreach " & $1 & " " & $2 & " " & $3 & ")" }
@@ -558,6 +564,14 @@ statement: { val : TEXT; cnt : INTEGER; }
   void_cast      { $$.val := Wrap("void-cast", $1) }
   null_stmt      { $$.val := "(null)" }
   annotation     { $$.val := "(annotation " & QuoteAnnotation($1) & " " & $2 & ")" }
+  labeled_assert_property { $$.val := "(labeled " & $1 & " (assert-property " & $2 & " " & $3 & "))" }
+  labeled_assume_property { $$.val := "(labeled " & $1 & " (assume-property " & $2 & " " & $3 & "))" }
+  labeled_cover_property  { $$.val := "(labeled " & $1 & " (cover-property " & $2 & "))" }
+  labeled_assert_stmt     { $$.val := "(labeled " & $1 & " (assert " & $2 & " " & $3 & "))" }
+  labeled_assume_stmt     { $$.val := "(labeled " & $1 & " (assume " & $2 & " " & $3 & "))" }
+  labeled_cover_stmt      { $$.val := "(labeled " & $1 & " (cover " & $2 & "))" }
+  labeled_assert_deferred { $$.val := "(labeled " & $1 & " (assert-deferred " & $2 & " " & $3 & " " & $4 & "))" }
+  labeled_assert_final    { $$.val := "(labeled " & $1 & " (assert-final " & $2 & " " & $3 & "))" }
 
 opt_block_name: { val : TEXT; cnt : INTEGER; }
   yes    { $$.val := $1 }

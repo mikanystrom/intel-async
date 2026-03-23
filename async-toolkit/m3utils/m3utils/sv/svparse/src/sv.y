@@ -253,6 +253,8 @@ module_item:
   assert_mod                mark T_ASSERT T_PROPERTY '(' property_expr ')' opt_assert_else
   assume_mod                mark T_ASSUME T_PROPERTY '(' property_expr ')' opt_assert_else
   cover_mod                 mark T_COVER T_PROPERTY '(' property_expr ')' ';'
+  cover_seq_mod             mark T_COVER T_SEQUENCE '(' property_expr ')' ';'
+  restrict_mod              mark T_RESTRICT T_PROPERTY '(' property_expr ')' ';'
   assert_imm_mod            mark T_ASSERT '#' T_NUMBER '(' expression ')' opt_assert_else
   assert_final_mod          mark T_ASSERT T_FINAL '(' expression ')' opt_assert_else
   assume_imm_mod            mark T_ASSUME '#' T_NUMBER '(' expression ')' opt_assert_else
@@ -269,6 +271,8 @@ module_item:
   for_gen                   mark T_FOR '(' genvar_init ';' expression ';' genvar_step ')' generate_block
   case_item                 mark case_keyword '(' expression ')' case_item_list T_ENDCASE
   begin_block               mark T_BEGIN opt_block_name generate_body T_END opt_end_name
+  property_decl             mark T_PROPERTY T_IDENT opt_port_list ';' property_expr ';' T_ENDPROPERTY opt_end_name
+  sequence_decl             mark T_SEQUENCE T_IDENT opt_port_list ';' property_expr ';' T_ENDSEQUENCE opt_end_name
   annotation                T_ANNOTATION module_item
   translate_off             mark T_TRANSLATE_OFF translate_off_body T_TRANSLATE_ON
 
@@ -494,6 +498,8 @@ statement:
   cover_deferred            T_COVER '#' T_NUMBER '(' expression ')' ';'
   cover_final               T_COVER T_FINAL '(' expression ')' ';'
   cover_property_stmt       T_COVER T_PROPERTY '(' property_expr ')' ';'
+  cover_sequence_stmt       T_COVER T_SEQUENCE '(' property_expr ')' ';'
+  restrict_property_stmt    T_RESTRICT T_PROPERTY '(' property_expr ')' ';'
   delay_stmt                '#' expression statement
   event_ctrl_stmt           sensitivity statement
   foreach_stmt              T_FOREACH '(' hierarchical_id '[' foreach_var_list ']' ')' statement
@@ -503,6 +509,14 @@ statement:
   void_cast                 T_VOID '\'' '(' expression ')' ';'
   null_stmt                 ';'
   annotation                T_ANNOTATION statement
+  labeled_assert_property   T_IDENT ':' T_ASSERT T_PROPERTY '(' property_expr ')' opt_assert_else
+  labeled_assume_property   T_IDENT ':' T_ASSUME T_PROPERTY '(' property_expr ')' opt_assert_else
+  labeled_cover_property    T_IDENT ':' T_COVER T_PROPERTY '(' property_expr ')' ';'
+  labeled_assert_stmt       T_IDENT ':' T_ASSERT '(' expression ')' opt_assert_else
+  labeled_assume_stmt       T_IDENT ':' T_ASSUME '(' expression ')' opt_assert_else
+  labeled_cover_stmt        T_IDENT ':' T_COVER '(' expression ')' ';'
+  labeled_assert_deferred   T_IDENT ':' T_ASSERT '#' T_NUMBER '(' expression ')' opt_assert_else
+  labeled_assert_final      T_IDENT ':' T_ASSERT T_FINAL '(' expression ')' opt_assert_else
 
 opt_block_name:
   yes                       ':' T_IDENT
