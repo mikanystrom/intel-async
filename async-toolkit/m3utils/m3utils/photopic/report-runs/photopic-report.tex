@@ -1886,11 +1886,18 @@ converting Philips LER via the production loss chain
 \label{fig:rf-frontier-80}
 \end{figure}
 
-Figure~\ref{fig:rf-frontier-80} reveals a striking contrast with the
-$R_9$ sweeps.  While $R_9$ plummets from $\sim$90 to negative values
-across the same efficacy range (Section~\ref{sec:philips}), $R_f$
-\emph{barely degrades}: from $\sim$89 at 103~lm/W system efficacy
-to $\sim$86 at 139~lm/W --- a drop of only 3~points.
+Figure~\ref{fig:rf-frontier-80} reveals two regimes.  Below
+$\sim$290~Philips~lm/W ($\sim$149~lm/W best-production system
+efficacy), $R_f$ is remarkably robust: it declines gently from
+$\sim$89 at 103~lm/W to $\sim$86 at 149~lm/W --- a drop of only
+3~points, while $R_9$ plummets from $\sim$90 to negative values over
+the same range (Section~\ref{sec:philips}).
+
+Above 290~Philips~lm/W, the picture changes dramatically.  $R_f$
+collapses from 86 to 44 over the final 30~lm/W of the sweep, as
+even the 99-sample metric can no longer mask the spectral distortion.
+The CRI constraint itself breaks down: at 320~Philips~lm/W the
+optimizer can only achieve CRI~68, far below the 80 target.
 
 The gamut index $R_g$ tells the complementary story.  Below
 $\sim$134~lm/W system efficacy, $R_g \approx 89$--90 (moderate
@@ -1913,11 +1920,13 @@ rather than via $R_f$.
 \end{figure}
 
 At CRI$\,\geq\,$95, $R_f$ starts near 98 and declines smoothly to
-$\sim$92.5 at 270~Philips~lm/W (139~lm/W best-production system
-efficacy).  This is far more graceful than the corresponding $R_9$
-trajectory, which drops from 84 to 64 over the same range.  The tight
-CRI constraint already forces broad-enough spectra that the 99-sample
-TM-30 metric tracks CRI closely.
+$\sim$90 at 280~Philips~lm/W (144~lm/W best-production system
+efficacy).  Above that point, $R_f$ degrades more steeply, reaching
+76 at 320~Philips~lm/W as the CRI constraint becomes infeasible
+(the optimizer can only achieve CRI~80 at the highest efficacy
+levels, well below the 95 target).  The tight CRI constraint
+forces broad spectra that the 99-sample TM-30 metric tracks
+closely until the constraint itself breaks down.
 
 \subsection{Combined Comparison}
 
@@ -1935,15 +1944,22 @@ Figure~\ref{fig:rf-frontier-both} overlays both CRI constraints.
 Key observations:
 
 \begin{enumerate}
-\item \textbf{TM-30 $R_f$ is remarkably robust to efficacy pressure.}
-  Even at CRI$\,\geq\,$80, the worst $R_f$ observed is 86 --- compared
-  to $R_9$ values well below zero at the same operating point.
+\item \textbf{$R_f$ is robust in the regulatory mid-range.}
+  At CRI$\,\geq\,$80, $R_f$ holds above 85 from 103 to 149~lm/W
+  system efficacy (best production) --- the range covering EU and
+  DOE~2028 thresholds.  Over the same range, $R_9$ drops from 90
+  to below zero.
 
-\item \textbf{The ``CRI loophole'' is invisible to $R_f$.}  The
-  three-peak spectra that achieve CRI=80 with $R_9 < 0$ still score
-  $R_f \geq 86$.  This is because $R_f$ averages over 99 samples:
-  even if a few hue bins are poorly rendered, the overall fidelity
-  remains high.
+\item \textbf{$R_f$ eventually collapses.}  Above $\sim$150~lm/W
+  system efficacy, $R_f$ falls steeply, reaching 44 at the highest
+  tested point (CRI$\,\geq\,$80).  Even 99 samples cannot mask the
+  spectral distortion when the spectrum is pushed far enough.
+
+\item \textbf{The ``CRI loophole'' is partially invisible to $R_f$.}
+  In the 130--150~lm/W range, three-peak spectra that achieve CRI~82
+  with $R_9 < 0$ still score $R_f \geq 85$.  $R_f$ averages over
+  99 samples, so localized hue-bin failures (particularly in red)
+  are diluted by adequate performance in green and yellow.
 
 \item \textbf{$R_g$ exposes what $R_f$ cannot.}  The gamut jump at high
   efficacy (from $\sim$89 to $\sim$103) reveals spectral distortion that
@@ -1951,13 +1967,15 @@ Key observations:
   report both $R_f$ and $R_g$ together, not $R_f$ alone.
 
 \item \textbf{CRI$\,\geq\,$95 narrows the gap.}  With tight CRI, the
-  optimizer cannot find loophole spectra, so $R_f$ tracks CRI closely
-  ($R_f \approx 0.97 \times \text{CRI}$).
+  optimizer cannot find loophole spectra in the regulatory range, so
+  $R_f$ tracks CRI closely ($R_f \approx 0.97 \times \text{CRI}$).
+  The gap opens only above $\sim$155~lm/W where the CRI constraint
+  itself becomes infeasible.
 \end{enumerate}
 
 These results confirm that replacing CRI with TM-30~$R_f$ in regulations
 would not, by itself, prevent the efficacy-driven spectral distortion
-documented in earlier sections.
+documented in earlier sections within the regulatory range.
 
 \subsection{Per-Hue-Bin Analysis: Why Averages Hide the Problem}
 
@@ -1978,14 +1996,16 @@ these reveals the distortion pattern that $R_f$ alone conceals:
   is $-0.103$.  The average $R_f = 89$ is a fair summary because the
   errors are uniform.
 
-\item \textbf{High efficacy} (270~Philips~lm/W, CRI$\,\geq\,$80):
+\item \textbf{High efficacy} (275~Philips~lm/W, CRI$\,\geq\,$80):
   The pattern \emph{reverses sign} in some bins.  Green--cyan bins
   (h7--h9) shift to $+0.05$ to $+0.09$ (oversaturated), while red
   bins (h1, h14--h16) shift to $-0.03$ to $-0.09$ (desaturated).
   Because positive and negative errors \emph{cancel in the average},
-  $R_f$ reports~86 --- only 3~points worse than the uniform case.
+  $R_f$ reports~87 --- only 2~points worse than the uniform case.
   But specific object colors are rendered very differently from the
-  reference illuminant: greens too vivid, reds washed out.
+  reference illuminant: greens too vivid, reds washed out.  At still
+  higher efficacy ($>$300~Philips~lm/W), even the averaging can no
+  longer hide the damage, and $R_f$ plunges below 70.
 \end{itemize}
 
 This sign-flip pattern is invisible to any averaged metric, whether
