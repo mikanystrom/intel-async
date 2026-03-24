@@ -897,6 +897,15 @@ BEGIN
       END;
       m := NEW(Macro, body := value, params := NIL, defaults := NIL);
       MacroSet(name, m);
+    ELSIF Text.Equal(arg, "--help") OR Text.Equal(arg, "-h") THEN
+      Wr.PutText(Stdio.stderr, "svpp -- SystemVerilog preprocessor\n");
+      Wr.PutText(Stdio.stderr, "Usage: svpp [--help] [-I dir]... [-D NAME[=VALUE]]... file.sv\n\n");
+      Wr.PutText(Stdio.stderr, "  -I dir          Add include search directory\n");
+      Wr.PutText(Stdio.stderr, "  -D NAME[=VALUE] Define a preprocessor macro\n\n");
+      Wr.PutText(Stdio.stderr, "Preprocessed output is written to stdout.\n");
+      Wr.PutText(Stdio.stderr, "See sv/doc/svfe-manual.md (Section 10) for full documentation.\n");
+      Wr.Flush(Stdio.stderr);
+      filename := "";  (* suppress "no file" usage message *)
     ELSIF Text.GetChar(arg, 0) = '-' THEN
       Wr.PutText(Stdio.stderr, "svpp: unknown option: " & arg & "\n");
       Wr.Flush(Stdio.stderr);
@@ -907,9 +916,9 @@ BEGIN
   END;
 
   IF filename = NIL THEN
-    Wr.PutText(Stdio.stderr, "Usage: svpp [-I dir]... [-D NAME[=VALUE]]... file.sv\n");
+    Wr.PutText(Stdio.stderr, "Usage: svpp [--help] [-I dir]... [-D NAME[=VALUE]]... file.sv\n");
     Wr.Flush(Stdio.stderr);
-  ELSE
+  ELSIF Text.Length(filename) > 0 THEN
     (* Reverse include dirs to maintain command-line order *)
     includeDirs := TextList.ReverseD(includeDirs);
     Preprocess(filename);

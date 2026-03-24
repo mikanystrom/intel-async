@@ -14,6 +14,19 @@ PROCEDURE BaseName(fname : TEXT) : TEXT =
     RETURN base
   END BaseName;
 
+PROCEDURE Help() =
+  BEGIN
+    Wr.PutText(stderr, "svfe -- SystemVerilog frontend (parser)\n");
+    Wr.PutText(stderr, "Usage: svfe [--help] [--scm] [--lex] [--no-lines] [--name NAME] <file.sv>\n\n");
+    Wr.PutText(stderr, "  --scm        Emit S-expression parse tree to stdout\n");
+    Wr.PutText(stderr, "  --lex        Emit lexer token stream (debugging)\n");
+    Wr.PutText(stderr, "  --no-lines   Suppress (@ N ...) line number wrappers\n");
+    Wr.PutText(stderr, "  --name NAME  Set module name for error messages\n\n");
+    Wr.PutText(stderr, "With no flags, checks syntax and prints 'filename: syntax ok'.\n");
+    Wr.PutText(stderr, "See sv/doc/svfe-manual.md for full documentation.\n");
+    Wr.Flush(stderr);
+  END Help;
+
 VAR
   lexer  := NEW(svLexExt.T);
   parser := NEW(svParseExt.T);
@@ -21,6 +34,7 @@ VAR
   fname  : TEXT := NIL;
   doLex  : BOOLEAN := FALSE;
   doScm  : BOOLEAN := FALSE;
+  doHelp : BOOLEAN := FALSE;
   modName : TEXT := NIL;
   i : INTEGER;
 BEGIN
@@ -37,14 +51,18 @@ BEGIN
       ELSIF Text.Equal(arg, "--name") THEN
         INC(i);
         IF i < Params.Count THEN modName := Params.Get(i) END;
+      ELSIF Text.Equal(arg, "--help") OR Text.Equal(arg, "-h") THEN
+        doHelp := TRUE;
       ELSE
         fname := arg;
       END;
     END;
     INC(i);
   END;
-  IF fname = NIL THEN
-    Wr.PutText(stderr, "usage: svfe [--lex] [--scm] [--no-lines] [--name NAME] <file.sv>\n");
+  IF doHelp THEN
+    Help();
+  ELSIF fname = NIL THEN
+    Wr.PutText(stderr, "usage: svfe [--help] [--scm] [--lex] [--no-lines] [--name NAME] <file.sv>\n");
     Wr.Flush(stderr);
   ELSE
     IF modName = NIL THEN modName := BaseName(fname) END;

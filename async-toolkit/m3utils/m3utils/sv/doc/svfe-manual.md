@@ -61,14 +61,17 @@ generate parsers that produce identical results on all test suites.
 ### 3.1 Command-line options
 
 ```
-svfe [--scm] [--lex] [--name <module>] <file.sv>
+svfe [--scm] [--lex] [--no-lines] [--name <module>] <file.sv>
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--scm` | Emit S-expression output (default mode) |
 | `--lex` | Emit lexer token stream (for debugging) |
+| `--no-lines` | Suppress `(@ N ...)` line number wrappers in output |
 | `--name` | Set the module name for error messages |
+
+With no flags, svfe checks syntax only and prints `filename: syntax ok`.
 
 ### 3.2 Basic usage
 
@@ -209,6 +212,114 @@ Then in mscheme:
 | `` `directive `` | Compiler directives (preserved as `(directive)` nodes) |
 | Hierarchical ids | `a.b`, `pkg::name` |
 
+### 4.9 SystemVerilog Assertions (SVA)
+
+svfe implements comprehensive SVA support covering the large majority of
+IEEE 1800-2017 §16 and Annex A §A.2.10.
+
+#### Assertion statements
+
+| Construct | Context |
+|-----------|---------|
+| `assert property (...)` | Module item and statement |
+| `assume property (...)` | Module item and statement |
+| `cover property (...)` | Module item and statement |
+| `cover sequence (...)` | Module item and statement |
+| `restrict property (...)` | Module item and statement |
+| `expect (...)` | Statement only |
+| `label: assert property (...)` | Labeled (module item and statement) |
+| `label: assume property (...)` | Labeled |
+| `label: cover property (...)` | Labeled |
+
+#### Property spec
+
+```
+[clocking_event] [disable iff (expr)] property_expr
+```
+
+The `property_spec` wrapper inside `assert property(...)` etc. supports
+an optional clocking event and an optional `disable iff` clause.
+
+#### Property operators (by precedence, lowest first)
+
+| Operator | Syntax | Associativity |
+|----------|--------|---------------|
+| `iff` | `p iff q` | Right |
+| `implies` | `p implies q` | Right |
+| `until`, `s_until`, `until_with`, `s_until_with` | `p until q` | Right |
+| `or` | `p or q` | Left |
+| `and`, `intersect` | `p and q`, `p intersect q` | Left |
+| `not` | `not p` | Prefix |
+| `\|->`, `\|=>`, `#-#`, `#=#` | `seq \|-> prop` | Infix |
+
+#### Temporal operators (prefix, inside `prop_temporal_expr`)
+
+| Operator | Syntax |
+|----------|--------|
+| `nexttime` | `nexttime p`, `nexttime [N] p` |
+| `s_nexttime` | `s_nexttime p`, `s_nexttime [N] p` |
+| `always` | `always p`, `always [lo:hi] p` |
+| `s_always` | `s_always [lo:hi] p` |
+| `eventually` | `eventually [lo:hi] p` |
+| `s_eventually` | `s_eventually p`, `s_eventually [lo:hi] p` |
+| `accept_on` | `accept_on (expr) p` |
+| `reject_on` | `reject_on (expr) p` |
+| `sync_accept_on` | `sync_accept_on (expr) p` |
+| `sync_reject_on` | `sync_reject_on (expr) p` |
+| `if`/`else` | `if (expr) p else q` |
+| `case` | `case (expr) val: p; ... endcase` |
+
+#### Sequence operators
+
+| Operator | Syntax |
+|----------|--------|
+| `within` | `s1 within s2` |
+| `throughout` | `expr throughout seq` |
+| `##` (delay) | `s1 ##N s2`, `s1 ##[lo:hi] s2`, `##[*] s`, `##[+] s` |
+| `strong`/`weak` | `strong(seq)`, `weak(seq)` |
+| `first_match` | `first_match(seq)` |
+
+#### Boolean abbreviations (repetition)
+
+| Syntax | Meaning |
+|--------|---------|
+| `expr [*N]` | Consecutive repetition (exact) |
+| `expr [*lo:hi]` | Consecutive repetition (range) |
+| `expr [*]` | Zero or more consecutive |
+| `expr [+]` | One or more consecutive |
+| `expr [->N]` | Goto repetition (exact) |
+| `expr [->lo:hi]` | Goto repetition (range) |
+| `expr [=N]` | Non-consecutive repetition (exact) |
+| `expr [=lo:hi]` | Non-consecutive repetition (range) |
+
+#### Named declarations
+
+| Construct | Description |
+|-----------|-------------|
+| `property name [...]; ... endproperty` | Named property declaration |
+| `sequence name [...]; ... endsequence` | Named sequence declaration |
+
+Both support optional port lists and optional end labels
+(`endproperty : name`).
+
+#### Not supported (LALR parser limitations)
+
+- **Inline clocking events** in sequence expressions
+  (`@(posedge clk) a ##1 @(posedge clk2) b`).
+  The `@(event)` syntax is shared with `always @(...)` and
+  event-control statements; LALR state merging makes them
+  indistinguishable.
+
+- **Sequence match-item assignments** (`(expr, x = val)`) as in
+  IEEE §16.10.  The `(expr,` prefix is ambiguous with parenthesized
+  expressions and function argument lists.
+
+- **`checker` construct** (`checker ... endchecker`).  Not implemented;
+  mechanically similar to `module` but low priority.
+
+See `svparse/svfe_sva_ieee_comparison.md` for a detailed comparison
+against the IEEE 1800-2017 formal grammar.
+
 
 ## 5. S-Expression Format
 
@@ -303,7 +414,106 @@ summarized here.
 (sens *)
 ```
 
-### 5.8 Example
+### 5.8 SVA (assertions and properties)
+
+#### Assertion statements
+
+```scheme
+(assert-property <property-expr> <action-block>)
+(assume-property <property-expr> <action-block>)
+(cover-property <property-expr>)
+(cover-sequence <property-expr>)
+(restrict-property <property-expr>)
+(expect-property <property-expr> <action-block>)
+(labeled <name> (assert-property ...))     ;; labeled assertion
+```
+
+#### Property operators
+
+```scheme
+(|-> <seq> <prop>)                         ;; overlapping implication
+(|=> <seq> <prop>)                         ;; non-overlapping implication
+(#-# <seq> <prop>)                         ;; followed-by (overlapping)
+(#=# <seq> <prop>)                         ;; followed-by (non-overlapping)
+(sva-and <p> <q>)                          ;; property/sequence AND
+(sva-or <p> <q>)                           ;; property/sequence OR
+(intersect <p> <q>)                        ;; sequence intersect
+(not <p>)                                  ;; property negation
+(iff <p> <q>)                              ;; property if-and-only-if
+(implies <p> <q>)                          ;; property implies (keyword)
+(until <p> <q>)                            ;; until
+(s_until <p> <q>)                          ;; strong until
+(until_with <p> <q>)                       ;; until_with
+(s_until_with <p> <q>)                     ;; strong until_with
+```
+
+#### Temporal operators
+
+```scheme
+(nexttime <p>)                             ;; next cycle
+(nexttime [<n>] <p>)                       ;; N cycles ahead
+(s_nexttime <p>)                           ;; strong nexttime
+(sva-always <p>)                           ;; always (unbounded)
+(sva-always [<lo>:<hi>] <p>)              ;; always (bounded range)
+(s_always [<lo>:<hi>] <p>)                ;; strong always
+(eventually [<lo>:<hi>] <p>)              ;; eventually (bounded)
+(s_eventually <p>)                         ;; strong eventually (unbounded)
+(s_eventually [<lo>:<hi>] <p>)            ;; strong eventually (bounded)
+(accept_on <expr> <p>)                     ;; abort (accept)
+(reject_on <expr> <p>)                     ;; abort (reject)
+(sync_accept_on <expr> <p>)               ;; synchronous abort (accept)
+(sync_reject_on <expr> <p>)               ;; synchronous abort (reject)
+```
+
+#### Sequence operators
+
+```scheme
+(## <N> <lhs> <rhs>)                       ;; cycle delay
+(##[<lo>:<hi>] <lhs> <rhs>)              ;; range delay
+(##[*] <lhs> <rhs>)                       ;; zero-or-more delay
+(##[+] <lhs> <rhs>)                       ;; one-or-more delay
+(## <N> <rhs>)                             ;; initial delay (no LHS)
+(within <s1> <s2>)                         ;; sequence within
+(throughout <expr> <seq>)                  ;; expression throughout
+(strong <seq>)                             ;; strong sequence
+(weak <seq>)                               ;; weak sequence
+(first_match <seq>)                        ;; first match
+```
+
+#### Boolean abbreviations (repetition)
+
+```scheme
+(rep* <expr>)                              ;; [*] zero or more
+(rep* <expr> <N>)                          ;; [*N] exact
+(rep* <expr> <lo>:<hi>)                   ;; [*lo:hi] range
+(rep+ <expr>)                              ;; [+] one or more
+(rep-> <expr> <N>)                         ;; [->N] goto
+(rep-> <expr> <lo>:<hi>)                  ;; [->lo:hi] goto range
+(rep= <expr> <N>)                          ;; [=N] non-consecutive
+(rep= <expr> <lo>:<hi>)                   ;; [=lo:hi] non-consecutive range
+```
+
+#### Declarations
+
+```scheme
+(property-decl <name> <ports> <body>)      ;; property ... endproperty
+(sequence-decl <name> <ports> <body>)      ;; sequence ... endsequence
+```
+
+#### Property spec wrapper
+
+```scheme
+;; bare property (no clocking)
+<prop-expr>
+
+;; with clocking event
+(sens ...) <prop-expr>
+
+;; with clocking and disable iff
+(sens ...) (disable-iff <expr>) <prop-expr>
+```
+
+### 5.9 Example
 
 Given this SystemVerilog:
 
@@ -606,20 +816,131 @@ across all 8-bit input combinations with both carry states.
 
 ## 10. Preprocessor (svpp)
 
-A standalone Modula-3 preprocessor for SystemVerilog:
+svpp is a standalone SystemVerilog preprocessor written in Modula-3.
+It handles all IEEE 1800 preprocessor directives needed for synthesis
+and emits preprocessed source to stdout with line numbers preserved.
+
+### 10.1 Usage
 
 ```
-$ sv/svpp/AMD64_LINUX/svpp [-D MACRO] [-I path] input.sv
+svpp [-I dir]... [-D NAME[=VALUE]]... file.sv
 ```
 
-Supports:
-- `` `define `` with parameters
-- `` `ifdef `` / `` `ifndef `` / `` `elsif `` / `` `else `` / `` `endif ``
-- `` `include ``
-- `` `` `` token pasting
-- Inline conditionals
+| Option | Description |
+|--------|-------------|
+| `-I dir` | Add `dir` to include file search path (searched in order) |
+| `-D NAME` | Define macro `NAME` with value `1` |
+| `-D NAME=VALUE` | Define macro `NAME` with value `VALUE` |
 
-The preprocessor is run before svfe in all tool pipelines.
+Both `-I` and `-D` accept the flag and argument either separated by a
+space (`-I dir`) or joined (`-Idir`).
+
+Output goes to stdout.  Errors go to stderr.
+
+### 10.2 Supported directives
+
+| Directive | Description |
+|-----------|-------------|
+| `` `define NAME body`` | Define a simple macro |
+| `` `define NAME(a,b) body`` | Define a parameterized macro |
+| `` `define NAME(a,b=default) body`` | Parameters with default values |
+| `` `undef NAME`` | Undefine a macro |
+| `` `ifdef NAME`` | Conditional: true if `NAME` is defined |
+| `` `ifndef NAME`` | Conditional: true if `NAME` is not defined |
+| `` `elsif NAME`` | Else-if branch |
+| `` `else`` | Else branch |
+| `` `endif`` | End conditional |
+| `` `include "file"`` | Include a file |
+
+### 10.3 Macro expansion
+
+Macros are expanded iteratively to a fixed point (up to 50 iterations).
+Backtick-prefixed identifiers (`` `NAME``) are looked up in the macro
+table and replaced with their expansion bodies.
+
+**Parameterized macros** support positional arguments with optional
+defaults:
+
+```systemverilog
+`define BUS(width, name) logic [width-1:0] name
+`define REG(name, width=8) logic [width-1:0] name
+
+`BUS(32, data_bus)        // -> logic [32-1:0] data_bus
+`REG(counter)             // -> logic [8-1:0] counter (default width)
+`REG(addr, 16)            // -> logic [16-1:0] addr
+```
+
+**Token pasting** (` `` `) concatenates adjacent tokens in macro bodies:
+
+```systemverilog
+`define MAKE_SIGNAL(prefix, suffix) logic prefix``_``suffix
+`MAKE_SIGNAL(data, valid)   // -> logic data_valid
+```
+
+**Multi-line macros** use backslash continuation:
+
+```systemverilog
+`define ASSERT_PROP(name, prop) \
+  name: assert property (prop) \
+    else $error("Assertion name failed");
+```
+
+**Multi-line macro invocations** are supported: if a parameterized macro
+call has unclosed parentheses at end of line, svpp joins subsequent lines
+until the closing `)` is found.
+
+### 10.4 Inline conditional expansion
+
+After macro expansion, svpp processes any inline conditional directives
+that appear within the expanded text.  This handles the common pattern
+of macros that expand to conditionally-compiled code:
+
+```systemverilog
+`define OPTIONAL_DEBUG `ifdef DEBUG $display("debug"); `endif
+```
+
+### 10.5 Include file search
+
+For `` `include "file"`` directives, svpp searches:
+
+1. The directory containing the current source file
+2. Each `-I` directory, in command-line order
+
+Circular includes are detected and silently skipped (each file is
+processed at most once).
+
+### 10.6 Line number preservation
+
+svpp preserves source line numbers so that downstream parser error
+messages refer to the original source:
+
+- Directive lines are replaced with blank lines in the output
+- Multi-line macro definitions emit one blank per source line consumed
+- If macro expansion produces more output lines than source lines,
+  svpp emits a `` `line`` directive to resynchronize
+
+### 10.7 Ignored directives
+
+The following directives are recognized and silently consumed (emitting
+a blank line):
+
+`` `timescale``, `` `resetall``, `` `default_nettype``,
+`` `celldefine``, `` `endcelldefine``
+
+### 10.8 Pipeline usage
+
+svpp is typically the first stage in the svfe pipeline:
+
+```sh
+svpp -I rtl/include -D SYNTHESIS design.sv | svfe --scm /dev/stdin
+```
+
+Or using a shell wrapper that chains both steps:
+
+```sh
+svpp -I rtl/include -D SYNTHESIS design.sv > /tmp/pp.sv
+svfe --scm /tmp/pp.sv
+```
 
 
 ## 11. Excluded Constructs
@@ -638,7 +959,7 @@ of the synthesis subset:
 | `#delay` | Time delays |
 | DPI (`import "DPI-C"`) | Foreign function interface |
 | `bind` | Verification binding |
-| `sequence` / `property` | SVA assertions |
+| `checker` / `endchecker` | SVA checker construct |
 | `mailbox`, `semaphore` | Verification synchronization |
 
 Also not yet supported:
@@ -679,6 +1000,7 @@ Also not yet supported:
 | `sv/6502/rtl/ALU.sv` | 6502 combinational ALU |
 | `sv/6502/rtl/cpu.sv` | 6502 CPU FSM |
 | `sv/6502/emu/` | 6502 C emulator + test harness |
+| `sv/svparse/svfe_sva_ieee_comparison.md` | SVA grammar vs IEEE 1800-2017 |
 | `sv/doc/svfe-manual.md` | This file |
 
 
