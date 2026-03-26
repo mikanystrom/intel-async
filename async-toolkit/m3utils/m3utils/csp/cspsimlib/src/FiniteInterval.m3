@@ -2,9 +2,9 @@
 (* SPDX-License-Identifier: Apache-2.0 *)
 
 MODULE FiniteInterval;
-IMPORT BigInt;
+IMPORT Mpz;
 
-PROCEDURE Construct(lo, hi : BigInt.T) : T =
+PROCEDURE Construct(lo, hi : Mpz.T) : T =
   BEGIN
     RETURN T { lo, hi }
   END Construct;

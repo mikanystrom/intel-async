@@ -2,11 +2,11 @@
 (* SPDX-License-Identifier: Apache-2.0 *)
 
 INTERFACE CspInterval;
-IMPORT BigInt;
+IMPORT Mpz;
 
 TYPE
   T = RECORD
-    left, right : BigInt.T;
+    left, right : Mpz.T;
   END;
 
 CONST Brand = "CspInterval";

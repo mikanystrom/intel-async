@@ -2,7 +2,7 @@
 % SPDX-License-Identifier: Apache-2.0
 
 import ("libm3")
-import ("cit_util")
+import ("mpz")
 import ("parseparams")
 import ("simpletoken")
 import ("mscheme")

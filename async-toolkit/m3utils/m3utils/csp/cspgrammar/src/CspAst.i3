@@ -17,7 +17,7 @@ IMPORT CspStatementSeq;
 IMPORT CspDeclaratorSeq;
 IMPORT CspStructDeclaratorSeq;
 IMPORT CspStructMemberSeq;
-IMPORT BigInt;
+IMPORT Mpz;
 IMPORT Atom;
 IMPORT CspDeclaration;
 IMPORT CspDeclarator;
@@ -85,7 +85,7 @@ PROCEDURE BooleanExpr(val : BOOLEAN) : Expr;
 
 PROCEDURE ElseExpr() : Expr;
 
-PROCEDURE IntegerExpr(val : BigInt.T) : Expr;
+PROCEDURE IntegerExpr(val : Mpz.T) : Expr;
 
 PROCEDURE StringExpr(val : TEXT) : Expr;
 
@@ -128,7 +128,7 @@ PROCEDURE BooleanType(isConst : BOOLEAN) : Type;
 
 PROCEDURE ChannelStructureType(members : CspStructMemberSeq.T) : Type;
 
-PROCEDURE ChannelType(numValues : BigInt.T; dir : Direction) : Type;
+PROCEDURE ChannelType(numValues : Mpz.T; dir : Direction) : Type;
 
 PROCEDURE IntegerType(isConst, isSigned : BOOLEAN;
                       dw                : Expr;

@@ -10,7 +10,7 @@ FROM SchemeUtils IMPORT List2, List3, List5;
 IMPORT SchemeBoolean;
 IMPORT CspRange;
 IMPORT CspDirection;
-IMPORT BigInt;
+IMPORT SchemeInt;
 IMPORT CspExpression;
 IMPORT CspInterval;
 IMPORT CspType;
@@ -106,7 +106,7 @@ PROCEDURE NodeLisp(self : Node) : SchemeObject.T =
     IF self.arrayed THEN
       RETURN List3(Sym("node-array"),
                    Sym(CspDirection.Names[self.direction]),
-                   BigInt.New(self.width))
+                   SchemeInt.FromI(self.width))
     ELSE
       RETURN List2(Sym("node"),
                    Sym(CspDirection.Names[self.direction]))

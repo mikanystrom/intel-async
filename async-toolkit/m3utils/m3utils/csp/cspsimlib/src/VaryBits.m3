@@ -2,13 +2,9 @@
 (* SPDX-License-Identifier: Apache-2.0 *)
 
 MODULE VaryBits;
-IMPORT BigInt;
-IMPORT BigIntRep; 
-FROM BigInt IMPORT Sign, GetMsb;
-FROM BigIntRep IMPORT GetTheBits;
+IMPORT Mpz;
 IMPORT FiniteInterval;
 IMPORT Debug;
-IMPORT Word;
 IMPORT CardSet;
 IMPORT CardSetDef;
 IMPORT CardArraySort;
@@ -16,51 +12,47 @@ FROM Fmt IMPORT F, Int;
 
 TYPE Interval = FiniteInterval.T;
 
-VAR Zero := BigInt.New(0);
+VAR MpzZero := Mpz.NewInt(0);
 
-(*
-PROCEDURE FromInterval(fi : FiniteInterval.T) : T =
+PROCEDURE MpzGetMsb(big : Mpz.T) : [-1 .. LAST(CARDINAL)] =
+  (* Highest bit in the 2s complement representation that differs
+     from the sign bit.  Returns -1 for 0 and -1. *)
+  VAR sgn := Mpz.cmp(big, MpzZero);
   BEGIN
-    IF BigInt.Sign(fi.lo) # BigInt.Sign(fi.hi) THEN
-      RETURN Union(FromIntervalNeg(Interval { fi.lo, Zero }),
-                   FromIntervalPos(Interval { Zero, fi.hi }))
-    ELSIF BigInt.Sign(fi.lo) = -1 THEN
-      RETURN FromIntervalNeg(Interval { fi.lo, fi.hi })
+    IF sgn = 0 THEN
+      RETURN -1
+    ELSIF sgn > 0 THEN
+      RETURN Mpz.sizeinbase(big, 2) - 1
     ELSE
-      RETURN FromIntervalPos(Interval { fi.lo, fi.hi })
+      WITH k = Mpz.sizeinbase(big, 2) DO
+        IF Mpz.tstbit(big, k - 1) = 0 THEN
+          RETURN k - 1
+        ELSE
+          RETURN k - 2  (* e.g. -1: k=1, returns -1 *)
+        END
+      END
     END
-  END FromInterval;
-*)
+  END MpzGetMsb;
 
-PROCEDURE IntBits(big : BigInt.T) : T =
+PROCEDURE IntBits(big : Mpz.T) : T =
   VAR
-    repBits  := MAX(GetMsb(big) + 1, 1); (* even for 0 and -1 we need a word *)
-    repWords := (repBits - 1) DIV BITSIZE(Word.T) + 1;
-    w        := NEW(REF ARRAY OF Word.T, repWords);
-    res      : T;
-
+    repBits := MAX(MpzGetMsb(big) + 1, 1);
+    res     : T;
+    sgn     := Mpz.cmp(big, MpzZero);
   BEGIN
-    CASE Sign(big) OF
-      -1 => res.sign := Bit.One
-    |
-      0..+1 => res.sign := Bit.Zero 
+    IF sgn < 0 THEN res.sign := Bit.One
+    ELSE             res.sign := Bit.Zero
     END;
 
     FOR b := FIRST(res.x) TO LAST(res.x) DO
       res.x[b] := NEW(CardSetDef.T).init()
     END;
-    
-    GetTheBits(big, w^);
-    FOR i := FIRST(w^) TO LAST(w^) DO
-      VAR x := w[i]; BEGIN
-        FOR j := 0 TO Word.Size - 1 DO
-          IF Word.And(x, 1) = 1 THEN
-            EVAL res.x[Bit.One].insert(Word.Size * i + j)
-          ELSE
-            EVAL res.x[Bit.Zero].insert(Word.Size * i + j)
-          END;
-          x := Word.Shift(x, -1)
-        END
+
+    FOR i := 0 TO repBits - 1 DO
+      IF Mpz.tstbit(big, i) # 0 THEN
+        EVAL res.x[Bit.One].insert(i)
+      ELSE
+        EVAL res.x[Bit.Zero].insert(i)
       END
     END;
     RETURN CleanMsbs(res)

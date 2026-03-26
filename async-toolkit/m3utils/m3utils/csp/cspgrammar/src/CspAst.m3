@@ -5,7 +5,7 @@ MODULE CspAst;
 IMPORT CspGuardedCommand;
 IMPORT CspGuardedCommandSeq;
 IMPORT Pathname;
-IMPORT BigInt;
+IMPORT Mpz;
 IMPORT Atom;
 
 IMPORT CspExpression AS X;
@@ -140,7 +140,7 @@ PROCEDURE ElseExpr() : Expr =
     RETURN NEW(X.Else)
   END ElseExpr;
 
-PROCEDURE IntegerExpr(val : BigInt.T) : Expr =
+PROCEDURE IntegerExpr(val : Mpz.T) : Expr =
   BEGIN
     RETURN NEW(X.Integer, val := val)
   END IntegerExpr;
@@ -230,7 +230,7 @@ PROCEDURE ChannelStructureType(members : CspStructMemberSeq.T) : Type =
     RETURN NEW(T.ChannelStructure, members := members)
   END ChannelStructureType;
   
-PROCEDURE ChannelType(numValues : BigInt.T; dir : Direction) : Type =
+PROCEDURE ChannelType(numValues : Mpz.T; dir : Direction) : Type =
   BEGIN
     RETURN NEW(T.Channel, numValues := numValues, dir := dir)
   END ChannelType;

@@ -1172,8 +1172,8 @@
       (m3-convert-port-type-build (caddr ptype))
       (let ((stype (port-type-short ptype)))
         (case (car stype)
-          ((node)  (cons 'Node ((cadr stype))))
-          ((bd)    (cons 'UInt ((cadr stype))))
+          ((node)  (cons 'Node (cadr stype)))
+          ((bd)    (cons 'UInt (cadr stype)))
           (else (error))
           )
         )
@@ -1205,7 +1205,7 @@
         (if (not (pair? stype))
             (error "m3-convert-port-ass-bits : bad type " ptype))
         (dis "m3-convert-port-ass-bits stype " stype dnl)
-        ((cadr stype))))
+        (cadr stype)))
   )
 
 (define (m3-convert-port-ass-category ptype)
@@ -1415,7 +1415,7 @@
   )
 
 (define (m3-int-type-width t)
-  (if (m3-dynamic-int-type? t) (error) ((cadddr t))))
+  (if (m3-dynamic-int-type? t) (error) (cadddr t)))
 
 (define (m3-natively-representable-type? t)
   ;; if a type is "narrow", we can do regular math on it
@@ -4012,7 +4012,7 @@
            (compile!)
            (write-object (sa (build-dir) "/" modname ".text9.scm") text9)
            (do-m3!)
-           (pickle-globals! (sa (build-dir) "/" modname))
+           ;;(pickle-globals! (sa (build-dir) "/" modname))
            'ok)
            
           );;dnoc

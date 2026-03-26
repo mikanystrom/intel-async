@@ -3,7 +3,7 @@
 
 INTERFACE CspExpression;
 IMPORT Atom;
-IMPORT BigInt;
+IMPORT Mpz;
 IMPORT CspSyntax;
 
 TYPE
@@ -21,7 +21,7 @@ TYPE
   Integer <: PublicInteger;
 
   PublicInteger = T OBJECT
-    val : BigInt.T;
+    val : Mpz.T;
   END;
 
   String <: PublicString;

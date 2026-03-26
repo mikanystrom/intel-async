@@ -19,7 +19,7 @@ import ("mdd")
 %SYSTEM_LIBS{"MPZ"} = [ "-lgmp" ]
 %SYSTEM_LIBORDER += [ "MPZ" ] % need this, too
 
-%import ("mpz")
+import ("mpz")
 %if defined("CM3_VERSION")
 %        m3_optimize("T")
 %end

@@ -6,7 +6,7 @@ IMPORT CspSyntax;
 IMPORT CspRange;
 IMPORT CspDirection;
 IMPORT CspInterval;
-IMPORT BigInt;
+IMPORT Mpz;
 
 TYPE
   T <: Public;
@@ -29,7 +29,7 @@ TYPE
   ChannelStructure <: T; (* see CspTypePublic.i3 *)
 
   PubChannel = T OBJECT
-    numValues : BigInt.T;
+    numValues : Mpz.T;
     dir       : CspDirection.T;
   END;
 

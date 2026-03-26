@@ -4,11 +4,11 @@
 INTERFACE VaryBits;
 IMPORT CardSet;
 IMPORT FiniteInterval;
-IMPORT BigInt;
+IMPORT Mpz;
 
 TYPE
   Bit = { Zero, One, Vary };
-  
+
   T = RECORD
     sign : Bit;
     x    : ARRAY Bit OF CardSet.T;
@@ -19,7 +19,7 @@ CONST
 
   Flip    = ARRAY Bit OF Bit  { Bit.One, Bit.Zero, Bit.Vary };
 
-PROCEDURE IntBits(big : BigInt.T) : T;
+PROCEDURE IntBits(big : Mpz.T) : T;
 
 PROCEDURE Union(a, b : T) : T;
   

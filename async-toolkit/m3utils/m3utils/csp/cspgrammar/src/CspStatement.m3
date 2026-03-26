@@ -14,7 +14,7 @@ IMPORT CspSyntax;
 FROM CspSyntax IMPORT Lisp;
 IMPORT Pathname;
 IMPORT SchemeString;
-IMPORT BigInt;
+IMPORT SchemeInt;
 IMPORT CspDeclarator;
 IMPORT CspRange;
 IMPORT CspExpression;
@@ -157,8 +157,8 @@ PROCEDURE ErrorLisp(self : Error) : SchemeObject.T =
   BEGIN
     RETURN List4(Sym("error"),
                  SchemeString.FromText(self.fn),
-                 BigInt.New(self.lno),
-                 BigInt.New(self.cno))
+                 SchemeInt.FromI(self.lno),
+                 SchemeInt.FromI(self.cno))
   END ErrorLisp;
   
 PROCEDURE AssignmentLisp(self : Assignment) : SchemeObject.T =
