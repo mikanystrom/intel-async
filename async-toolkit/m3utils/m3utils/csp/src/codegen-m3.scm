@@ -23,11 +23,11 @@
 ;; so we do it this way
 
 (define *target-word-size* 64) ;; word size of target machine
-(define *bwsz*    (bn *target-word-size*))
-(define *bwszm1*  (xnum-- *bwsz* *big1*))
+(define *bwsz*    *target-word-size*)
+(define *bwszm1*  (xnum-- *bwsz* 1))
 
-(define m3-word-min *big0*)
-(define m3-word-max (xnum--(xnum-<< *big1* *bwsz*) *big1*))
+(define m3-word-min 0)
+(define m3-word-max (xnum--(xnum-<< 1 *bwsz*) 1))
 
 (define m3-integer-min (xnum-- (xnum-<< *big1* *bwszm1*)))
 (define m3-integer-max (xnum-- (xnum-<< *big1* *bwszm1*) *big1*))
@@ -91,13 +91,24 @@
   )
 
 (define (bf x)
-  ;; format a BigInt.T in base 10
-  (BigInt.Format x 10))
+  ;; format an exact integer in base 10
+  (number->string x 10))
+
+(define (m3-format-hex x)
+  ;; format an exact integer as uppercase hex digits (no prefix)
+  (CitTextUtils.ToUpper (number->string (abs x) 16)))
+
+(define (m3-format-literal x base)
+  ;; format as M3 literal: [sign]<base>_<digits>
+  (let ((sign (if (negative? x) "-" ""))
+        (prefix (string-append (number->string base 10) "_"))
+        (digits (CitTextUtils.ToUpper (number->string (abs x) base))))
+    (string-append sign prefix digits)))
 
 (define (m3-native-literal expr)
   (if (not (bigint? expr))
       (error "not a constant integer : " expr)
-      (BigInt.FormatLiteral expr 16)
+      (m3-format-literal expr 16)
       );;fi
   )
 
@@ -161,9 +172,9 @@
          (let ((width (cadddr type)))
            (cond ((not (bigint? width)) #f)
                  ((caddr type)
-                  (cons 'SInt (BigInt.ToInteger width)))
+                  (cons 'SInt width))
                  (else
-                  (cons 'UInt (BigInt.ToInteger width)))
+                  (cons 'UInt width))
                  );;dnoc
            );;tel
          )
@@ -1141,8 +1152,8 @@
       
       (let ((stype (port-type-short ptype)))
         (case (car stype)
-          ((node) (string-append "Node" (BigInt.Format (cadr stype) 10)))
-          ((bd)   (string-append "UInt" (BigInt.Format (cadr stype) 10) "Chan"))
+          ((node) (string-append "Node" (number->string (cadr stype) 10)))
+          ((bd)   (string-append "UInt" (number->string (cadr stype) 10) "Chan"))
           (else (error))
           )
         )
@@ -1161,8 +1172,8 @@
       (m3-convert-port-type-build (caddr ptype))
       (let ((stype (port-type-short ptype)))
         (case (car stype)
-          ((node)  (cons 'Node (BigInt.ToInteger (cadr stype))))
-          ((bd)    (cons 'UInt (BigInt.ToInteger (cadr stype))))
+          ((node)  (cons 'Node ((cadr stype))))
+          ((bd)    (cons 'UInt ((cadr stype))))
           (else (error))
           )
         )
@@ -1178,8 +1189,8 @@
 
       (let ((stype (port-type-short ptype)))
         (case (car stype)
-          ((node) (string-append "UInt" (BigInt.Format (cadr stype) 10)))
-          ((bd)   (string-append "UInt" (BigInt.Format (cadr stype) 10)))
+          ((node) (string-append "UInt" (number->string (cadr stype) 10)))
+          ((bd)   (string-append "UInt" (number->string (cadr stype) 10)))
           (else (error))
           )
         )
@@ -1194,7 +1205,7 @@
         (if (not (pair? stype))
             (error "m3-convert-port-ass-bits : bad type " ptype))
         (dis "m3-convert-port-ass-bits stype " stype dnl)
-        (BigInt.ToInteger (cadr stype))))
+        ((cadr stype))))
   )
 
 (define (m3-convert-port-ass-category ptype)
@@ -1404,7 +1415,7 @@
   )
 
 (define (m3-int-type-width t)
-  (if (m3-dynamic-int-type? t) (error) (BigInt.ToInteger (cadddr t))))
+  (if (m3-dynamic-int-type? t) (error) ((cadddr t))))
 
 (define (m3-natively-representable-type? t)
   ;; if a type is "narrow", we can do regular math on it
@@ -1527,7 +1538,7 @@
 (define (format-int-literal pc cat x)
   (case cat
     ((native)
-     (Fmt.Int (BigInt.ToInteger x) 10))
+     (Fmt.Int x 10))
 
     ((dynamic wide)
      (make-dynamic-constant! pc x))
@@ -1678,7 +1689,7 @@
                  (builder (m3-force-type pc 'native "frame.a" rhs)))
         
                 ((bigint? rhs)
-                 (builder (BigInt.Format rhs 10)))
+                 (builder (number->string rhs 10)))
                 
                 ((binary-expr? rhs)
                  (m3-compile-typed-binop pc
@@ -1951,7 +1962,7 @@
 
 (define (m3-compile-stringify-integer-value pc x)
   (if (bigint? x) ;; are the quotes right here?
-      (sa "\"" (BigInt.Format x 10) "\"") 
+      (sa "\"" (number->string x 10) "\"") 
   
       (let ((type (declared-type pc x)))
         (cond
@@ -2045,7 +2056,7 @@
 
         ((bigint? x)
 ;;         (error) ;; shouldnt happen...
-         (sa "\"" (BigInt.Format x 10) "\""))
+         (sa "\"" (number->string x 10) "\""))
         
         (else (err))
         );;dnoc
@@ -2074,7 +2085,7 @@
   (cond ((string? x) (stringify x))
 
         ((and (bigint? x) (eq? int-class 'native))
-         (BigInt.FormatLiteral x 16))
+         (m3-format-literal x 16))
 
         ((and (bigint? x) (eq? int-class 'dynamic))
          (make-dynamic-constant! pc x))
@@ -2092,7 +2103,7 @@
 (define (m3-compile-native-value pc x)
   ;; compile "x", an integer value, to something with native type
   (cond ((bigint? x)
-         (BigInt.FormatLiteral x 16))
+         (m3-format-literal x 16))
 
         ((native-integer-value? pc x)
          (m3-format-designator pc x))
@@ -2695,7 +2706,7 @@
   (cond ((string? x) (stringify x))
         
         ((bigint? x)
-         (sa "\"0x" (CitTextUtils.ToLower (BigInt.Format x 16)) "\""))
+         (sa "\"0x" (number->string (abs x) 16) "\""))
         
         ((and (boolean? x) x)       (m3-compile-print-value pc *bigm1*))
         
@@ -2779,7 +2790,7 @@
 
                      ((and (eq? sfx 'native)
                            (bigint? rhs))
-                      (sa "16_" (BigInt.Format rhs)))
+                      (m3-format-literal rhs 16))
 
                      (else
                       (m3-format-designator pc rhs))))
@@ -3288,8 +3299,8 @@
     
     (if native
         (let* ((range  (m3-get-intf-range intf))
-               (lo-txt (BigInt.FormatLiteral (car range)  16))
-               (hi-txt (BigInt.FormatLiteral (cadr range) 16))
+               (lo-txt (m3-format-literal (car range)  16))
+               (hi-txt (m3-format-literal (cadr range) 16))
                ) 
           (iw
            (cond ;; special cases per open issue in CM3
@@ -3366,8 +3377,8 @@
         )
     
         (let* ((range  (m3-get-intf-range intf))
-               (lo-txt (BigInt.FormatLiteral (car range)  16))
-               (hi-txt (BigInt.FormatLiteral (cadr range) 16))
+               (lo-txt (m3-format-literal (car range)  16))
+               (hi-txt (m3-format-literal (cadr range) 16))
                ) 
           (if native
               (begin
@@ -3514,7 +3525,7 @@
 
 (define *all-stubs*
   '(CspExpression CspExpressionPublic CspExpressionSeq
-                  CspStatement CspStatementPublic CspStatementSeq CspType CspTypePublic CspStructMember CspStructMemberSeq CspAst CspGuardedCommand CspGuardedCommandSeq CspDeclaration CspDeclarationPublic CspDeclarationSeq CspDirection CspRange CspInterval CspDeclarator CspDeclaratorSeq CspStructDeclarator CspStructDeclaratorSeq CspSyntax CspPort CspPortSeq AtomCspPortSeqTbl TextCspPortSeqTbl FiniteInterval VaryBits DynamicInt WideInt NativeInt Debug BigInt Math Text TextWr FileWr Wr FileRd Rd TextRd SchemeEnvironment SchemeUtils Fmt Atom Word Env CitTextUtils FS FileFinder RegEx TextSeq Fingerprint Mpfr Wx Mpz
+                  CspStatement CspStatementPublic CspStatementSeq CspType CspTypePublic CspStructMember CspStructMemberSeq CspAst CspGuardedCommand CspGuardedCommandSeq CspDeclaration CspDeclarationPublic CspDeclarationSeq CspDirection CspRange CspInterval CspDeclarator CspDeclaratorSeq CspStructDeclarator CspStructDeclaratorSeq CspSyntax CspPort CspPortSeq AtomCspPortSeqTbl TextCspPortSeqTbl FiniteInterval VaryBits DynamicInt WideInt NativeInt Debug Math Text TextWr FileWr Wr FileRd Rd TextRd SchemeEnvironment SchemeUtils Fmt Atom Word Env CitTextUtils FS FileFinder RegEx TextSeq Fingerprint Mpfr Wx Mpz
                   )
   )
 
@@ -3522,7 +3533,6 @@
   '(CspSyntax
     DynamicInt WideInt NativeInt
     Debug
-    BigInt
     Math
     Text TextWr FileWr Wr FileRd Rd TextRd
     SchemeEnvironment
@@ -3843,7 +3853,7 @@
 
 (define (m3-gen-constant-init m3-ident bigint)
   (sa "VAR "
-      m3-ident " := Mpz.InitScan(\"" (BigInt.Format bigint 16) "\", 16);" dnl)
+      m3-ident " := Mpz.InitScan(\"" (number->string bigint 16) "\", 16);" dnl)
   )
 
 (define (m3-make-symtab the-decls the-arrays)
@@ -4049,7 +4059,6 @@
     (mw "IMPORT Pathname;" dnl)
     (mw "IMPORT Thread;" dnl)
     (mw "IMPORT TextSeq;" dnl)
-    (mw "IMPORT BigInt;" dnl)
     (mw "IMPORT CspSim;" dnl)
     (mw "IMPORT CspWorker;" dnl)
     (mw "IMPORT CspMaster;" dnl)
@@ -4094,7 +4103,6 @@
     (mw "  theWorker: CspWorker.T := NIL;" dnl)
     (mw "" dnl)
     (mw "BEGIN" dnl)
-    (mw "  EVAL   BigInt.GetInitialized();" dnl)
     (mw "  " dnl)
     (mw "  TRY" dnl)
     (mw "    IF    pp.keywordPresent(\"-worker\") THEN" dnl)

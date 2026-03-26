@@ -13,7 +13,7 @@
 
 
 
-(if (not (BigInt.GetInitialized)) (error "BigInt not initialized"))
+;; BigInt initialization check removed -- using native exact integers
 
 (define debug #f)
 
@@ -56,7 +56,7 @@
 ;;(loaddata! "functions_p00")
 
 
-(define a (BigInt.New 12))
+(define a 12)
 
 ;;(define csp (obj-method-wrap (convert-prog data) 'CspSyntax.T))
 

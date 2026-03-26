@@ -9,7 +9,7 @@
   (and (pair? type) (eq? 'array (car type))))
 
 (define (index-hash lst)
-  (apply + (map BigInt.Hash lst)))
+  (apply + (map (lambda (x) (remainder (abs x) 1000000007)) lst)))
 
 (define (get-index-list access)
   (if (and (pair? access) (eq? (car access) 'array-access))

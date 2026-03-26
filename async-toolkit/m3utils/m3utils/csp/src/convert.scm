@@ -16,12 +16,10 @@
   )
 
 (define (force-boolean x)
-  (cond ((and (= *bigtc* (rttype-typecode x))
-              (BigInt.Equal *bigm1* x))
+  (cond ((and (number? x) (exact? x) (= -1 x))
          #t)
 
-        ((and (= *bigtc* (rttype-typecode x))
-              (BigInt.Equal *big0* x))
+        ((and (number? x) (exact? x) (= 0 x))
          #f)
 
         (else x)))
@@ -97,8 +95,8 @@
                    (sep-id (caddr args))
                    (stmt   (cadddr args)))
 
-               ((cond ((BigInt.Equal sep-id *big0*) CspAst.SequentialLoop)
-                      ((BigInt.Equal sep-id *big1*) CspAst.ParallelLoop)
+               ((cond ((= sep-id 0) CspAst.SequentialLoop)
+                      ((= sep-id 1) CspAst.ParallelLoop)
                       (else (error "convert-stmt : unknown loop type " sep-id)))
                 idxvar
                 (convert-range range)
@@ -232,7 +230,7 @@
 
   (cond ((null? x) (error "convert-expr : x is null"))
 
-        ((BigInt.IsT x)  (CspAst.IntegerExpr x))
+        ((and (number? x) (exact? x))  (CspAst.IntegerExpr x))
 
         ((string? x) (CspAst.StringExpr x))
 

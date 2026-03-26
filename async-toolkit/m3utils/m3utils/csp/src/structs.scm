@@ -40,14 +40,14 @@
          (let ((bw (cadddr ty)))
            (if (null? bw)
                -1
-               (BigInt.ToInteger bw))))
+               bw)))
         
         ((array-type? ty)
          (let* ((extent (array-extent ty))
                 (min (cadr extent))
                 (max (caddr extent))
                 (ok (and (bigint? min) (bigint? max))))
-           (if ok (* (+ 1 (BigInt.ToInteger (big- max min)))
+           (if ok (* (+ 1 (- max min))
                      (get-type-width (array-elemtype ty))))))
 
         ((struct-type? ty)

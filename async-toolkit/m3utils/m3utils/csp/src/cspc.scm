@@ -808,7 +808,7 @@
         ((eq? 'bits (car d)) (atom-hash (cadr d)))
         ((eq? 'array-access (car d))
          (+ (* 2 (hash-designator (cadr d)))
-            (if (bigint? (caddr d)) (* 57 (BigInt.ToLongReal (caddr d))) 511)))
+            (if (bigint? (caddr d)) (* 57 (caddr d)) 511)))
         ((eq? 'member-access (car d)) (* 3 (hash-designator (cadr d))))
         (else (error "hash-designator : not done yet"))))
 

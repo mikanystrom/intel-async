@@ -16,8 +16,7 @@ IMPORT Scheme;
 IMPORT Pathname;
 IMPORT Thread;
 IMPORT TextSeq;
-IMPORT BigInt;
-
+IMPORT TextRd, SchemeInputPort;
 <*FATAL Thread.Alerted*>
 
 PROCEDURE GetPaths(extras : TextSeq.T) : REF ARRAY OF Pathname.T = 
@@ -38,13 +37,15 @@ PROCEDURE GetPaths(extras : TextSeq.T) : REF ARRAY OF Pathname.T =
 VAR
   pp := NEW(ParseParams.T).init(Stdio.stderr);
   doScheme := FALSE;
+  evalExpr : TEXT := NIL;
   extra := NEW(TextSeq.T).init();
 
 BEGIN
-  EVAL   BigInt.GetInitialized();
-  
   TRY
     doScheme := pp.keywordPresent("-scm");
+    IF pp.keywordPresent("-e") THEN
+      evalExpr := pp.getNext()
+    END;
     pp.skipParsed();
     WITH n = NUMBER(pp.arg^) - pp.next DO
       FOR i := 0 TO n - 1 DO
@@ -56,11 +57,16 @@ BEGIN
     ParseParams.Error => Debug.Error("Can't parse command line")
   END;
 
-  IF doScheme THEN
+  IF doScheme OR evalExpr # NIL THEN
     SchemeStubs.RegisterStubs();
     TRY
       WITH scm = NEW(SchemeM3.T).init(GetPaths(extra)^) DO
-        SchemeReadLine.MainLoop(NEW(ReadLine.Default).init(), scm)
+        IF evalExpr # NIL THEN
+          EVAL scm.loadPort(NEW(SchemeInputPort.T).init(NEW(TextRd.T).init(evalExpr)))
+        END;
+        IF doScheme THEN
+          SchemeReadLine.MainLoop(NEW(ReadLine.Default).init(), scm)
+        END
       END
     EXCEPT
       Scheme.E(err) => Debug.Error("Caught Scheme.E : " & err)

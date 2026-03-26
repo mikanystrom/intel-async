@@ -62,9 +62,7 @@
                   (cb (constant-value 'integer base))
 
                   (result (sa (CitTextUtils.ToLower
-                                    (BigInt.Format
-                                     cn
-                                     (BigInt.ToInteger cb)))
+                                    (number->string cn cb))
                               )
                           );;tluser
                   
@@ -181,13 +179,13 @@
 
 (define *boolean-binops*
   (list
-   `(== integer ,BigInt.Equal) ;; must be first in the list
+   `(== integer ,=) ;; must be first in the list
    `(== boolean ,eq?)
-   `(!= integer ,(lambda(a b)(not (BigInt.Equal a b))))
-   `(<  integer ,(lambda(a b)(<   (BigInt.Compare a b) 0)))
-   `(>  integer ,(lambda(a b)(>   (BigInt.Compare a b) 0)))
-   `(>= integer ,(lambda(a b)(>=  (BigInt.Compare a b) 0)))
-   `(<= integer ,(lambda(a b)(<=  (BigInt.Compare a b) 0)))
+   `(!= integer ,(lambda(a b)(not (= a b))))
+   `(<  integer ,<)
+   `(>  integer ,>)
+   `(>= integer ,>=)
+   `(<= integer ,<=)
 
    ;; * below here doesnt mean bitwise operations.
    ;; it means that the operands will be coerced to boolean
@@ -403,12 +401,12 @@
           
           ((boolean)
            (if (bigint? res)
-               (if (eq? *big0* res) #f #t)
+               (if (= 0 res) #f #t)
                (do-error))
            )
           
           ((string)
-           (cond ((bigint? res)  (BigInt.Format res 10))
+           (cond ((bigint? res)  (number->string res 10))
                  ((boolean? res)
                   (if res "-1" "0"))
                  (else (do-error)))

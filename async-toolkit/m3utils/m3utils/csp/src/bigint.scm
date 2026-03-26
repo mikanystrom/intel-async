@@ -5,93 +5,54 @@
 ;;
 ;; bigint.scm
 ;;
-;; Manipulate BigInt.T from Karl Papadantonakis's unlimited-precision
-;; arithmetic library.
+;; Integer arithmetic for the CSP compiler, using mscheme's native
+;; exact integer tower (fixnum + GMP bignum).
 ;;
-;; Note that these types are only used internally in the compiler.
-;; The Modula-3 generating back-end uses GNU's gmp/mpz format for the
-;; generated code.
+;; Previously wrapped BigInt.T; now uses native Scheme exact integers
+;; with bitwise-and, bitwise-ior, bitwise-xor, bitwise-not,
+;; arithmetic-shift, integer-length builtins from mscheme.
 ;;
 
 (define (bigint-dbg . x)
 ;;    (apply dis x)
   )
-  
+
 
 ;;
-;; fundamental constants
+;; fundamental constants -- now plain exact integers
 ;;
 
-(define *bigm1* (BigInt.New -1))
-(define *big0*  (BigInt.New  0))
-(define *big1*  (BigInt.New  1))
-(define *big2*  (BigInt.New  2))
-
-(define *bigtc* (rttype-typecode *big1*)) ;; typecode of BigInt.T
+(define *bigm1* -1)
+(define *big0*   0)
+(define *big1*   1)
+(define *big2*   2)
 
 (define (bigint? x)
-  ;; test for bigint-ness
-  (cond ((null? x) #f)
-        ((pair? x) #f)
-        ((= *bigtc* (rttype-typecode x)) #t)
-        (else #f)))
-
-(define (make-big-op real-op big-op . init-val)
-  (define (the-op a  b)
-    (if (and (number? a) (number? b))
-        (real-op a b)
-        (big-op (if (bigint? a) a (BigInt.New a))
-                (if (bigint? b) b (BigInt.New b)))))
-  
-  (lambda x
-
-;;    (dis x dnl)
-    
-    (if (null? (cdr x))
-        (if (not (null? init-val))
-            (the-op (car init-val) (car x))
-            (car x))
-        (fold-left
-         the-op
-         (car x)
-         (cdr x))
-        )
-    )
-  )
+  ;; test for exact integer
+  (and (number? x) (exact? x)))
 
 (define (force-bigint x)
   (cond ((null? x) x)
-        ((bigint? x) x)
-        (else (BigInt.New x))))
+        ((and (number? x) (exact? x)) x)
+        ((number? x) (inexact->exact (round x)))
+        (else x)))
 
-(define (make-big-binop real-op big-op)
-  (lambda(a . blst)
-    (if (null? b)
-    (if (and (number? a) (number? b))
-                  (real-op a b)
-                  (big-op (if (bigint? a) a (BigInt.New a))
-                          (if (bigint? b) b (BigInt.New b)))))))
-  
 (define (make-big x)
   (cond ((null? x) (error "make-big of nil"))
-        ((bigint? x) x)
-        (else (BigInt.New x))))
+        ((and (number? x) (exact? x)) x)
+        ((number? x) (inexact->exact (round x)))
+        (else (error "make-big: not a number: " x))))
 
 (define (big<< x sa)
-  (BigInt.Shift x (BigInt.ToInteger sa)))
-
+  (arithmetic-shift x sa))
 
 (define (big>> x sa)
-  (BigInt.Shift x (- (BigInt.ToInteger sa))))
+  (arithmetic-shift x (- sa)))
 
 (define (dumb-binop-range op)
   (lambda (a b)
     (bigint-dbg "dumb-binop-range " op " " a " " b dnl)
-    (let* ((all-pairs   (cartesian-product
-                         (map force-bigint a)
-                         (map force-bigint b)))
-
-           
+    (let* ((all-pairs   (cartesian-product a b))
            (all-results (map eval (map (lambda(x)(cons op x)) all-pairs)))
            (min-res     (apply big-min all-results))
            (max-res     (apply big-max all-results)))
@@ -99,83 +60,74 @@
       (bigint-dbg "all-results : " all-results dnl)
       (bigint-dbg "min-res     : " min-res dnl)
       (bigint-dbg "max-res     : " max-res dnl)
-      
+
       (list min-res max-res))))
 
-(define (big-compare op) (lambda(a b) (op (BigInt.Compare
-                                           (force-bigint a)
-                                           (force-bigint b)) 0)))
+(define (big-compare a b) (cond ((< a b) -1) ((> a b) 1) (else 0)))
 
-(define big>  (big-compare >))
-(define big<  (big-compare <))
-(define big>= (big-compare >=))
-(define big<= (big-compare <=))
-(define big=  (big-compare =))
+(define big>  >)
+(define big<  <)
+(define big>= >=)
+(define big<= <=)
+(define big=  =)
 
-(define (big-neg? b) (big< b *big0*))
-(define (big-zero? b) (big= b *big0*))
+(define big-neg?  negative?)
+(define big-zero? zero?)
 
 (define (big/ a b)
   (cond
-   ((big-zero? b) *big0*) ;; weird CSP semantics for dbZ
-   ((big-neg? a) (big- (big/ (big- a)       b )))
-   ((big-neg? b) (big- (big/       a  (big- b))))
-   (else (BigInt.Div a b))))
+   ((zero? b) 0) ;; weird CSP semantics for dbZ
+   (else (quotient a b))))
 
 (define (big% a b)
-  (cond ((big-zero? b) *big0*) ;; more weird CSP semantics
-        ((big-neg? a) (big- (big% (big- a)       b )))
-        ((big-neg? b)       (big%       a  (big- b)) )
-        (else (BigInt.Mod a b))))
+  (cond ((zero? b) 0) ;; more weird CSP semantics
+        (else (remainder a b))))
 
 (define (big** a b)
   (cond
-   ((big-zero? a) *big0*) ;; covers 0**0 - weird CSP semantics
-   (else (BigInt.Pow a b))))
+   ((zero? a) 0) ;; covers 0**0 - weird CSP semantics
+   (else (expt a b))))
 
 (let () ;; don't pollute the global environment
-  
-  (define +   (make-big-op +        BigInt.Add))
-  (define *   (make-big-op *        BigInt.Mul))
-  (define -   (make-big-op -        BigInt.Sub 0)) ;; special syntax
-  (define /   (make-big-op /        BigInt.Div 1)) ;; special syntax
-  (define min (make-big-op min      BigInt.Min))
-  (define max (make-big-op max      BigInt.Max))
-  (define pow (make-big-op Math.pow BigInt.Pow))   ;; associates wrong way?
-      
-  (define-global-symbol `big+    +  )
-  (define-global-symbol `big-    -  )
-  (define-global-symbol `big*    *  )
-;;  (define-global-symbol `big/    /  )
-  (define-global-symbol `big-min min)
-  (define-global-symbol `big-max max)
-  (define-global-symbol `big-pow pow)
+
+  (define big+   +)
+  (define big-   -)
+  (define big*   *)
+  (define big-min min)
+  (define big-max max)
+  (define big-pow expt)
+
+  (define-global-symbol 'big+    big+)
+  (define-global-symbol 'big-    big-)
+  (define-global-symbol 'big*    big*)
+  (define-global-symbol 'big-min big-min)
+  (define-global-symbol 'big-max big-max)
+  (define-global-symbol 'big-pow big-pow)
 
   ;; ops on finite ranges...
-  (define-global-symbol 'frange+ (dumb-binop-range +))
-  (define-global-symbol 'frange- (dumb-binop-range -))
-  (define-global-symbol 'frange* (dumb-binop-range *))
-  (define-global-symbol 'frange/ (dumb-binop-range /))
+  (define-global-symbol 'frange+ (dumb-binop-range big+))
+  (define-global-symbol 'frange- (dumb-binop-range big-))
+  (define-global-symbol 'frange* (dumb-binop-range big*))
+  (define-global-symbol 'frange/ (dumb-binop-range big/))
 
-  
   )
 
-(define big| BigInt.Or) ;; |)
+(define big| bitwise-ior) ;; |)
 
-(define big& BigInt.And)
+(define big& bitwise-and)
 
-(define big^ BigInt.Xor)
+(define big^ bitwise-xor)
 
 (define (bigbits x a b)
-  (let* ((w    (big+ *big1* (big- b a)))
+  (let* ((w    (+ 1 (- b a)))
          (sx   (big>> x a))
-         (mask (big- (big<< *big1* w) *big1*)))
+         (mask (- (big<< 1 w) 1)))
     (big& sx mask)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; an extended number "xnum" is one of
-;; 1. a BigInt.T
+;; 1. an exact integer
 ;; 2. -inf
 ;; 3. +inf
 ;; 4.  nan
@@ -196,8 +148,8 @@
 (define *xnum-special-values* '(nan -inf +inf))
 
 (define (make-xnum x)
-  (cond ((bigint? x) x)
-        ((number? x) (force-bigint x))
+  (cond ((and (number? x) (exact? x)) x)
+        ((number? x) (inexact->exact (round x)))
         ((eq? '-inf x) x)
         ((eq? '+inf x) x)
         ((eq? 'nan  x) x)
@@ -206,7 +158,7 @@
 
 (define (check-xnum x)
   (map (lambda(q)
-         (if (not (or (bigint? x) (member x '(-inf +inf nan))))
+         (if (not (or (and (number? x) (exact? x)) (member x '(-inf +inf nan))))
              (error "not an xnum : " x)))))
 
 (define (xnum-infinite? x) (member x '(-inf +inf)))
@@ -226,16 +178,16 @@
         ((eq? b '-inf) +1)
         ((eq? b '+inf) -1)
         ((member 'nan (list a b)) 0)  ;; hmm.....
-        (else (BigInt.Compare a b))))
+        (else (big-compare a b))))
 
 
-(define (xnum-zero? x) (eq? x xnum-0))
+(define (xnum-zero? x) (and (number? x) (= x 0)))
 (define (xnum-neg? x) (= -1 (xnum-compare x xnum-0)))
 (define (xnum-pos? x) (= +1 (xnum-compare x xnum-0)))
 
-(define xnum-0 *big0*)
-(define xnum-1 *big1*)
-(define xnum-m1 *bigm1*)
+(define xnum-0  0)
+(define xnum-1  1)
+(define xnum-m1 -1)
 
 (define (xnum-+ a b)
   (let ((both (list a b)))
@@ -243,35 +195,35 @@
           ((and (member '+inf both) (member '-inf both)) 'nan)
           ((member '+inf both) '+inf)
           ((member '-inf both) '-inf)
-          ((eq? xnum-0 a) b)
-          ((eq? xnum-0 b) a)
-          (else (big+ a b)))))
+          ((xnum-zero? a) b)
+          ((xnum-zero? b) a)
+          (else (+ a b)))))
 
 (define (xnum-uneg a)
   ;; negation
   (cond ((eq? a 'nan) 'nan)
         ((eq? a '+inf) '-inf)
         ((eq? a '-inf) '+inf)
-        (else (BigInt.Neg a))))
+        (else (- a))))
 
 (define (xnum-sgn a)
   (cond ((eq? a 'nan)   0)
         ((eq? a '+inf) +1)
         ((eq? a '-inf) -1)
-        (else (BigInt.Sign a))))
+        (else (cond ((positive? a) 1) ((negative? a) -1) (else 0)))))
 
 (define (xnum-abs a)
   (cond ((eq? a 'nan)   a)
         ((eq? a '+inf) '+inf)
         ((eq? a '-inf) '+inf)
-        (else (BigInt.Abs a))))
+        (else (abs a))))
 
 (define (xnum-log2 a)
   ;; note this ROUNDS UP -- as in CSP.
   (cond ((eq? a 'nan)   a)
         ((eq? a '+inf) '+inf)
         ((eq? a '-inf) '+inf)
-        (else (BigInt.New (xnum-clog2 a)))))
+        (else (xnum-clog2 a))))
 
 
 (define (xnum-- a . b)
@@ -290,7 +242,7 @@
     (cond (have-nan 'nan)
 
           ((eq? a xnum-m1) (xnum-uneg b))
-          
+
           ;; { no nan }
           (have-neg? (xnum-* (make-xnum sgn) (apply xnum-* babs)))
 
@@ -301,15 +253,15 @@
                ))
 
           ;; { no nan & no neg & no inf }
-          (else (big* a b)))))
+          (else (* a b)))))
 
 (define *xnum-special-values* '(nan +inf -inf))
 
 (define (xnum-fin a)
   (cond ((member a *xnum-special-values*) a)
-        ((eq? *big0* a) 0)
+        ((xnum-zero? a) 0)
         (else 'fin)))
-  
+
 (define (xnum-/ a b)
   (let* ((both      (list a b))
          (bsgn      (map xnum-sgn both))
@@ -319,7 +271,7 @@
          (have-nan  (member 'nan both)))
 
     (bigint-dbg "bfin : " bfin dnl)
-    
+
     (cond (have-nan 'nan)
 
           ((eq? b xnum-1) a)
@@ -332,10 +284,10 @@
 
           ((equal? bfin '(0 0)) 'nan) ;; 0/0
 
-          ((eq? a xnum-0) xnum-0) ;; 0 / not-nan-not-zero
+          ((xnum-zero? a) xnum-0) ;; 0 / not-nan-not-zero
 
-          ((eq? b xnum-0) '+inf) ;; not-nan-not-zero / 0
-          
+          ((xnum-zero? b) '+inf) ;; not-nan-not-zero / 0
+
           ((equal? bfin '(fin fin)) (big/ a b))
 
           ((equal? bfin '(+inf fin)) '+inf)
@@ -356,7 +308,7 @@
          (have-nan (member 'nan both)))
 
     (cond (have-nan 'nan) ;; should (pow 1 nan) = 1 or nan?
-          
+
           ;; { no nan }
           ((eq? a xnum-1) xnum-1)
 
@@ -364,7 +316,7 @@
 
           ((equal? bfin '(fin 0)) xnum-1)
 
-          ((xnum-neg? b) (if (eq? a xnum-0) 'nan xnum-0))
+          ((xnum-neg? b) (if (xnum-zero? a) 'nan xnum-0))
 
           ((equal? bfin '(-inf 0)) 'nan)
 
@@ -374,7 +326,7 @@
 
           ((equal? bfin '(0 +inf)) 'nan)
 
-          (else (big-pow a b)))))
+          (else (expt a b)))))
 
 (define xnum-**  xnum-pow)
 
@@ -388,22 +340,22 @@
   (case a
     ((nan) 'nan)
     ((-inf +inf) +inf)
-    (else (BigInt.GetAbsMsb a))))
+    (else (integer-length (abs a)))))
 
-(define (xnum-clog2 x) (+ 1 (xnum-msb-abs (xnum-- x *big1*))))
+(define (xnum-clog2 x) (+ 1 (xnum-msb-abs (xnum-- x 1))))
 
 (define (xnum-max a . b)
   (define (do2 a b)
     (define blist (list a b))
-    (cond 
+    (cond
      ((member '+inf blist) '+inf)
      ((member 'nan blist) 'nan)
      ((eq? a '-inf) b)
      ((eq? b '-inf) a)
-     (else (BigInt.Max a b))))
+     (else (max a b))))
 
   (fold-left do2 a b))
-    
+
 (define (xnum-min a . b)
 
   (define (do2 a b)
@@ -413,61 +365,61 @@
      ((member 'nan blist) 'nan)
      ((eq? a '+inf) b)
      ((eq? b '+inf) a)
-     (else (BigInt.Min a b))))
+     (else (min a b))))
 
   (fold-left do2 a b))
 
 (define (xnum-<< x sa)
-  (cond ((eq? *big0* sa) x)
+  (cond ((and (number? sa) (= 0 sa)) x)
         ((eq? x 'nan) 'nan)
         ((eq? x '-inf) '-inf)
         ((eq? x '+inf) '+inf)
         ((eq? sa 'nan) 'nan)
         ((eq? sa '+inf) '+inf)
-        ((eq? sa '-inf) *big0*)
-        (else (let* ((xlog2 (BigInt.GetAbsMsb x))
-                     (rlog2 (+ (BigInt.ToInteger sa) xlog2)))
-                (if (> rlog2 *maximum-size*) +inf (BigInt.Shift x (BigInt.ToInteger sa)))))))
+        ((eq? sa '-inf) 0)
+        (else (let* ((xlog2 (integer-length (abs x)))
+                     (rlog2 (+ sa xlog2)))
+                (if (> rlog2 *maximum-size*) +inf (arithmetic-shift x sa))))))
 
 (define (xnum->> x sa) (xnum-<< x (xnum-uneg sa)))
 
 (define (xnum-| a b) ;; |)
   (let ((blist (list a b)))
     (cond
-     ((eq? a *big0*) b)
-     ((eq? b *big0*) a)
+     ((xnum-zero? a) b)
+     ((xnum-zero? b) a)
      ((member? '+inf blist) +inf)
      ((member? '-inf blist) -inf)
      ((member? 'nan blist)  nan)
-     (else (BigInt.Or a b)))))
+     (else (bitwise-ior a b)))))
 
 (define (xnum-^ a b) ;; |)
   (let ((blist (list a b)))
-    (cond 
-     ((eq? a *big0*) b)
-     ((eq? b *big0*) a)
+    (cond
+     ((xnum-zero? a) b)
+     ((xnum-zero? b) a)
      ((member? '+inf blist) +inf)
      ((member? '-inf blist) -inf)
      ((member? 'nan blist)  nan)
-     (else (BigInt.Xor a b)))))
+     (else (bitwise-xor a b)))))
 
 (define (xnum-& a b) ;; |)
   (let ((blist (list a b)))
     (cond
-     ((eq? a *big0*) *big0*)
-     ((eq? b *big0*) *big0*)
+     ((xnum-zero? a) 0)
+     ((xnum-zero? b) 0)
      ((member? '+inf blist) nan)
      ((member? '-inf blist) nan)
      ((member? 'nan blist)  nan)
-     (else (BigInt.And a b)))))
+     (else (bitwise-and a b)))))
 
 (define (xnum-~ a)
-  (cond 
-     ((eq? a *big0*) *bigm1*)
-     ((eq? a *bigm1*) *big0*)
+  (cond
+     ((xnum-zero? a) -1)
+     ((and (number? a) (= a -1)) 0)
      ((eq? a '+inf) nan)
      ((eq? a '-inf) nan)
-     (else (BigInt.Not a))))
+     (else (bitwise-not a))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -493,8 +445,8 @@
   ;; a point-range is a range of a single value
   (list x x))
 
-(define *range1* (make-point-range *big1*))
-(define *rangem1* (make-point-range *bigm1*))
+(define *range1* (make-point-range 1))
+(define *rangem1* (make-point-range -1))
 
 (define (range-min r) (car r))
 
@@ -524,26 +476,26 @@
 (define (range-member? x r)
   (range-contains? r (make-point-range x)))
 
-(define *range-one*           `(,*big1* ,*big1*))
-(define *an-empty-range*      `(   +inf   -inf )) 
-(define *range-zero*          `(,*big0* ,*big0*))
-(define *range-bit*           `(,*big0* ,*big1*))
-(define *range-unsigned-byte* `(,*big0* ,(BigInt.New 255)))
+(define *range-one*           '(1 1))
+(define *an-empty-range*      '(+inf -inf))
+(define *range-zero*          '(0 0))
+(define *range-bit*           '(0 1))
+(define *range-unsigned-byte* '(0 255))
 
 ;; natural, pos, and neg DO NOT include zero.
-(define *range-natural*    `(,*big1*     +inf ))
+(define *range-natural*    '(1     +inf))
 (define *range-pos* *range-natural*)
 
-(define *range-neg*        `(-inf    ,*bigm1* ))
-(define *range-nonneg*     `(,*big0*     +inf ))
-(define *range-nonpos*     `(-inf    ,*big0*  ))
+(define *range-neg*        '(-inf    -1))
+(define *range-nonneg*     '(0     +inf))
+(define *range-nonpos*     '(-inf    0))
 
 ;; the entire number line:
 (define *range-complete*   '(-inf        +inf))
 
 (define (range-is-zero? r) (range-eq? r *range-zero*))
 
-(define (range-contains-zero? r) (range-member? *big0* r))
+(define (range-contains-zero? r) (range-member? 0 r))
 
 (define (range-one? f)  (range-eq? r *range-one*))
 
@@ -567,7 +519,7 @@
              (bigint-dbg "all-results : " all-results dnl)
              (bigint-dbg "min-res     : " min-res dnl)
              (bigint-dbg "max-res     : " max-res dnl)
-             
+
              (list min-res max-res))))))
 
 (define (range-union ra . rb)
@@ -576,7 +528,7 @@
                 (xnum-max (range-max ra) (range-max rb))))
 
   (fold-left do2 ra rb))
-              
+
 (define (range-intersection ra . rb)
   (define (do2 ra rb)
     (make-range (xnum-max (range-min ra) (range-min rb))
@@ -597,11 +549,11 @@
   (cond ((range-empty? r) r)
         ((not (range-member? x r)) r)
         ((eq? (car r) x)  (list
-                           (xnum-+ x *big1*)
+                           (xnum-+ x 1)
                            (cadr r)))
         ((eq? (cadr r) x) (list
                            (car r)
-                           (xnum-- x *big1*)))
+                           (xnum-- x 1)))
         (else r)))
 
 (define (split-range r x)
@@ -646,13 +598,13 @@
 
 (define (range-/ a b)
   (let ((unsigned/ (make-simple-range-binop xnum-/)))
-    (cond ((range-extends? a *big0*)
-           (let* ((alist (split-range a *big0*))
+    (cond ((range-extends? a 0)
+           (let* ((alist (split-range a 0))
                   (rlist (map (lambda(a)(range-/ a b)) alist)))
              (apply range-union rlist)))
 
-          ((range-extends? b *big0*)
-           (let* ((blist (split-range b *big0*))
+          ((range-extends? b 0)
+           (let* ((blist (split-range b 0))
                   (rlist (map (lambda(b)(range-/ a b)) blist)))
              (apply range-union rlist)))
 
@@ -662,7 +614,7 @@
 
           ((and (eq? a *range-zero*) (eq? b *range-zero*))
            (unsigned/ a b ))
-          
+
           (else (if (not (and (range-nonneg? a) (range-nonneg? b)))
                     (error
                      "attempting unsigned/ of non-positive ranges : " a b))
@@ -672,18 +624,18 @@
   )
 
 (define (range-% a b)
-  (cond ((range-extends? a *big0*)
-         (let* ((alist (split-range a *big0*))
+  (cond ((range-extends? a 0)
+         (let* ((alist (split-range a 0))
                 (rlist (map (lambda(a)(range-% a b)) alist)))
            (apply range-union rlist)))
-        
-        ((range-extends? b *big0*)
-           (let* ((blist (split-range b *big0*))
+
+        ((range-extends? b 0)
+           (let* ((blist (split-range b 0))
                   (rlist (map (lambda(b)(range-% a b)) blist)))
              (apply range-union rlist)))
 
         ((range-is-zero? a) a) ;; return zero range
-        
+
         ((range-is-zero? b) b) ;; return zero range
 
         ;; result has sign of dividend
@@ -697,10 +649,10 @@
 
         ;; we get here, both ranges are positive
 
-        (else (let* ((xa  (range-extend a *big0*))
+        (else (let* ((xa  (range-extend a 0))
 
-                     (xb  (range-extend b *big0*))
-                     
+                     (xb  (range-extend b 0))
+
                      (xbr (range-remove xb (range-max xb)))
                      ;; remove the max point of xb, since the remainder
                      ;; is always at least one less than the divisor
@@ -724,7 +676,7 @@
   (set! r-shl-b b)
 
 ;;  (error)
-  
+
   (let ((pos<< (make-simple-range-binop xnum-<<)))
     (cond
      ((range-infinite? a) a)
@@ -732,20 +684,20 @@
      ((range-is-zero? a) a)
 
      ((range-infinite? b) *range-complete*)
-     
-     ((range-extends? a *big0*)
-      (let* ((alist (split-range a *big0*))
+
+     ((range-extends? a 0)
+      (let* ((alist (split-range a 0))
              (rlist (map (lambda(a)(range-<< a b)) alist))
              (ilist (map invert-range rlist)))
         (apply range-union (append rlist ilist (list (pos<< a b))))))
-     
+
      ((range-neg? a) (range-union
                       (pos<< a b)
                       (invert-range (range-<< (invert-range a) b))))
-     
+
      ((and (eq? a *range-zero*) (eq? b *range-zero*))
       (pos<< a b ))
-     
+
      (else (pos<< a b))
      );;dnoc
     );tel
@@ -769,7 +721,7 @@
 
   (cond ((range-infinite? a) b)
         ((range-infinite? b) a)
-        (else 
+        (else
          (let* ((amin (range-min a))
                 (amax (range-max a))
                 (bmin (range-min b))
@@ -789,7 +741,7 @@
 
          (neg  (or (xnum-neg? amin) (xnum-neg? bmin)))
          (pos  (or (xnum-pos? amax) (xnum-pos? bmax)))
-                
+
          (rmin (if neg
                    (xnum-min
                     (xnum-clearallbits amin)
@@ -797,7 +749,7 @@
                     (xnum-~ (xnum-setallbits amax))
                     (xnum-~ (xnum-setallbits bmax))
                     )
-                   *big0*))
+                   0))
          (rmax (if pos
                    (xnum-max
                     (xnum-setallbits amax)
@@ -805,45 +757,43 @@
                     (xnum-~ (xnum-clearallbits amin))
                     (xnum-~ (xnum-clearallbits bmin))
                     )
-                   *bigm1*))
+                   -1))
          )
     (make-range rmin rmax)))
-  
+
 (define (range-not a)
   (negate-range (range-- a *range1*)))
 
 (define (range-pos-& a b)
   ;; a and b are positive ranges
-  (make-range *big0* (xnum-min (range-max a) (range-max b))))
+  (make-range 0 (xnum-min (range-max a) (range-max b))))
 
 (define xnum-pos-& xnum-&)
 
 (define (range-pos-| a b) ;|)
   ;; a and b are positive ranges
-  (make-range *big0* (xnum-setallbits (xnum-max (range-max a) (range-max b)))))
+  (make-range 0 (xnum-setallbits (xnum-max (range-max a) (range-max b)))))
 
 (define xnum-pos-| xnum-|) ;)
 
-                
+
 (define (xnum-setallbits x)
   ;; set all bits up to and including the highest set bit in x
-  (cond ((eq? x +inf) *bigm1*)
+  (cond ((eq? x +inf) -1)
 
         ((xnum-pos? x)
-         (xnum-- (xnum-pow *big2*
-                           (BigInt.New (xnum-clog2 (xnum-+ x *big1*))))
-                 *big1*))
-        ((eq? x *big0*) *big0*)
-        ((xnum-neg? x) *bigm1*)
+         (- (expt 2 (xnum-clog2 (+ x 1))) 1))
+        ((xnum-zero? x) 0)
+        ((xnum-neg? x) -1)
         (else (error))))
 
 (define (xnum-clearallbits x)
   ;; clear all bits up to and including the highest clear bit in x
-  (cond ((eq? x -inf) *big0*) 
+  (cond ((eq? x -inf) 0)
         ((xnum-neg? x)
          (xnum-~ (xnum-setallbits (xnum-~ x))))
-        ((eq? x *big0*) *big0*)
-        ((xnum-pos? x) *big0*)
+        ((xnum-zero? x) 0)
+        ((xnum-pos? x) 0)
         (else (error))))
 
 
@@ -851,20 +801,20 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (define (xnum-bits x lo hi)
-  (cond ((eq? x *big0*) *big0*)
-        ((eq? lo +inf) *big0*)
+  (cond ((xnum-zero? x) 0)
+        ((eq? lo +inf) 0)
         ((eq? lo -inf) nan)
         ((eq? lo  nan) nan)
 
-        ((eq? (xnum-> lo hi) #t) *big0*)
-         
+        ((eq? (xnum-> lo hi) #t) 0)
+
         ;; lo is finite
-        ((not (eq? lo *big0*))
-         (xnum-bits (xnum->> x lo) *big0* (xnum-+ (xnum-- hi lo) 1)))
+        ((not (xnum-zero? lo))
+         (xnum-bits (xnum->> x lo) 0 (xnum-+ (xnum-- hi lo) 1)))
 
         ;; lo is zero
         ((eq? hi +inf) x)
-        ((eq? hi -inf) *big0*)
+        ((eq? hi -inf) 0)
         ((eq? hi nan) nan)
 
         ;; hi is finite
@@ -887,9 +837,9 @@
 (define xex #f)
 (define (xnum-eval expr)
   (set! xex expr)
-  (cond ((bigint? expr) expr)
-        ((number? expr) (BigInt.New expr))
-        ((string? expr) (BigInt.ScanBased expr 10 #f))
+  (cond ((and (number? expr) (exact? expr)) expr)
+        ((number? expr) (inexact->exact (round expr)))
+        ((string? expr) (string->number expr 10))
 
         ((and (pair? expr)
               (eq? 'apply (car expr)))
@@ -909,11 +859,11 @@
         ((= 2 (length expr))
          (apply (convert-eval-xnum-binop (car expr))
                 (map xnum-eval (cdr expr))))
-        
+
         (else (error "xnum-eval : can't handle : " expr))))
 
 (define mult  1e11)
-(define bmult (BigInt.New mult)) 
+(define bmult (inexact->exact (round mult)))
 
 (define *r* #f)
 (define *rr* #f)
@@ -923,14 +873,14 @@
          (lo (car rr))
          (hi (cadr rr))
          (eq (eq? lo hi))
-         (delta (if (eq? lo hi) *big0* (xnum-- hi lo)))
+         (delta (if (eq? lo hi) 0 (xnum-- hi lo)))
          (r1    (random)))
 
     (cond ((< r1 0.1) (car range))  ;; may be -inf
           ((< r1 0.2) (cadr range)) ;; may be +inf
           (else
            (let* ((r2 (* mult (random)))
-                  (b2 (BigInt.New (round r2)))
+                  (b2 (inexact->exact (round r2)))
                   (x  (xnum-* b2 delta))
                   (y  (xnum-/ x  bmult))
                   (res (xnum-+ lo y))
@@ -938,7 +888,7 @@
 
              (set! *r* range)
              (set! *rr* rr)
-             
+
              (bigint-dbg "range = " range dnl)
              (bigint-dbg "rr    = " rr dnl)
              (bigint-dbg "delta = " delta dnl)
@@ -971,11 +921,11 @@
     )
   )
 
-(define *val-lo* (BigInt.New -100))
-(define *val-hi* (BigInt.New +100))
+(define *val-lo* -100)
+(define *val-hi* +100)
 (define *val-range* (make-range *val-lo* *val-hi*))
-(define *val-pos* (make-range *big1* *val-hi*))
-(define *val-neg* (make-range *val-lo* *bigm1*))
+(define *val-pos* (make-range 1 *val-hi*))
+(define *val-neg* (make-range *val-lo* -1))
 
 
 (define (make-random-range r)
@@ -997,13 +947,12 @@
 ;; some testing stuff
 
 ;;(if #t
-(define (bs16 s) (BigInt.ScanBased s 16))
-(define (bf16 s) (BigInt.Format s 16))
-(BigInt.Shift (bs16 "-c0edbabe") 4)
-(BigInt.Shift (bs16 "-c0edbabe") -31)
-;;(bf16 (BigInt.Shift (bs16 "-c0edbabe") -44))
+(define (bs16 s) (string->number s 16))
+(define (bf16 x) (number->string x 16))
+(arithmetic-shift (bs16 "-c0edbabe") 4)
+(arithmetic-shift (bs16 "-c0edbabe") -31)
+;;(bf16 (arithmetic-shift (bs16 "-c0edbabe") -44))
 ;;)
 
-(define bn BigInt.New)
-
+(define bn inexact->exact)
 
