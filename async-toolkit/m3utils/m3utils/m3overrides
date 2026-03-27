@@ -228,5 +228,4 @@ override("globelib", TOP & "/globe")
 override("geodata", TOP & "/globe")
 override("airports", TOP & "/globe")
 
-SYSTEM_LIBS{"MPZ"} = [ "-lgmp" ]
-SYSTEM_LIBORDER += [ "MPZ" ] % need this, too
+% MPZ is now defined in the system config (cm3.cfg / ARM64_DARWIN / Unix.common)
