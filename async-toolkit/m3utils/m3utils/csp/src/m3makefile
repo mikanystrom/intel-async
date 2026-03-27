@@ -113,6 +113,8 @@ SchemeStubs ("MakeConstant")
 ExportSchemeStubs ("cspc")
 importSchemeStubs()
 
+LinkCompiledSchemeAs ("CspcCompiled")
+
 implementation ("Main")
 
 program ("cspc")

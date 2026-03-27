@@ -3512,20 +3512,17 @@
   '("libm3"
     "cit_util"
     "parseparams"
-    "simpletoken"
     "mscheme"
     "modula3scheme"
     "sstubgen"
-    "parseparams"
     "cspsimlib"
-    "mpfr"
     "cspgrammar"
     )
   )
 
 (define *all-stubs*
   '(CspExpression CspExpressionPublic CspExpressionSeq
-                  CspStatement CspStatementPublic CspStatementSeq CspType CspTypePublic CspStructMember CspStructMemberSeq CspAst CspGuardedCommand CspGuardedCommandSeq CspDeclaration CspDeclarationPublic CspDeclarationSeq CspDirection CspRange CspInterval CspDeclarator CspDeclaratorSeq CspStructDeclarator CspStructDeclaratorSeq CspSyntax CspPort CspPortSeq AtomCspPortSeqTbl TextCspPortSeqTbl FiniteInterval VaryBits DynamicInt WideInt NativeInt Debug Math Text TextWr FileWr Wr FileRd Rd TextRd SchemeEnvironment SchemeUtils Fmt Atom Word Env CitTextUtils FS FileFinder RegEx TextSeq Fingerprint Mpfr Wx Mpz
+                  CspStatement CspStatementPublic CspStatementSeq CspType CspTypePublic CspStructMember CspStructMemberSeq CspAst CspGuardedCommand CspGuardedCommandSeq CspDeclaration CspDeclarationPublic CspDeclarationSeq CspDirection CspRange CspInterval CspDeclarator CspDeclaratorSeq CspStructDeclarator CspStructDeclaratorSeq CspSyntax CspPort CspPortSeq AtomCspPortSeqTbl TextCspPortSeqTbl FiniteInterval VaryBits DynamicInt WideInt NativeInt Debug Math Text TextWr FileWr Wr FileRd Rd TextRd SchemeEnvironment SchemeUtils Fmt Atom Word Env CitTextUtils FS FileFinder RegEx TextSeq Fingerprint Mpz
                   )
   )
 
@@ -3541,7 +3538,7 @@
     FS
     RegEx TextSeq
     Fingerprint
-    Mpfr Wx Mpz
+    Mpz
     CspCompiledScheduler1
     CspChannelOps1
     TextPortTbl

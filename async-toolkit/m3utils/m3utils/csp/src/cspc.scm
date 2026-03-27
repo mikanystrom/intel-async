@@ -1133,7 +1133,15 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (define (done-banner)
-  (dis go-grn-bold-term (run-command "banner **DONE**") reset-term dnl))
+  (dis go-grn-bold-term
+       "                        ######  ####### #     # #######" dnl
+       " #   #   #   #          #     # #     # ##    # #                #   #   #   #" dnl
+       "  # #     # #           #     # #     # # #   # #                 # #     # #" dnl
+       "### ### ### ###         #     # #     # #  #  # #####           ### ### ### ###" dnl
+       "  # #     # #           #     # #     # #   # # #                 # #     # #" dnl
+       " #   #   #   #          #     # #     # #    ## #                #   #   #   #" dnl
+       "                        ######  ####### #     # #######" dnl
+       reset-term dnl))
 
 (define (compile-m3! nm)
   (do-compile-m3! nm)

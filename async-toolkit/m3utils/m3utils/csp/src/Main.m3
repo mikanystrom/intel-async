@@ -17,6 +17,9 @@ IMPORT Pathname;
 IMPORT Thread;
 IMPORT TextSeq;
 IMPORT TextRd, SchemeInputPort;
+
+(* Force compiled Scheme modules to be linked and registered *)
+IMPORT CspcCompiled; <*NOWARN*>
 <*FATAL Thread.Alerted*>
 
 PROCEDURE GetPaths(extras : TextSeq.T) : REF ARRAY OF Pathname.T = 
