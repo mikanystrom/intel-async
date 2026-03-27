@@ -13,6 +13,9 @@ IMPORT SchemeM3;
 IMPORT ReadLine;
 IMPORT Pathname;
 
+(* Force compiled Scheme modules to be linked and registered *)
+IMPORT PhotopicCompiled; <*NOWARN*>
+
 PROCEDURE DoIt() =
   BEGIN
   END DoIt;
