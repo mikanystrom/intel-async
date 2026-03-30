@@ -207,7 +207,7 @@ override("simpletoken", TOP)
 override("fileupdatewr", TOP)
 override("svspredict", TOP)
 override("regression", TOP)
-override("mpfr", TOP & "/mpfr")
+
 
 %override("mysql", TOP)
 override("hammingnn", TOP)
