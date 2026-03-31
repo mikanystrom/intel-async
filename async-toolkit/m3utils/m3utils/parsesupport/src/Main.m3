@@ -27,15 +27,16 @@ BEGIN
 
   (* First arg is TARGET platform, rest are init files *)
   WITH target = Params.Get(1),
-       arr = NEW(REF ARRAY OF Pathname.T, Params.Count - 1) DO
-    arr[0] := "require";
-    FOR i := 2 TO Params.Count-1 DO arr[i-1] := Params.Get(i) END;
+       initArr = ARRAY [0..0] OF Pathname.T { "require" } DO
     TRY
-      WITH scm = NEW(SchemeM3.T).init(arr^,
+      WITH scm = NEW(SchemeM3.T).init(initArr,
                                       globalEnv :=
                                 NEW(SchemeNavigatorEnvironment.T).initEmpty()) DO
         EVAL scm.loadEvalText(
           "(define deriv-dir \"../" & target & "/\")");
+        FOR i := 2 TO Params.Count-1 DO
+          EVAL scm.loadEvalText("(load \"" & Params.Get(i) & "\")")
+        END;
         MainLoop(NEW(ReadLine.Default).init(), scm)
       END
     EXCEPT
