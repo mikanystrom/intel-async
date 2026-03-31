@@ -22,8 +22,8 @@ module ("Range")
 list ("Range", "Range")
 table ("TextRangeList", "Text", "RangeList")
 
-resource ("pg_template.sv")
-resource ("hlp_pg_template.sv")
+resource ("pg_template.sv.tmpl")
+resource ("hlp_pg_template.sv.tmpl")
 bundle ("PgToolSVTemplates")
 
 module ("PgCRIF")
