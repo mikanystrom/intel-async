@@ -9,6 +9,7 @@ import ("cit_util")
 %end
 
 
+c_source ("dummy")
 Generic_module("Tokenizer")
 
 library ("simpletoken")
