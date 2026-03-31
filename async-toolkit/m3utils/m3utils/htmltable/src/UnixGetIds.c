@@ -3,7 +3,12 @@
 
 #include <sys/types.h>
 #include <pwd.h>
+#ifdef __APPLE__
+#include <stdlib.h>
+#include <unistd.h>
+#else
 #include <malloc.h>
+#endif
 #include <grp.h>
 
 uid_t
@@ -47,7 +52,7 @@ UnixGetIds__getgrouplist(const char *user,
                          gid_t *groups,
                          int *ngroups)
 {
-  return getgrouplist(user, group, groups, ngroups);
+  return getgrouplist(user, (int)group, (int *)groups, ngroups);
 }
 
 
