@@ -105,7 +105,7 @@ mv_if_different rdl.l.tmp rdl.l
 
 cat *.dat | sort | grep -v '^$' | uniq | awk '{printf("%%const T_%s\n", toupper($1))}' > rdl.t.1
 
-cat rdl.t.[0-9] > rdl.t
+cat rdl.t.[0-9] > rdl.t.tmp
 mv_if_different rdl.t.tmp rdl.t
 
 for file in *.dat; do
