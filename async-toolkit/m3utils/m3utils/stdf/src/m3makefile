@@ -5,9 +5,9 @@ import ("libm3")
 import ("cit_util")
 
 
-_exec(["../generator/AMD64_LINUX/generator","../src/common.scm","../src/stdf.scm","exit"])
+_exec(["../generator/" & TARGET & "/generator","../src/common.scm","../src/stdf.scm","exit"])
 
-include ("../AMD64_LINUX/derived.m3m")
+include ("../" & TARGET & "/derived.m3m")
 
 Module ("StdfI1")
 Module ("StdfI2")

@@ -10,7 +10,7 @@ if defined("CM3_VERSION")
         m3_optimize("T")
 end
 
-_exec(["../makekeywords/AMD64_LINUX/makekeywords","../src/key.words","NetKeywords"])
+_exec(["../makekeywords/" & TARGET & "/makekeywords","../src/key.words","NetKeywords"])
 
 derived_interface("NetKeywords",HIDDEN)
 
