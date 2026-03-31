@@ -1,0 +1,41 @@
+MScheme Feature Requests from the photopic project
+===================================================
+
+Most "missing" functionality can be provided by adding SchemeStubs
+bindings to existing Modula-3 libraries (FS, Process, Time, etc.).
+The items below are things that seem to require language-level changes.
+
+1. ParseParams string getter
+
+   ParseParams.T exposes getNextInt and getNextLongReal but has no
+   method to retrieve the next command-line argument as a string.
+   This prevents passing file paths or other string values via CLI
+   flags from Scheme.
+
+   Fix: add GetNextString to ParseParams.T (M3 side), then sstubgen
+   picks it up automatically.
+
+2. load relative to source file
+
+   (load "foo.scm") resolves relative to CWD, not relative to the
+   file containing the load call.  This means a script that loads
+   helper files breaks when invoked from a different working
+   directory.
+
+   Possible fix: track the directory of the currently evaluating
+   file and resolve load paths relative to it.  Or expose
+   __FILE__ / __DIR__ so scripts can construct paths themselves.
+
+3. Document the error handler
+
+   MScheme has an error handler but its usage isn't obvious from
+   the photopic codebase.  Documenting the syntax (or confirming
+   R7RS guard compatibility) would help.
+
+Note: the following are NOT language requests --- they can be done
+today by adding SchemeStubs to existing M3 interfaces:
+
+  - file-exists?    => FS.Status() wrapped in error handler
+  - current-directory => Process.GetWorkingDirectory()
+  - time            => Time.Now() before/after
+  - chdir           => already possible via Process module
