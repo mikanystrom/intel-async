@@ -25,13 +25,17 @@ BEGIN
 
   SchemeStubs.RegisterStubs();
 
-  WITH arr = NEW(REF ARRAY OF Pathname.T, Params.Count) DO
+  (* First arg is TARGET platform, rest are init files *)
+  WITH target = Params.Get(1),
+       arr = NEW(REF ARRAY OF Pathname.T, Params.Count - 1) DO
     arr[0] := "require";
-    FOR i := 1 TO Params.Count-1 DO arr[i] := Params.Get(i) END;
+    FOR i := 2 TO Params.Count-1 DO arr[i-1] := Params.Get(i) END;
     TRY
-      WITH scm = NEW(SchemeM3.T).init(arr^, 
-                                      globalEnv := 
+      WITH scm = NEW(SchemeM3.T).init(arr^,
+                                      globalEnv :=
                                 NEW(SchemeNavigatorEnvironment.T).initEmpty()) DO
+        EVAL scm.loadEvalText(
+          "(define deriv-dir \"../" & target & "/\")");
         MainLoop(NEW(ReadLine.Default).init(), scm)
       END
     EXCEPT

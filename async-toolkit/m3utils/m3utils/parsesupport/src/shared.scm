@@ -6,7 +6,7 @@
 ;; COMMON HELPERS
 ;;
 
-(define deriv-dir "../AMD64_LINUX/")
+;; deriv-dir is set by the calling program from the TARGET argument
 
 (define (fromhex x) (Scan.Int (stringify x) 16))
 

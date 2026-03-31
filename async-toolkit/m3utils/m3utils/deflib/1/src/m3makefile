@@ -7,7 +7,7 @@ import ("parseparams")
 import ("trie")
 import ("recursiveparse")
 
-_exec(["../../../parsesupport/" & TARGET & "/parsesupport","../src/enums.scm","exit"])
+_exec(["../../../parsesupport/" & TARGET & "/parsesupport",TARGET,"../src/enums.scm","exit"])
 
 include ("../" & TARGET & "/derived.m3m")
 

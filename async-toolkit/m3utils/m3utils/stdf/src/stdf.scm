@@ -86,7 +86,7 @@
        dnl
        wr))
 
-(define deriv-dir "../AMD64_LINUX/")
+;; deriv-dir is set by the generator from the TARGET argument
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 

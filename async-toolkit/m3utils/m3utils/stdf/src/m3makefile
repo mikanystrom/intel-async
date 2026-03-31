@@ -5,7 +5,7 @@ import ("libm3")
 import ("cit_util")
 
 
-_exec(["../generator/" & TARGET & "/generator","../src/common.scm","../src/stdf.scm","exit"])
+_exec(["../generator/" & TARGET & "/generator",TARGET,"../src/common.scm","../src/stdf.scm","exit"])
 
 include ("../" & TARGET & "/derived.m3m")
 
