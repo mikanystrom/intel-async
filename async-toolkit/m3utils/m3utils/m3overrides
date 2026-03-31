@@ -220,7 +220,7 @@ override("cspgrammar", TOP & "/csp")
 override("cspparse", TOP & "/csp")
 override("mdd", TOP & "/csp")
 
-override("mpz", TOP & "/gmp")
+%override("mpz", TOP & "/gmp") % moved to cm3 m3-libs/mpz
 
 override("micdellib", TOP & "/micdel")
 
