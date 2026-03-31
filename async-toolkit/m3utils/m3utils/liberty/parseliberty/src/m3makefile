@@ -44,7 +44,7 @@ Sequence ("LibertyComponent", "LibertyComponent")
 Module ("LibertyComponentSeqBuilder")
 Interface ("LibertyComponentChildren")
 
-Module ("LibertyParse")
+Module ("LibertyParseMain")
 Module ("LibertyCsv")
 Module ("LibertyArcs")
 

@@ -26,7 +26,7 @@ MODULE Main;
 
 *)
 
-IMPORT LibertyParse;
+IMPORT LibertyParseMain;
 IMPORT ParseParams;
 IMPORT Stdio;
 IMPORT Debug;
@@ -797,7 +797,7 @@ BEGIN
 
   TRY
     Debug.Out("Parsing lib...");
-    lib := LibertyParse.Parse(rd);
+    lib := LibertyParseMain.Parse(rd);
     Debug.Out("Done parsing lib.");
     Rd.Close(rd)
   EXCEPT

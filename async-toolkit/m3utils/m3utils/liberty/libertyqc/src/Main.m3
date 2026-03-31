@@ -19,7 +19,7 @@ MODULE Main;
 
 *)
 
-IMPORT LibertyParse;
+IMPORT LibertyParseMain;
 IMPORT ParseParams;
 IMPORT Stdio;
 IMPORT Debug;
@@ -440,7 +440,7 @@ BEGIN
   END;
 
   TRY
-    lib := LibertyParse.Parse(rd);
+    lib := LibertyParseMain.Parse(rd);
     Rd.Close(rd)
   EXCEPT
     Rd.Failure(e) =>

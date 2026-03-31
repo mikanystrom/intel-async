@@ -34,7 +34,7 @@ SchemeStubs ("LibertyAttrValSeq")
 SchemeStubs ("LibertyComponentChildren")
 SchemeStubs ("LibertyComponentSeq")
 SchemeStubs ("LibertyStatementSeq")
-SchemeStubs ("LibertyParse")
+SchemeStubs ("LibertyParseMain")
 SchemeStubs ("LibertyCsv")
 SchemeStubs ("LibertyArcs")
 

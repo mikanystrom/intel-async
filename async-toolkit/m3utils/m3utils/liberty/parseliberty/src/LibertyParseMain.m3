@@ -1,7 +1,7 @@
 (* Copyright (c) 2025 Intel Corporation.  All rights reserved.  See the file COPYRIGHT for more information. *)
 (* SPDX-License-Identifier: Apache-2.0 *)
 
-MODULE LibertyParse;
+MODULE LibertyParseMain;
 IMPORT Rd;
 IMPORT LibertyComponent;
 IMPORT libertyLexStd;
@@ -25,4 +25,4 @@ PROCEDURE Parse(rd : Rd.T) : LibertyComponent.T  RAISES { Rd.Failure } =
   END Parse;
 
 
-BEGIN END LibertyParse.
+BEGIN END LibertyParseMain.
