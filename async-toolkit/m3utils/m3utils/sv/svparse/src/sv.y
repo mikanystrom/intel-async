@@ -692,13 +692,13 @@ foreach_var_list:
 
 statement_list:
   empty
-  cons                      statement_list statement
-  local_decl                statement_list net_declaration ';'
-  auto_decl                 statement_list T_AUTOMATIC net_declaration ';'
-  static_decl               statement_list T_STATIC net_declaration ';'
-  const_decl                statement_list T_CONST net_declaration ';'
-  local_param               statement_list localparam_declaration ';'
-  local_parameter            statement_list parameter_declaration ';'
+  cons                      statement_list mark statement
+  local_decl                statement_list mark net_declaration ';'
+  auto_decl                 statement_list mark T_AUTOMATIC net_declaration ';'
+  static_decl               statement_list mark T_STATIC net_declaration ';'
+  const_decl                statement_list mark T_CONST net_declaration ';'
+  local_param               statement_list mark localparam_declaration ';'
+  local_parameter            statement_list mark parameter_declaration ';'
 
 subroutine_call:
   func                      hierarchical_id '(' opt_arg_list ')'

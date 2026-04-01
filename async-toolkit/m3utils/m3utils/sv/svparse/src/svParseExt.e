@@ -747,13 +747,13 @@ foreach_var_list: { val : TEXT; cnt : INTEGER; }
 
 statement_list: { val : TEXT; cnt : INTEGER; }
   empty      { $$.val := "" }
-  cons       { $$.val := Seq($1, $2) }
-  local_decl      { $$.val := Seq($1, $2) }
-  auto_decl       { $$.val := Seq($1, $2) }
-  static_decl     { $$.val := Seq($1, $2) }
-  const_decl      { $$.val := Seq($1, "(const " & $2 & ")") }
-  local_param     { $$.val := Seq($1, $2) }
-  local_parameter { $$.val := Seq($1, $2) }
+  cons       { $$.val := Seq($1, WrapLine(self, $2, $3)) }
+  local_decl      { $$.val := Seq($1, WrapLine(self, $2, $3)) }
+  auto_decl       { $$.val := Seq($1, WrapLine(self, $2, "(automatic " & $3 & ")")) }
+  static_decl     { $$.val := Seq($1, WrapLine(self, $2, "(static " & $3 & ")")) }
+  const_decl      { $$.val := Seq($1, WrapLine(self, $2, "(const " & $3 & ")")) }
+  local_param     { $$.val := Seq($1, WrapLine(self, $2, $3)) }
+  local_parameter { $$.val := Seq($1, WrapLine(self, $2, $3)) }
 
 subroutine_call: { val : TEXT; cnt : INTEGER; }
   func    { $$.val := "(call " & $1 & " " & $2 & ")" }
