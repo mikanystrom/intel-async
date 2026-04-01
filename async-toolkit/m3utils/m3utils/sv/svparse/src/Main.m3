@@ -35,7 +35,7 @@ PROCEDURE EmitScmHeader(wr: Wr.T) =
 
 PROCEDURE PrettyPrintScm(wr: Wr.T; s: TEXT) =
   (* Pretty-print an S-expression with indentation.
-     Only breaks lines at (@ N ...) nodes (source-line markers).
+     Breaks lines at (@ N ...) source-line markers.
      Respects quoted strings. *)
   VAR
     len   := Text.Length(s);
@@ -54,12 +54,10 @@ PROCEDURE PrettyPrintScm(wr: Wr.T; s: TEXT) =
         Wr.PutChar(wr, c);
         inStr := TRUE;
       ELSIF c = '(' THEN
-        (* Check for (@ — line annotation node *)
-        IF i + 1 < len AND Text.GetChar(s, i + 1) = '@' THEN
-          IF depth > 0 THEN
-            Wr.PutChar(wr, '\n');
-            FOR j := 1 TO depth DO Wr.PutText(wr, "  ") END;
-          END;
+        IF i + 1 < len AND Text.GetChar(s, i + 1) = '@'
+           AND depth > 0 THEN
+          Wr.PutChar(wr, '\n');
+          FOR j := 1 TO depth DO Wr.PutText(wr, "  ") END;
         END;
         Wr.PutChar(wr, '(');
         INC(depth);

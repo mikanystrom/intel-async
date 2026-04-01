@@ -532,13 +532,13 @@ opt_else:
   empty
 
 opt_assert_else:
-  yes                       T_ELSE statement
+  yes                       T_ELSE mark statement
   bare                      ';'
 
 property_expr:
-  bare                      prop_temporal_expr
-  clocked                   sensitivity prop_temporal_expr
-  clocked_disable           sensitivity T_SVA_DISABLE T_SVA_IFF '(' expression ')' prop_temporal_expr
+  bare                      mark prop_temporal_expr
+  clocked                   mark sensitivity mark prop_temporal_expr
+  clocked_disable           mark sensitivity mark T_SVA_DISABLE T_SVA_IFF '(' expression ')' mark prop_temporal_expr
 
 prop_temporal_expr:
   single                    prop_iff_expr

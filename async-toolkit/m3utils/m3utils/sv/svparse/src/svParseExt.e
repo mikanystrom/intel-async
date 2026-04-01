@@ -587,13 +587,13 @@ opt_else: { val : TEXT; cnt : INTEGER; }
   empty  { $$.val := "()" }
 
 opt_assert_else: { val : TEXT; cnt : INTEGER; }
-  yes    { $$.val := $1 }
+  yes    { $$.val := WrapLine(self, $1, $2) }
   bare   { $$.val := "()" }
 
 property_expr: { val : TEXT; cnt : INTEGER; }
-  bare              { $$.val := $1 }
-  clocked           { $$.val := $1 & " " & $2 }
-  clocked_disable   { $$.val := $1 & " (disable-iff " & $2 & ") " & $3 }
+  bare              { $$.val := WrapLine(self, $1, $2) }
+  clocked           { $$.val := WrapLine(self, $1, $2) & " " & WrapLine(self, $3, $4) }
+  clocked_disable   { $$.val := WrapLine(self, $1, $2) & " " & WrapLine(self, $3, "(disable-iff " & $4 & ")") & " " & WrapLine(self, $5, $6) }
 
 prop_temporal_expr: { val : TEXT; cnt : INTEGER; }
   single            { $$.val := $1 }
