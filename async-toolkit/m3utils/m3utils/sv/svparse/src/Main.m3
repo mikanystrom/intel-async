@@ -1,7 +1,7 @@
 (* Copyright (c) 2026 Mika Nystrom.  All rights reserved. *)
 
 MODULE Main;
-IMPORT Params, FileRd, Rd, Wr, Thread, OSError, Text, Pathname;
+IMPORT Params, FileRd, Rd, Wr, Thread, OSError, Text, Pathname, Env, FmtTime, Time;
 IMPORT svTok, svLexExt, svParseExt;
 FROM Stdio IMPORT stdout, stderr;
 <* FATAL Wr.Failure, Thread.Alerted *>
@@ -13,6 +13,62 @@ PROCEDURE BaseName(fname : TEXT) : TEXT =
     IF dot >= 0 THEN base := Text.Sub(base, 0, dot) END;
     RETURN base
   END BaseName;
+
+PROCEDURE CommandLine(): TEXT =
+  VAR res: TEXT := "";
+  BEGIN
+    FOR i := 0 TO Params.Count - 1 DO
+      IF i > 0 THEN res := res & " " END;
+      res := res & Params.Get(i);
+    END;
+    RETURN res;
+  END CommandLine;
+
+PROCEDURE EmitScmHeader(wr: Wr.T) =
+  VAR cwd := Env.Get("PWD");
+  BEGIN
+    Wr.PutText(wr, ";; Command: " & CommandLine() & "\n");
+    IF cwd # NIL THEN Wr.PutText(wr, ";; CWD: " & cwd & "\n") END;
+    Wr.PutText(wr, ";; Date: " & FmtTime.Long(Time.Now()) & "\n");
+    Wr.PutText(wr, "\n");
+  END EmitScmHeader;
+
+PROCEDURE PrettyPrintScm(wr: Wr.T; s: TEXT) =
+  (* Pretty-print an S-expression with indentation.
+     Rule: a nested '(' after a space gets its own indented line.
+     Respects quoted strings — does not reformat inside "...". *)
+  VAR
+    len   := Text.Length(s);
+    depth := 0;
+    c     : CHAR;
+    prev  : CHAR := ' ';
+    inStr := FALSE;
+  BEGIN
+    FOR i := 0 TO len - 1 DO
+      c := Text.GetChar(s, i);
+      IF inStr THEN
+        Wr.PutChar(wr, c);
+        IF c = '"' AND prev # '\\' THEN inStr := FALSE END;
+      ELSIF c = '"' THEN
+        Wr.PutChar(wr, c);
+        inStr := TRUE;
+      ELSIF c = '(' THEN
+        IF depth > 0 AND prev = ' ' THEN
+          Wr.PutChar(wr, '\n');
+          FOR j := 1 TO depth DO Wr.PutText(wr, "  ") END;
+        END;
+        Wr.PutChar(wr, '(');
+        INC(depth);
+      ELSIF c = ')' THEN
+        Wr.PutChar(wr, ')');
+        IF depth > 0 THEN DEC(depth) END;
+      ELSE
+        Wr.PutChar(wr, c);
+      END;
+      prev := c;
+    END;
+    Wr.PutChar(wr, '\n');
+  END PrettyPrintScm;
 
 PROCEDURE Help() =
   BEGIN
@@ -76,7 +132,8 @@ BEGIN
       ELSE
         parser.setLex(lexer).parse().discard();
         IF doScm THEN
-          Wr.PutText(stdout, parser.scmResult & "\n");
+          EmitScmHeader(stdout);
+          PrettyPrintScm(stdout, parser.scmResult);
           Wr.Flush(stdout);
         ELSE
           Wr.PutText(stdout, fname & ": syntax ok\n");

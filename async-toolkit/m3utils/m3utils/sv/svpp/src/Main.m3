@@ -11,7 +11,7 @@ MODULE Main;
 *)
 
 IMPORT Rd, Wr, FileRd, Stdio, Text, TextList, Params,
-       TextRefTbl, OSError, Pathname, FS, BoolSeq, Fmt;
+       TextRefTbl, OSError, Pathname, FS, BoolSeq, Fmt, Env, FmtTime, Time;
 
 <*FATAL ANY*>
 
@@ -919,6 +919,21 @@ BEGIN
     Wr.PutText(Stdio.stderr, "Usage: svpp [--help] [-I dir]... [-D NAME[=VALUE]]... file.sv\n");
     Wr.Flush(Stdio.stderr);
   ELSIF Text.Length(filename) > 0 THEN
+    (* Emit provenance comment and resync line numbers *)
+    VAR cmd: TEXT := ""; cwd := Env.Get("PWD"); BEGIN
+      FOR j := 0 TO Params.Count - 1 DO
+        IF j > 0 THEN cmd := cmd & " " END;
+        cmd := cmd & Params.Get(j);
+      END;
+      Wr.PutText(Stdio.stdout,
+        "/* svpp: " & cmd & "  CWD: ");
+      IF cwd # NIL THEN Wr.PutText(Stdio.stdout, cwd) END;
+      Wr.PutText(Stdio.stdout,
+        "  Date: " & FmtTime.Long(Time.Now()) & " */\n");
+      (* Resync: tell downstream parser that next line is line 1 of the source *)
+      Wr.PutText(Stdio.stdout,
+        "`line 1 \"" & filename & "\" 0\n");
+    END;
     (* Reverse include dirs to maintain command-line order *)
     includeDirs := TextList.ReverseD(includeDirs);
     Preprocess(filename);
