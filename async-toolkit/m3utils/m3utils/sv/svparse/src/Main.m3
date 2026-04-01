@@ -35,27 +35,31 @@ PROCEDURE EmitScmHeader(wr: Wr.T) =
 
 PROCEDURE PrettyPrintScm(wr: Wr.T; s: TEXT) =
   (* Pretty-print an S-expression with indentation.
-     Rule: a nested '(' after a space gets its own indented line.
-     Respects quoted strings — does not reformat inside "...". *)
+     Only breaks lines at (@ N ...) nodes (source-line markers).
+     Respects quoted strings. *)
   VAR
     len   := Text.Length(s);
     depth := 0;
     c     : CHAR;
-    prev  : CHAR := ' ';
     inStr := FALSE;
   BEGIN
     FOR i := 0 TO len - 1 DO
       c := Text.GetChar(s, i);
       IF inStr THEN
         Wr.PutChar(wr, c);
-        IF c = '"' AND prev # '\\' THEN inStr := FALSE END;
+        IF c = '"' AND (i = 0 OR Text.GetChar(s, i - 1) # '\\') THEN
+          inStr := FALSE
+        END;
       ELSIF c = '"' THEN
         Wr.PutChar(wr, c);
         inStr := TRUE;
       ELSIF c = '(' THEN
-        IF depth > 0 AND prev = ' ' THEN
-          Wr.PutChar(wr, '\n');
-          FOR j := 1 TO depth DO Wr.PutText(wr, "  ") END;
+        (* Check for (@ — line annotation node *)
+        IF i + 1 < len AND Text.GetChar(s, i + 1) = '@' THEN
+          IF depth > 0 THEN
+            Wr.PutChar(wr, '\n');
+            FOR j := 1 TO depth DO Wr.PutText(wr, "  ") END;
+          END;
         END;
         Wr.PutChar(wr, '(');
         INC(depth);
@@ -65,7 +69,6 @@ PROCEDURE PrettyPrintScm(wr: Wr.T; s: TEXT) =
       ELSE
         Wr.PutChar(wr, c);
       END;
-      prev := c;
     END;
     Wr.PutChar(wr, '\n');
   END PrettyPrintScm;
