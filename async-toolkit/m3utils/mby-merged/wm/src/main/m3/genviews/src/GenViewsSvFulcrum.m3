@@ -10,7 +10,7 @@ IMPORT Text;
 IMPORT BigInt;
 IMPORT FieldData, Rd, Pickle2;
 IMPORT Wx;
-IMPORT TextUtils;
+IMPORT CitTextUtils AS TextUtils;
 IMPORT RegComponent;
 IMPORT Thread;
 FROM RegProperty IMPORT Unquote;
@@ -356,7 +356,7 @@ PROCEDURE EmitBigLocalParam(t       : T;
     IF hexBits = -1 THEN
       valStr := BigInt.Format(val)
     ELSE
-      <*ASSERT BigInt.Compare(val,BigInt.Zero) >= 0 *>
+      <*ASSERT BigInt.Compare(val,BigInt.New(0)) >= 0 *>
       <*ASSERT BigInt.Compare(val,BigPow2(hexBits)) < 1 *>
       valStr := F("%s'h%s", Int(hexBits), BigInt.Format(val, base := 16))
     END;
@@ -375,7 +375,7 @@ PROCEDURE DoReg(t    : T;
     width  : INTEGER;
     svName := FormatNameArcsOnly(pfx);
     lim := 0;
-    rst := BigInt.Zero;
+    rst := BigInt.New(0);
   BEGIN
     EmitComment(t, "Reg", pfx, lev);
     Emit(t, "  // " & TreeType.Format(tree), lev);
@@ -607,11 +607,11 @@ VAR bigPow2 := NEW(BigIntSeq.T).init();
 PROCEDURE BigPow2(n : CARDINAL) : BigInt.T =
   BEGIN
     WHILE n >= bigPow2.size() DO
-      bigPow2.addhi(BigInt.Mul(bigPow2.get(bigPow2.size()-1),BigInt.Two))
+      bigPow2.addhi(BigInt.Mul(bigPow2.get(bigPow2.size()-1),BigInt.New(2)))
     END;
     RETURN bigPow2.get(n)
   END BigPow2;
 
 BEGIN
-  bigPow2.addhi(BigInt.One) (* 2^0 = 1 *)
+  bigPow2.addhi(BigInt.New(1)) (* 2^0 = 1 *)
 END GenViewsSvFulcrum.

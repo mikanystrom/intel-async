@@ -8,5 +8,5 @@ override("mby_c",MBY_REGS_C)
 override("hlp_c",MBY_REGS_C)
 override("c", MBY_C_MODEL)
 include(META_INC)
-SYSTEM_LD="/usr/intel/pkgs/gcc/7.2.0/bin/" & SYSTEM_LD
-M3_PARALLEL_BACK=30
+%SYSTEM_LD="/usr/intel/pkgs/gcc/7.2.0/bin/" & SYSTEM_LD
+%M3_PARALLEL_BACK=30

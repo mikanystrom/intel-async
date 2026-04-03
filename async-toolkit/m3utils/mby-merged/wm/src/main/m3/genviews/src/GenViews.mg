@@ -26,6 +26,7 @@ IMPORT DecoratedComponentDef;
 IMPORT RegFieldArraySort;
 IMPORT ParseError;
 IMPORT RegFieldAccess, IntelAccessType, IntelAccessTypeLookup;
+IMPORT RdlPropertyRvalueKeyword;
 FROM RegProperty IMPORT Unquote;
 
 CONST Brand = "GenViews(" & Tgt.Brand & ")";
@@ -54,11 +55,17 @@ PROCEDURE ApplyFieldProperties(VAR f : RegField.T) : BOOLEAN
        one way is using RDL standard hw, sw
        another way is using Intel AccessType annotation *)
     FOR i := FIRST(RegFieldAccess.Master) TO LAST(RegFieldAccess.Master) DO
-      (* look for stated property *)
-      WITH p   = RegFieldAccess.MasterProperty[i] DO
-        IF f.getRdlPredefTextProperty(p,str) THEN
-          gotRdlProps := TRUE;
-          f.access[i] := RegFieldAccess.Parse(str)
+      (* look for stated property — try keyword first (raw RDL), then text (preprocessed) *)
+      VAR kw : RdlPropertyRvalueKeyword.T;
+      BEGIN
+        WITH p = RegFieldAccess.MasterProperty[i] DO
+          IF f.getRdlPredefKwProperty(p, kw) THEN
+            gotRdlProps := TRUE;
+            f.access[i] := RegFieldAccess.Parse(RdlPropertyRvalueKeyword.Names[kw])
+          ELSIF f.getRdlPredefTextProperty(p, str) THEN
+            gotRdlProps := TRUE;
+            f.access[i] := RegFieldAccess.Parse(str)
+          END
         END
       END
     END;

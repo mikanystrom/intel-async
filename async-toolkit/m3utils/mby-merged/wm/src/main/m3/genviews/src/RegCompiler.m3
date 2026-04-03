@@ -13,7 +13,7 @@ REVEAL
 PROCEDURE Init(t : T; map : RegAddrmap.T) : T =
   BEGIN
     t.map := map;
-    t.addr := BigInt.Zero; (* should be adjustable, no? *)
+    t.addr := BigInt.New(0); (* should be adjustable, no? *)
     RETURN t
   END Init;
 

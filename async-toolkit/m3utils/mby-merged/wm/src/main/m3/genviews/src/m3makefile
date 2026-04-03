@@ -122,7 +122,7 @@ implementation ("Main")
 
 SchemeStubs ("FieldData")
 SchemeStubs ("Text")
-SchemeStubs ("TextUtils")
+SchemeStubs ("CitTextUtils")
 SchemeStubs ("Wr")
 SchemeStubs ("Rd")
 SchemeStubs ("TextWr")

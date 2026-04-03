@@ -339,22 +339,24 @@ PROCEDURE FmtArrFor(a : RdlArray.Single) : TEXT =
   (**********************************************************************)
 
 VAR
-  props : ARRAY Prop OF RdlProperty.T := MakeProps(PropNames)^;
+  props : ARRAY Prop OF RdlProperty.T;
+  propsInitted := FALSE;
 
-PROCEDURE MakeProps(READONLY z : ARRAY OF TEXT) : REF ARRAY OF RdlProperty.T =
-  VAR
-    res := NEW(REF ARRAY OF RdlProperty.T, NUMBER(z));
+PROCEDURE InitProps() =
   BEGIN
-    FOR i := FIRST(z) TO LAST(z) DO
-      res[i] := RdlProperty.Make(z[i])
+    IF propsInitted THEN RETURN END;
+    FOR i := FIRST(Prop) TO LAST(Prop) DO
+      props[i] := RdlProperty.Make(PropNames[i])
     END;
-    RETURN res
-  END MakeProps;
+    propsInitted := TRUE
+  END InitProps;
 
 PROCEDURE GetPropText(prop : Prop; comp : RegComponent.T) : TEXT =
   VAR
-    q : RdlExplicitPropertyAssign.T := comp.props.lookup(props[prop]);
+    q : RdlExplicitPropertyAssign.T;
   BEGIN
+    InitProps();
+    q := comp.props.lookup(props[prop]);
     IF q = NIL THEN
       (* return default *)
       RETURN CompRange.DefProp[prop]
@@ -390,9 +392,10 @@ PROCEDURE GetPropText(prop : Prop; comp : RegComponent.T) : TEXT =
   
 PROCEDURE GetAddressingProp(comp : RegComponent.T) : CompAddr.Addressing =
   VAR
-    q : RdlExplicitPropertyAssign.T :=
-        comp.props.lookup(props[CompRange.Prop.Addressing]);
+    q : RdlExplicitPropertyAssign.T;
   BEGIN
+    InitProps();
+    q := comp.props.lookup(props[CompRange.Prop.Addressing]);
     IF q = NIL THEN
       (* return default *)
       RETURN CompAddr.Addressing.Regalign
@@ -442,6 +445,7 @@ PROCEDURE GenChildInit(e          : RegChild.T;
     childArc : TEXT;
     atS      : TEXT;
   BEGIN
+    InitProps();
     (* special case for array with only one child is that it is NOT
        a record *)
     IF skipArc THEN
@@ -1392,7 +1396,7 @@ PROCEDURE FmtLittleEndian(x : BigInt.T; w : CARDINAL) : TEXT =
     r : BigInt.T;
   BEGIN
     Wx.PutText(wx, F("ARRAY [0..%s-1] OF [0..1] {", Fmt.Int(w)));
-    IF BigInt.Equal(x,BigInt.Zero) THEN
+    IF BigInt.Equal(x,BigInt.New(0)) THEN
       FOR i := 0 TO w-1 DO
         Wx.PutText(wx, "0");
         IF i # w-1 THEN
@@ -1401,7 +1405,7 @@ PROCEDURE FmtLittleEndian(x : BigInt.T; w : CARDINAL) : TEXT =
       END
     ELSE
       FOR i := 0 TO w-1 DO
-        BigInt.Divide(x, BigInt.Two, x, r);
+        BigInt.Divide(x, BigInt.New(2), x, r);
         Wx.PutText(wx, F("16_%s", BigInt.Format(r,base:=16)));
         IF i # w-1 THEN
           Wx.PutText(wx, ", ")
@@ -1414,7 +1418,7 @@ PROCEDURE FmtLittleEndian(x : BigInt.T; w : CARDINAL) : TEXT =
 
 PROCEDURE DefVal(canBeNil : RdlNum.T) : BigInt.T =
   BEGIN
-    IF canBeNil # NIL THEN RETURN canBeNil.x ELSE RETURN BigInt.Zero END
+    IF canBeNil # NIL THEN RETURN canBeNil.x ELSE RETURN BigInt.New(0) END
   END DefVal;
   
 PROCEDURE GenRegReset(r : RegReg.T; gs : GenState) =

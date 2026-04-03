@@ -3,4 +3,3 @@ MBY_REGS="MODEL_ROOT/wm/src/main/m3/genviews/src/build/"
 MBY_REGS_C="MODEL_ROOT/wm/src/main/m3/genviews/src/build_c/"
 MBY_C_MODEL="MODEL_ROOT/wm/src/main/"
 META_INC="META_HOME/m3overrides"
-

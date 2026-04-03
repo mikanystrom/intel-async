@@ -2,25 +2,18 @@
 .NOTPARALLEL:
 .DELETE_ON_ERROR:
 
-ifndef MODEL_ROOT
-   $(error MODEL_ROOT undefined, did you do a setnhdk?)
-endif
-
 # Makefile for CM3 white model build
-OS_TARG=AMD64_LINUX
-CM3=$(shell ToolConfig.pl get_tool_exec cm3)
 
-METAROOT=$(shell ToolConfig.pl get_tool_path meta)
-METAVERSION=$(shell ToolConfig.pl get_tool_version meta)
+MODEL_ROOT:=$(realpath ../../../..)
+META_HOME:=$(realpath ../../../../..)/m3utils
 
-# override here if you want to test a new toolchain
-#CM3=/tmp/cm3-all-AMD64_LINUX-d5.10.0-Linux3.0.101-20180514/bin/cm3
-#METAROOT=/nfs/sc/disks/hlp_0015/mnystroe/git/meta-git
+OS_TARG=$(shell uname -m | sed 's/arm64/ARM64/' | sed 's/x86_64/AMD64/')_$(shell uname -s | tr a-z A-Z | sed 's/DARWIN/DARWIN/')
+CM3?=cm3
 
-SVPP=${METAROOT}/rdl/svpp/$(OS_TARG)/svpp
-PERLFE=${METAROOT}/perlfe/$(OS_TARG)/perlfe
+SVPP=${META_HOME}/rdl/svpp/$(OS_TARG)/svpp
+PERLFE=${META_HOME}/perlfe/$(OS_TARG)/perlfe
 
-NEBULON=$(shell ToolConfig.pl get_tool_path nebulon)
+NEBULON?=
 
 MBY_C_ROOT=../c
 MBY_C_TARGDIR=$(MBY_C_ROOT)/$(OS_TARG)
@@ -97,15 +90,9 @@ all: mains fulcrum_consts
 .PHONY: mains
 mains: mby_mains hlp_mains model_server doc
 
-# provide a mechanism to force rebuild on meta update
-META_VERSION_F=meta.version.$(METAVERSION)
-$(META_VERSION_F):
-	touch $@
-
 top: $(TOP)
-$(TOP): $(TOP_TEMPLATE) $(META_VERSION_F)
-	sed "s#MODEL_ROOT#$(MODEL_ROOT)#" $< > $@
-	sed -i "s#META_HOME#$(METAROOT)#" $@
+$(TOP): $(TOP_TEMPLATE)
+	sed "s#MODEL_ROOT#$(MODEL_ROOT)#" $< | sed "s#META_HOME#$(META_HOME)#" > $@
 
 mby_mains: $(GENVIEWS) $(MBYLIB) $(C_GEN)
 	$(MAKE) CM3=$(CM3) -C $(GENVIEWS_ROOT)/src/mby_mains

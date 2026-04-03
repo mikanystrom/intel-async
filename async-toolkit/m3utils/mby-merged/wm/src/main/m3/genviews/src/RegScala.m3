@@ -195,17 +195,17 @@ PROCEDURE FmtArrFor(a : RdlArray.Single) : TEXT =
   END FmtArrFor;
 
 VAR
-  props : ARRAY Prop OF RdlProperty.T := MakeProps(PropNames)^;
+  props : ARRAY Prop OF RdlProperty.T;
+  propsInitted := FALSE;
 
-PROCEDURE MakeProps(READONLY z : ARRAY OF TEXT) : REF ARRAY OF RdlProperty.T =
-  VAR
-    res := NEW(REF ARRAY OF RdlProperty.T, NUMBER(z));
+PROCEDURE InitProps() =
   BEGIN
-    FOR i := FIRST(z) TO LAST(z) DO
-      res[i] := RdlProperty.Make(z[i])
+    IF propsInitted THEN RETURN END;
+    FOR i := FIRST(Prop) TO LAST(Prop) DO
+      props[i] := RdlProperty.Make(PropNames[i])
     END;
-    RETURN res
-  END MakeProps;
+    propsInitted := TRUE
+  END InitProps;
 
 CONST
    DefProp = ARRAY Prop OF TEXT {
@@ -227,8 +227,10 @@ PROCEDURE FormatMemory(bits : CARDINAL) : TEXT =
 
 PROCEDURE GetPropText(prop : Prop; comp : RegComponent.T) : TEXT =
   VAR
-    q : RdlExplicitPropertyAssign.T := comp.props.lookup(props[prop]);
+    q : RdlExplicitPropertyAssign.T;
   BEGIN
+    InitProps();
+    q := comp.props.lookup(props[prop]);
     IF q = NIL THEN
       (* return default *)
       RETURN DefProp[prop]
@@ -262,9 +264,10 @@ PROCEDURE GetPropText(prop : Prop; comp : RegComponent.T) : TEXT =
   
 PROCEDURE GetAddressingProp(comp : RegComponent.T) : CompAddr.Addressing =
   VAR
-    q : RdlExplicitPropertyAssign.T :=
-        comp.props.lookup(props[CompRange.Prop.Addressing]);
+    q : RdlExplicitPropertyAssign.T;
   BEGIN
+    InitProps();
+    q := comp.props.lookup(props[CompRange.Prop.Addressing]);
     IF q = NIL THEN
       (* return default *)
       RETURN CompAddr.Addressing.Regalign
@@ -316,6 +319,7 @@ PROCEDURE GenChildInit(e          : RegChild.T;
     childArc : TEXT;
     atS      : TEXT;
   BEGIN
+    InitProps();
     (* special case for array with only one child is that it is NOT
        a record *)
     childArc := IdiomName(e.nm,debug := FALSE);

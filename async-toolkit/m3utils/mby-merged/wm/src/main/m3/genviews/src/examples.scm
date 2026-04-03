@@ -518,7 +518,7 @@
 (define *api-dir* "test_api/")
 
 (define (open-c-files pfx)
-  (let ((ifsym (string-append "_" (TextUtils.ToUpper pfx) "_H"))
+  (let ((ifsym (string-append "_" (CitTextUtils.ToUpper pfx) "_H"))
         (res
          (cons (FileWr.Open (string-append *api-dir* pfx ".h"))
                (FileWr.Open (string-append *api-dir* pfx ".c")))))
