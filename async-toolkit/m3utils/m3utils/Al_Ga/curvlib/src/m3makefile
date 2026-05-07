@@ -1,0 +1,12 @@
+% Copyright (c) 2026 Mika Nystrom.  All rights reserved.
+% SPDX-License-Identifier: Apache-2.0
+
+import ("libm3")
+import ("plylib")
+import ("meshlib")
+import ("facetlib")
+
+Module ("Curv")
+Module ("HeightGrid")
+
+library ("curvlib")

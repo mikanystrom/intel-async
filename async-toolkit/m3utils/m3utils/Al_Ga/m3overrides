@@ -1,0 +1,9 @@
+build_standalone()
+
+% AL_GA must be set by includer before including this file.
+% e.g.: AL_GA = path() & "/../.."
+
+override("plylib",   AL_GA)
+override("meshlib",  AL_GA)
+override("facetlib", AL_GA)
+override("curvlib",  AL_GA)
