@@ -10,7 +10,19 @@ IMPORT TriMesh, Vec3;
    A Facet.T represents a grain face after coordinate transformation:
    the best-fit plane is at z=0, the facet normal points in +z, and
    vertex positions are expressed in the rotated frame.  The "height"
-   of each vertex is its z coordinate in this frame. *)
+   of each vertex is its z coordinate in this frame.
+
+   The rotation is computed via Rodrigues' formula.  See:
+     Rodrigues, O. (1840), "Des lois geometriques qui regissent les
+     deplacements d'un systeme solide dans l'espace", Journal de
+     Mathematiques Pures et Appliquees, 5, 380--440.
+
+   Invariants:
+     - NVertices(f) = TriMesh.NVertices(mesh) used to construct f
+     - GetRotation(f) is orthogonal with determinant +1
+     - GetRotation(f) * GetNormal(f) = (0, 0, 1)
+     - For all i: GetTransformed(f,i) = R * (p_i - origin)
+     - For all i: GetHeight(f,i) = GetTransformed(f,i).z *)
 
 TYPE
   (* 3x3 rotation matrix, row-major: R[row][col]. *)
@@ -19,31 +31,47 @@ TYPE
   T <: REFANY;
 
 PROCEDURE Analyze(mesh: TriMesh.T): T;
-  (* Fit plane, compute rotation, transform all vertices. *)
+  (* Requires: mesh has at least one face with nonzero area.
+     Ensures:  computes the area-weighted mean normal, the area-weighted
+               centroid, the Rodrigues rotation matrix mapping the normal
+               to (0,0,1), and transforms all vertex positions into the
+               rotated frame centered at the centroid. *)
 
 (* ---- Accessors ---- *)
 
 PROCEDURE GetRotation(f: T): Mat3;
-  (* Rotation matrix that maps original coordinates to z-up frame. *)
+  (* Ensures: returns the rotation matrix R such that R * n = (0,0,1)
+              where n is the best-fit plane normal. *)
 
 PROCEDURE GetOrigin(f: T): Vec3.T;
-  (* The centroid in original coordinates (subtracted before rotation). *)
+  (* Ensures: returns the area-weighted centroid in original coordinates.
+              This is subtracted from vertex positions before rotation. *)
 
 PROCEDURE GetNormal(f: T): Vec3.T;
-  (* The best-fit plane normal in original coordinates. *)
+  (* Ensures: returns the best-fit plane normal in original coordinates
+              (unit length). *)
 
 PROCEDURE NVertices(f: T): CARDINAL;
+  (* Ensures: returns the number of vertices. *)
 
 PROCEDURE GetXY(f: T; i: CARDINAL; VAR x, y: LONGREAL);
-  (* Rotated x, y of vertex i. *)
+  (* Requires: i < NVertices(f).
+     Modifies: x, y.
+     Ensures:  x, y are the first two components of the transformed
+               position of vertex i. *)
 
 PROCEDURE GetHeight(f: T; i: CARDINAL): LONGREAL;
-  (* z coordinate of vertex i in the rotated frame. *)
+  (* Requires: i < NVertices(f).
+     Ensures:  returns the z component of the transformed position
+               of vertex i (height above the best-fit plane). *)
 
 PROCEDURE GetHeights(f: T): REF ARRAY OF LONGREAL;
-  (* All vertex heights. *)
+  (* Ensures: returns the array of all vertex heights.
+              NUMBER(result^) = NVertices(f). *)
 
 PROCEDURE GetTransformed(f: T; i: CARDINAL): Vec3.T;
-  (* Full (x, y, z) in the rotated frame. *)
+  (* Requires: i < NVertices(f).
+     Ensures:  returns the full (x, y, z) position of vertex i in
+               the rotated frame. *)
 
 END Facet.

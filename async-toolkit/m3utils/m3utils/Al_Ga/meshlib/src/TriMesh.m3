@@ -1,6 +1,23 @@
 (* Copyright (c) 2026 Mika Nystrom.  All rights reserved. *)
 (* SPDX-License-Identifier: Apache-2.0 *)
 
+(* Implementation notes:
+ *
+ * FromPly eagerly computes all derived quantities:
+ *   - Per-face normals via cross product of edge vectors
+ *   - Per-face areas as half the cross-product magnitude
+ *   - Per-vertex normals as area-weighted averages of incident
+ *     face normals (the standard approach; see e.g. Max, N. (1999),
+ *     "Weights for Computing Vertex Normals from Facet Normals",
+ *     J. Graphics Tools, 4(2), pp. 1-6)
+ *   - 1-ring vertex adjacency via compressed sorted neighbor lists
+ *   - Area-weighted centroid and mean normal
+ *
+ * BuildAdjacency: for each face, records 6 directed edges (2 per
+ * vertex pair).  Edges are then sorted per-vertex and deduplicated
+ * into a compressed adjacency structure (adjStart, adjList).
+ * Sorting uses insertion sort since neighbor lists are small. *)
+
 MODULE TriMesh;
 
 IMPORT Ply, Vec3;

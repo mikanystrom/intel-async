@@ -1,6 +1,17 @@
 (* Copyright (c) 2026 Mika Nystrom.  All rights reserved. *)
 (* SPDX-License-Identifier: Apache-2.0 *)
 
+(* Implementation notes:
+ *
+ * RotationToZUp: Rodrigues' rotation formula.  Given the best-fit
+ * plane normal n, computes R such that R*n = (0,0,1).  The rotation
+ * axis is k = n x z_hat (normalized), and the angle theta satisfies
+ * cos(theta) = n.z.  Special cases for n parallel or anti-parallel
+ * to z_hat.
+ *
+ * See: Rodrigues, O. (1840), "Des lois geometriques qui regissent
+ * les deplacements d'un systeme solide dans l'espace". *)
+
 MODULE Facet;
 
 IMPORT TriMesh, Vec3, Math;

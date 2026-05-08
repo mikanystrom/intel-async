@@ -1,6 +1,24 @@
 (* Copyright (c) 2026 Mika Nystrom.  All rights reserved. *)
 (* SPDX-License-Identifier: Apache-2.0 *)
 
+(* Implementation notes:
+ *
+ * Region-growing segmentation with priority-queue seed selection.
+ * Seeds are chosen by extracting the unclaimed vertex with the most
+ * unclaimed neighbors (via a min-heap on negative neighbor count).
+ * Growth is BFS: each unclaimed neighbor whose vertex normal is
+ * within angleThreshold of the running mean normal is claimed.
+ * The running mean normal is updated incrementally (unnormalized
+ * accumulator, normalized for each comparison).
+ *
+ * Post-processing: regions are filtered by size and tilt angle,
+ * then sorted by decreasing vertex count.  Vertex labels are
+ * remapped to the sorted order.
+ *
+ * The priority queue is instantiated from CM3's generic PQueue
+ * (libm3) with an integer priority type.  SeedElt subclasses
+ * PQueue.Elt to carry the vertex index. *)
+
 MODULE Segment;
 
 IMPORT TriMesh, Vec3, Math, SeedPQ;

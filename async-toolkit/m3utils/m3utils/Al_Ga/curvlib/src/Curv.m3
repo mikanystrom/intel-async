@@ -1,6 +1,19 @@
 (* Copyright (c) 2026 Mika Nystrom.  All rights reserved. *)
 (* SPDX-License-Identifier: Apache-2.0 *)
 
+(* Implementation notes:
+ *
+ * ComputeCurvatures: cotangent-weighted discrete Laplace-Beltrami
+ * with mixed Voronoi area normalization, per Meyer et al. (2003).
+ * The cotangent Laplacian was introduced for mesh processing by
+ * Desbrun et al. (1999).
+ *
+ * ComputeResiduals: least-squares fit of z = ax^2+bxy+cy^2+dx+ey+f
+ * via 6x6 normal equations with Gaussian elimination (partial pivot).
+ *
+ * DetectAnomalies: statistical outlier detection on the residual
+ * field at a user-specified sigma threshold. *)
+
 MODULE Curv;
 
 IMPORT TriMesh, Facet, Vec3, Math;
