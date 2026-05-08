@@ -225,5 +225,10 @@ override("globelib", TOP & "/globe")
 override("geodata", TOP & "/globe")
 override("airports", TOP & "/globe")
 
+override("plylib",   TOP & "/Al_Ga")
+override("meshlib",  TOP & "/Al_Ga")
+override("facetlib", TOP & "/Al_Ga")
+override("curvlib",  TOP & "/Al_Ga")
+
 SYSTEM_LIBS{"MPZ"} = [ "-lgmp" ]
 SYSTEM_LIBORDER += [ "MPZ" ] % need this, too
