@@ -1,0 +1,3 @@
+build_standalone()
+include(path() & "/../../../m3overrides")
+override("m3bind", path() & "/../..")

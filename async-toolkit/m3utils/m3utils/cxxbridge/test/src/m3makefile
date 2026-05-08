@@ -1,0 +1,17 @@
+% Copyright (c) 2026 Mika Nystrom.  All rights reserved.
+% SPDX-License-Identifier: Apache-2.0
+
+import ("libm3")
+import ("m3bind")
+
+implementation ("Main")
+
+% Link the C++ wrapper library
+import_lib("toyshapes", path() & "/../../toylib")
+
+% Link C++ standard library
+SYSTEM_LIBS{"CXX"} = ["-lc++"]
+SYSTEM_LIBORDER += ["CXX"]
+import_sys_lib("CXX")
+
+program ("cxxtest")

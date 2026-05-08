@@ -1,0 +1,342 @@
+\documentclass[11pt]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage{listings}
+\usepackage{url}
+\usepackage[colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue]{hyperref}
+\lstset{basicstyle=\small\ttfamily, columns=fullflexible, breaklines=true,
+        frame=single, framerule=0.4pt, backgroundcolor=\color[gray]{0.97}}
+
+\title{Modula-3 / C++ Interoperability:\\Design Notes from a Toy Binding}
+\author{Mika Nystr\"om}
+\date{May 8, 2026}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\clearpage
+
+%% -------------------------------------------------------------------
+\section{Introduction}
+
+Modula-3 (M3) can call C functions via \texttt{EXTERNAL} declarations,
+but C++ libraries have no C calling convention.  This document describes
+a three-layer binding architecture demonstrated with a toy C++ class
+hierarchy, and identifies the design decisions that generalize to
+real libraries like Open3D, Eigen, or any C++ API.
+
+Source code:
+\begin{itemize}
+\item \url{https://github.com/mikanystrom/intel-async/tree/al-ga-surface-analysis/async-toolkit/m3utils/m3utils/cxxbridge}
+\end{itemize}
+
+%% -------------------------------------------------------------------
+\section{Architecture}
+
+The binding consists of three layers:
+
+\begin{center}
+\begin{tabular}{lll}
+\textbf{Layer} & \textbf{Language} & \textbf{Role} \\
+\hline
+C++ library  & C++  & The real implementation (\texttt{shapes.hpp}) \\
+C bridge     & C++ (\texttt{extern "C"}) & Flat C API over C++ objects (\texttt{shapes\_c.h}) \\
+M3 binding   & Modula-3 & Idiomatic M3 types and GC integration \\
+\end{tabular}
+\end{center}
+
+The C bridge is compiled as a static library (\texttt{libtoyshapes.a})
+and linked into the M3 program along with \texttt{-lc++} for the C++
+runtime.
+
+%% -------------------------------------------------------------------
+\section{Object Lifetime}
+
+\subsection{The problem}
+
+C++ uses RAII: objects are destroyed when they go out of scope or when
+\texttt{delete} is called.  M3 uses garbage collection: objects are
+destroyed at an unpredictable time after they become unreachable.
+When M3 holds a handle to a C++ object, who calls \texttt{delete}?
+
+\subsection{Solution: weak-reference cleaners}
+
+Each M3 wrapper object registers a \textbf{weak-reference cleaner}
+at construction time via \texttt{WeakRef.FromRef}.  When the M3 GC
+collects the wrapper, the cleaner calls the C destructor:
+
+\begin{lstlisting}
+REVEAL Shape = BRANDED REF RECORD
+  handle : ADDRESS;  (* C++ object pointer *)
+  owned  : BOOLEAN;  (* TRUE = we should free on GC *)
+END;
+
+PROCEDURE ShapeCleaner(READONLY w: WeakRef.T; r: REFANY) =
+  VAR s := NARROW(r, Shape);
+  BEGIN
+    IF s.owned AND s.handle # NIL THEN
+      ToyShapesC.ShapeFree(s.handle);
+      s.handle := NIL;
+    END;
+  END ShapeCleaner;
+\end{lstlisting}
+
+\subsection{Ownership transfer}
+
+When a Shape is added to a ShapeList, the C++ side takes ownership
+of the handle.  The M3 side sets \texttt{owned := FALSE} to
+suppress the destructor:
+
+\begin{lstlisting}
+PROCEDURE Add(sl: ShapeList; s: Shape) =
+  BEGIN
+    ToyShapesC.ShapeListAdd(sl.handle, s.handle);
+    s.owned := FALSE;  (* C++ owns it now *)
+    (* Keep M3 reference so GC doesn't collect the wrapper *)
+    sl.members[sl.nMembers] := s;
+    INC(sl.nMembers);
+  END Add;
+\end{lstlisting}
+
+This is the M3 equivalent of \texttt{std::unique\_ptr::release()}.
+
+%% -------------------------------------------------------------------
+\section{Type Fidelity}
+
+The C++ class hierarchy (\texttt{Shape}, \texttt{Circle},
+\texttt{Rectangle}) is represented on the M3 side as a
+\textbf{single opaque type} \texttt{Shape}.  Virtual dispatch
+happens entirely on the C++ side---the M3 code calls
+\texttt{ToyShapesC.ShapeArea(s.handle)}, which the C bridge
+casts to \texttt{Shape*} and calls the virtual method.
+
+An alternative would be to mirror the hierarchy in M3:
+\begin{lstlisting}
+TYPE Shape <: REFANY;
+     Circle <: Shape;
+     Rectangle <: Shape;
+\end{lstlisting}
+This would give M3 code compile-time type safety (e.g., calling
+\texttt{Radius()} on a non-Circle would be a type error).  The
+cost is maintaining a parallel type hierarchy and doing a
+\texttt{TYPECASE} or \texttt{NARROW} at the bridge layer.
+
+For this prototype, the single-type approach was chosen for
+simplicity.  Real bindings should consider which approach better
+serves the users.
+
+%% -------------------------------------------------------------------
+\section{String Marshaling}
+
+C++ \texttt{std::string} cannot cross the C boundary directly.
+The C bridge returns a \texttt{malloc}'d \texttt{char*}:
+
+\begin{lstlisting}[language=C]
+char *toy_shape_name(toy_shape_t s) {
+    std::string n = static_cast<Shape*>(s)->name();
+    char *r = (char*)malloc(n.size() + 1);
+    if (r) strcpy(r, n.c_str());
+    return r;
+}
+\end{lstlisting}
+
+The M3 side converts to \texttt{TEXT} and frees the C buffer:
+
+\begin{lstlisting}
+PROCEDURE Name(s: Shape): TEXT =
+  VAR cstr := ToyShapesC.ShapeName(s.handle);
+  BEGIN
+    t := M3toC.CopyStoT(cstr);
+    Cstdlib.free(cstr);
+    RETURN t;
+  END Name;
+\end{lstlisting}
+
+\texttt{M3toC.CopyStoT} copies the bytes into a GC-managed
+\texttt{TEXT}, so the \texttt{free()} is safe immediately after.
+
+%% -------------------------------------------------------------------
+\section{Callbacks}
+
+\subsection{The problem}
+
+C++ \texttt{std::function} captures state (closures), but C function
+pointers do not.  The standard C pattern is a function pointer plus a
+\texttt{void*} context:
+
+\begin{lstlisting}[language=C]
+typedef void (*toy_visitor_fn)(toy_shape_t s, size_t i, void *ctx);
+void toy_shapelist_foreach(toy_shapelist_t sl,
+                           toy_visitor_fn fn, void *ctx);
+\end{lstlisting}
+
+On the M3 side, we want to pass an object with a method (a closure):
+
+\begin{lstlisting}
+TYPE VisitorClosure = OBJECT METHODS
+  visit(s: Shape; index: CARDINAL);
+END;
+\end{lstlisting}
+
+\subsection{Solution: trampoline + LOOPHOLE}
+
+The M3 side passes a \textbf{trampoline} procedure as the function
+pointer, and the closure object's address as the context:
+
+\begin{lstlisting}
+PROCEDURE ForEach(sl: ShapeList; v: VisitorClosure) =
+  BEGIN
+    ToyShapesC.ShapeListForEach(
+      sl.handle, VisitorTrampoline, LOOPHOLE(v, ADDRESS));
+  END ForEach;
+
+PROCEDURE VisitorTrampoline(h: Handle; index: CARDINAL;
+                            ctx: ADDRESS) =
+  VAR v := LOOPHOLE(ctx, VisitorClosure);
+      s := NEW(Shape, handle := h, owned := FALSE);
+  BEGIN
+    v.visit(s, index);
+  END VisitorTrampoline;
+\end{lstlisting}
+
+The trampoline has a fixed address (it is a top-level procedure,
+not a closure), so it is safe to pass as a C function pointer.
+The \texttt{LOOPHOLE} converts between the M3 traced reference
+and the C \texttt{void*}.
+
+\textbf{GC safety}: During the callback, the closure \texttt{v} must
+not be collected or moved.  Since \texttt{ForEach} holds a reference
+to \texttt{v} on the M3 stack, the GC will not collect it.  CM3's
+conservative stack scanning ensures that the traced reference is
+seen even though we passed it as an untraced \texttt{ADDRESS}.
+
+\subsection{Closures with state}
+
+The predicate closure demonstrates captured state---the point
+coordinates \texttt{px}, \texttt{py} are fields of the closure
+object:
+
+\begin{lstlisting}
+TYPE ContainsPred = PredicateClosure OBJECT
+  px, py: LONGREAL;
+OVERRIDES
+  test := ContainsTest;
+END;
+
+(* Create and use: *)
+VAR pred := NEW(ContainsPred, px := 1.0d0, py := 0.0d0);
+    hits := ToyShapes.Filter(sl, pred);
+\end{lstlisting}
+
+The state travels through the C bridge via the \texttt{void*}
+context without the C code knowing anything about it.
+
+%% -------------------------------------------------------------------
+\section{Exception Handling}
+
+C++ exceptions cannot propagate through M3 stack frames.  The C
+bridge catches all exceptions and converts them to error indicators:
+
+\begin{lstlisting}[language=C]
+toy_shape_t toy_circle_new(double cx, double cy, double r) {
+    try {
+        return new Circle(cx, cy, r);
+    } catch (const std::exception &e) {
+        set_error(e.what());
+        return NULL;
+    } catch (...) {
+        set_error("unknown C++ exception");
+        return NULL;
+    }
+}
+\end{lstlisting}
+
+The M3 side checks for \texttt{NULL} and raises an M3 exception:
+
+\begin{lstlisting}
+PROCEDURE WrapHandle(h: Handle): Shape RAISES {Error} =
+  BEGIN
+    IF h = NIL THEN RAISE Error(GetLastError()); END;
+    ...
+  END WrapHandle;
+\end{lstlisting}
+
+The error message is stored in a thread-local buffer on the C side
+and retrieved by \texttt{toy\_last\_error()}.
+
+%% -------------------------------------------------------------------
+\section{Linking}
+
+The C++ wrapper is compiled as a static library:
+
+\begin{lstlisting}
+c++ -std=c++17 -O2 -fPIC -c shapes_c.cpp
+ar rcs libtoyshapes.a shapes_c.o
+\end{lstlisting}
+
+The M3 \texttt{m3makefile} links it with \texttt{import\_lib} and
+adds the C++ runtime via \texttt{SYSTEM\_LIBS}:
+
+\begin{lstlisting}
+import_lib("toyshapes", path() & "/../../toylib")
+SYSTEM_LIBS{"CXX"} = ["-lc++"]
+SYSTEM_LIBORDER += ["CXX"]
+import_sys_lib("CXX")
+\end{lstlisting}
+
+On macOS, \texttt{-lc++} links the system \texttt{libc++.dylib}.
+On Linux, this would be \texttt{-lstdc++}.
+
+%% -------------------------------------------------------------------
+\section{Generalizing to Real Libraries}
+
+The patterns demonstrated here apply directly to binding any
+C++ library (Open3D, Eigen, CGAL, etc.):
+
+\begin{enumerate}
+\item Write a \textbf{C bridge} (\texttt{extern "C"} in a
+  \texttt{.cpp} file) that exposes the needed functionality
+  through opaque handles, flat arrays, and function-pointer
+  callbacks.
+
+\item Write an \textbf{M3 raw interface} (\texttt{UNSAFE INTERFACE})
+  that matches the C bridge exactly, with \texttt{EXTERNAL}
+  declarations.
+
+\item Write an \textbf{M3 idiomatic layer} that wraps handles in
+  traced objects with GC cleaners, converts strings, and provides
+  closure-based callbacks.
+
+\item Link the C++ static library and \texttt{-lc++} into the
+  M3 program.
+\end{enumerate}
+
+The main cost is writing and maintaining the C bridge.  For a large
+library like Open3D, this is significant work, but it only needs to
+cover the functions actually used.
+
+\subsection{Open questions}
+
+\begin{itemize}
+\item \textbf{Shared libraries}: The prototype uses static linking.
+  For large C++ libraries, dynamic linking
+  (\texttt{libtoyshapes.dylib}) avoids code duplication but requires
+  the library to be findable at runtime.
+
+\item \textbf{Thread safety}: The error buffer uses
+  \texttt{thread\_local}.  If M3 and C++ both use threads, the
+  interaction between the M3 GC (which may stop threads) and C++
+  thread primitives needs care.
+
+\item \textbf{Large data}: For million-element arrays (vertices,
+  etc.), the copy-in/copy-out pattern works but doubles memory.
+  A zero-copy approach could share a buffer allocated by one side
+  and accessed by both, but requires careful lifetime management.
+
+\item \textbf{Subclassing from M3}: The current design does not
+  allow M3 code to create new Shape subclasses that participate in
+  C++ virtual dispatch.  This would require a C++ proxy class
+  that delegates virtual calls back to M3 methods---doable but
+  complex.
+\end{itemize}
+
+\end{document}
