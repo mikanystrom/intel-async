@@ -378,35 +378,35 @@ displayed in $\text{mm}^{-1}$; the color scale is clipped at
 $\pm 2\,\text{mm}^{-1}$ (corresponding to a radius of curvature of
 500~$\mu$m).
 
-\begin{figure}[htbp]
+\begin{figure}[p]
 \centering
-\includegraphics[width=\textwidth]{figures/face5_curvature_anomalies.pdf}
+\includegraphics[width=0.85\textwidth,height=0.8\textheight,keepaspectratio]{figures/face5_curvature_anomalies.pdf}
 \caption{Mean curvature $H$ (mm$^{-1}$) for Face~5, with anomalies
   (3$\sigma$ residual threshold) marked as black circles.  Gray
   indicates near-zero curvature; red is convex, blue is concave.
   Color palette follows the CIE Luv perceptual uniformity
-  recommendations of Nystrom (2008).}
+  recommendations of Nystr\"om (2008).}
 \label{fig:curvature}
 \end{figure}
 
 \subsection{Spectral decomposition}
 
 Figure~\ref{fig:spectral} shows the multiresolution decomposition
-of the same face into six frequency bands.  The coarsest level
+of the same face into frequency bands.  The coarsest level
 captures the overall shape (a gentle bowl with ${\sim}500$~$\mu$m
 peak-to-peak).  Successive bands reveal medium-scale undulations
-and fine-scale roughness.  The finest band (Band~4) shows features
+and fine-scale roughness.  The finest band shows features
 at the grid resolution (${\sim}5$~$\mu$m), where particle
 inclusions and polishing artifacts are most visible.
 
-\begin{figure}[htbp]
+\begin{figure}[p]
 \centering
-\includegraphics[width=\textwidth]{figures/face5_spectral.pdf}
+\includegraphics[width=0.85\textwidth,height=0.8\textheight,keepaspectratio]{figures/face5_spectral.pdf}
 \caption{Multiresolution height field decomposition of Face~5.
-  Top-left: coarsest smoothed level (Gaussian $\sigma = 8$ cells).
+  Top-left: coarsest smoothed level.
   Remaining panels: band-pass differences between successive
-  smoothing levels, from low frequency (Band~0) to the finest
-  detail (Band~4).  Color scales decrease by approximately $2\times$
+  smoothing levels, from low frequency to the finest
+  detail.  Color scales decrease by approximately $2\times$
   per band, consistent with a power-law roughness spectrum.  All
   values in $\mu$m.}
 \label{fig:spectral}
@@ -418,9 +418,9 @@ Figure~\ref{fig:height} shows the raw height field for Face~5 after
 rotation to the $z$-up frame.  The irregular face boundary is
 preserved through masking; cells outside the face are omitted.
 
-\begin{figure}[htbp]
+\begin{figure}[p]
 \centering
-\includegraphics[width=\textwidth]{figures/face5_height.pdf}
+\includegraphics[width=0.85\textwidth,height=0.8\textheight,keepaspectratio]{figures/face5_height.pdf}
 \caption{Height field $z(x,y)$ for Face~5 after best-fit plane
   subtraction and rotation.  Units: $\mu$m.  The irregular grain
   face boundary is visible.}
@@ -434,75 +434,57 @@ The following pages present cotangent-Laplacian mean curvature maps
 for all 38 grain faces across four sub-samples.  All plots share a
 common color scale of $[-3, +3]$\,mm$^{-1}$, with gray at zero
 (flat), red for convex, and blue for concave regions.  Coordinates
-are in micrometers.
+are in micrometers.  Axis scales are identical in $x$ and $y$.
 
-\begin{figure}[p]
-\centering
-\textbf{\large Sample 550-1-1}\\[6pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-1-Face-1.png}\hfill
-\includegraphics[width=0.48\textwidth]{figures/550-1-1-Face-2.png}\\[4pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-1-Face-3.png}\hfill
-\includegraphics[width=0.48\textwidth]{figures/550-1-1-Face-4.png}\\[4pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-1-Face-5.png}\hfill
-\includegraphics[width=0.48\textwidth]{figures/550-1-1-Face-6.png}\\[4pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-1-Face-7.png}\hfill
-\includegraphics[width=0.48\textwidth]{figures/550-1-1-Face-8.png}
-\caption{Mean curvature atlas for sample 550\_1\_1 (8~faces).}
-\end{figure}
+\clearpage
+\subsection*{Sample 550\_1\_1}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-1-Face-1.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-1-Face-2.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-1-Face-3.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-1-Face-4.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-1-Face-5.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-1-Face-6.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-1-Face-7.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-1-Face-8.png}\end{center}
 
-\begin{figure}[p]
-\centering
-\textbf{\large Sample 550-1-2}\\[6pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-1.png}\hfill
-\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-2.png}\\[4pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-3.png}\hfill
-\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-4.png}\\[4pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-5.png}\hfill
-\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-6.png}\\[4pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-7.png}\hfill
-\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-8.png}
-\caption{Mean curvature atlas for sample 550\_1\_2 (faces 1--8 of 12).}
-\end{figure}
+\clearpage
+\subsection*{Sample 550\_1\_2}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-2-Face-1.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-2-Face-2.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-2-Face-3.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-2-Face-4.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-2-Face-5.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-2-Face-6.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-2-Face-7.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-2-Face-8.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-2-Face-9.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-2-Face-10.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-2-Face-11.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-2-Face-12.png}\end{center}
 
-\begin{figure}[p]
-\centering
-\textbf{\large Sample 550-1-2 (continued)}\\[6pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-9.png}\hfill
-\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-10.png}\\[4pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-11.png}\hfill
-\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-12.png}
-\caption{Mean curvature atlas for sample 550\_1\_2 (faces 9--12 of 12).}
-\end{figure}
+\clearpage
+\subsection*{Sample 550\_1\_3}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-3-Face-1.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-3-Face-2.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-3-Face-3.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-3-Face-4.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-3-Face-5.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-3-Face-6.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-3-Face-7.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-3-Face-8.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-3-Face-9.png}\end{center}
 
-\begin{figure}[p]
-\centering
-\textbf{\large Sample 550-1-3}\\[6pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-3-Face-1.png}\hfill
-\includegraphics[width=0.48\textwidth]{figures/550-1-3-Face-2.png}\\[4pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-3-Face-3.png}\hfill
-\includegraphics[width=0.48\textwidth]{figures/550-1-3-Face-4.png}\\[4pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-3-Face-5.png}\hfill
-\includegraphics[width=0.48\textwidth]{figures/550-1-3-Face-6.png}\\[4pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-3-Face-7.png}\hfill
-\includegraphics[width=0.48\textwidth]{figures/550-1-3-Face-8.png}\\[4pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-3-Face-9.png}
-\caption{Mean curvature atlas for sample 550\_1\_3 (9~faces).}
-\end{figure}
-
-\begin{figure}[p]
-\centering
-\textbf{\large Sample 550-1-4}\\[6pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-4-Face-1.png}\hfill
-\includegraphics[width=0.48\textwidth]{figures/550-1-4-Face-2.png}\\[4pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-4-Face-3.png}\hfill
-\includegraphics[width=0.48\textwidth]{figures/550-1-4-Face-4.png}\\[4pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-4-Face-5.png}\hfill
-\includegraphics[width=0.48\textwidth]{figures/550-1-4-Face-6.png}\\[4pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-4-Face-7.png}\hfill
-\includegraphics[width=0.48\textwidth]{figures/550-1-4-Face-8.png}\\[4pt]
-\includegraphics[width=0.48\textwidth]{figures/550-1-4-Face-9.png}
-\caption{Mean curvature atlas for sample 550\_1\_4 (9~faces).}
-\end{figure}
+\clearpage
+\subsection*{Sample 550\_1\_4}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-4-Face-1.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-4-Face-2.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-4-Face-3.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-4-Face-4.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-4-Face-5.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-4-Face-6.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-4-Face-7.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-4-Face-8.png}\end{center}
+\begin{center}\includegraphics[width=0.75\textwidth]{figures/550-1-4-Face-9.png}\end{center}
 
 \clearpage
 
@@ -556,7 +538,7 @@ mm$^{-1}$.
 
 The color palette for curvature maps follows the recommendations
 of the CIE~Luv perceptual uniformity analysis in the ``Curves
-Reference Manual'' (Nystrom, 2008): a diverging palette with a
+Reference Manual'' (Nystr\"om, 2008): a diverging palette with a
 neutral gray midpoint (\texttt{\#909090}) and blue/red endpoints
 chosen to be approximately equidistant in Luv space.  This avoids
 the banding artifacts of HSV-based palettes and ensures that equal
@@ -599,7 +581,7 @@ curvature differences produce equal perceptual differences.
   2-manifolds.'' \textit{Visualization and Mathematics III},
   Springer, pp.\ 35--57.
 
-\item[Nystrom, M.\ (2008).]
+\item[Nystr\"om, M.\ (2008).]
   ``Curves Reference Manual.''  Generation Capital Ltd.  Chapter~4:
   Color (CIE Luv perceptual uniformity for quantitative data
   visualization).
