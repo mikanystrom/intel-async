@@ -30,12 +30,7 @@
 #include <string.h>
 #include <stdio.h>
 
-/* linux sticks just about EVERYTHING in /usr (not /usr/local like BSD) */
-#ifdef linux
-# include <expat.h>
-#else
-# include "/usr/local/include/expat.h"
-#endif
+#include <expat.h>
 
 #define DEBUG 0
 
