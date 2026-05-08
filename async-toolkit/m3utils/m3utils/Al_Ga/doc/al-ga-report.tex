@@ -8,7 +8,7 @@
 \lstset{basicstyle=\small\ttfamily, columns=fullflexible, breaklines=true}
 
 \title{Surface Mesh Analysis Pipeline for\\Al(Ga) Grain Face Characterization}
-\author{Mika Nystrom}
+\author{Mika Nystr\"om}
 \date{May 7, 2026}
 
 \begin{document}
@@ -182,10 +182,24 @@ $j \in N(i)$, the discrete mean curvature is:
     (\cot\alpha_{ij} + \cot\beta_{ij})\,(z_j - z_i)
 \]
 where $\alpha_{ij}$ and $\beta_{ij}$ are the angles opposite edge
-$(i,j)$ in the two adjacent triangles, and $A_i$ is the mixed
-Voronoi area (approximated here as one-third of the total incident
-face area).  This formula has units of $1/\text{length}$---the
+$(i,j)$ in the two adjacent triangles, and $A_i$ is the mixed Voronoi area of Meyer et al.\ (2003).  This formula has units of $1/\text{length}$---the
 inverse radius of curvature.
+
+The mixed Voronoi area $A_i$ is computed per-triangle as follows.
+If the triangle is non-obtuse, vertex $i$ receives its Voronoi
+region area:
+\[
+  A_{\text{vor}}(i) = \tfrac{1}{8}
+    \bigl(|\mathbf{e}_{ij}|^2 \cot\gamma_k
+         + |\mathbf{e}_{ik}|^2 \cot\gamma_j\bigr)
+\]
+where $\gamma_j$, $\gamma_k$ are the angles at the other two
+vertices and $\mathbf{e}_{ij}$, $\mathbf{e}_{ik}$ are the edge
+vectors.  If the triangle is obtuse, the vertex at the obtuse angle
+receives half the triangle area, and the other two vertices each
+receive one quarter.  This prevents the Voronoi area from becoming
+negative or excessively small at obtuse triangles, which would cause
+the cotangent Laplacian to produce spurious curvature spikes.
 
 The cotangent of an angle between vectors $\mathbf{a}$ and
 $\mathbf{b}$ is computed as:
@@ -414,6 +428,85 @@ preserved through masking; cells outside the face are omitted.
 \end{figure}
 
 %% -------------------------------------------------------------------
+\section{Curvature Atlas}
+
+The following pages present cotangent-Laplacian mean curvature maps
+for all 38 grain faces across four sub-samples.  All plots share a
+common color scale of $[-3, +3]$\,mm$^{-1}$, with gray at zero
+(flat), red for convex, and blue for concave regions.  Coordinates
+are in micrometers.
+
+\begin{figure}[p]
+\centering
+\textbf{\large Sample 550-1-1}\\[6pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-1-Face-1.png}\hfill
+\includegraphics[width=0.48\textwidth]{figures/550-1-1-Face-2.png}\\[4pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-1-Face-3.png}\hfill
+\includegraphics[width=0.48\textwidth]{figures/550-1-1-Face-4.png}\\[4pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-1-Face-5.png}\hfill
+\includegraphics[width=0.48\textwidth]{figures/550-1-1-Face-6.png}\\[4pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-1-Face-7.png}\hfill
+\includegraphics[width=0.48\textwidth]{figures/550-1-1-Face-8.png}
+\caption{Mean curvature atlas for sample 550\_1\_1 (8~faces).}
+\end{figure}
+
+\begin{figure}[p]
+\centering
+\textbf{\large Sample 550-1-2}\\[6pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-1.png}\hfill
+\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-2.png}\\[4pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-3.png}\hfill
+\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-4.png}\\[4pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-5.png}\hfill
+\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-6.png}\\[4pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-7.png}\hfill
+\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-8.png}
+\caption{Mean curvature atlas for sample 550\_1\_2 (faces 1--8 of 12).}
+\end{figure}
+
+\begin{figure}[p]
+\centering
+\textbf{\large Sample 550-1-2 (continued)}\\[6pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-9.png}\hfill
+\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-10.png}\\[4pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-11.png}\hfill
+\includegraphics[width=0.48\textwidth]{figures/550-1-2-Face-12.png}
+\caption{Mean curvature atlas for sample 550\_1\_2 (faces 9--12 of 12).}
+\end{figure}
+
+\begin{figure}[p]
+\centering
+\textbf{\large Sample 550-1-3}\\[6pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-3-Face-1.png}\hfill
+\includegraphics[width=0.48\textwidth]{figures/550-1-3-Face-2.png}\\[4pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-3-Face-3.png}\hfill
+\includegraphics[width=0.48\textwidth]{figures/550-1-3-Face-4.png}\\[4pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-3-Face-5.png}\hfill
+\includegraphics[width=0.48\textwidth]{figures/550-1-3-Face-6.png}\\[4pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-3-Face-7.png}\hfill
+\includegraphics[width=0.48\textwidth]{figures/550-1-3-Face-8.png}\\[4pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-3-Face-9.png}
+\caption{Mean curvature atlas for sample 550\_1\_3 (9~faces).}
+\end{figure}
+
+\begin{figure}[p]
+\centering
+\textbf{\large Sample 550-1-4}\\[6pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-4-Face-1.png}\hfill
+\includegraphics[width=0.48\textwidth]{figures/550-1-4-Face-2.png}\\[4pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-4-Face-3.png}\hfill
+\includegraphics[width=0.48\textwidth]{figures/550-1-4-Face-4.png}\\[4pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-4-Face-5.png}\hfill
+\includegraphics[width=0.48\textwidth]{figures/550-1-4-Face-6.png}\\[4pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-4-Face-7.png}\hfill
+\includegraphics[width=0.48\textwidth]{figures/550-1-4-Face-8.png}\\[4pt]
+\includegraphics[width=0.48\textwidth]{figures/550-1-4-Face-9.png}
+\caption{Mean curvature atlas for sample 550\_1\_4 (9~faces).}
+\end{figure}
+
+\clearpage
+
+%% -------------------------------------------------------------------
 \section{Usage}
 
 \subsection{Building}
@@ -495,10 +588,6 @@ curvature differences produce equal perceptual differences.
   and produce a PDF atlas of all grain faces with curvature maps
   and spectral decompositions.
 
-\item \textbf{Voronoi area.}  Replace the $A_i/3$ barycentric
-  approximation with the proper mixed Voronoi area of
-  Meyer et al.\ (2003) for more accurate curvature at obtuse
-  triangles.
 \end{itemize}
 
 %% -------------------------------------------------------------------

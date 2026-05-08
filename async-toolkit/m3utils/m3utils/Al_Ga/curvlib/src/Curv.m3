@@ -101,11 +101,49 @@ PROCEDURE ComputeCurvatures(mesh: TriMesh.T; facet: Facet.T)
       curv[v1] := curv[v1] + cotC * (h0 - h1) + cotA * (h2 - h1);
       curv[v2] := curv[v2] + cotB * (h0 - h2) + cotA * (h1 - h2);
 
-      (* Mixed Voronoi area: 1/3 of face area per vertex (Barycentric) *)
+      (* Mixed Voronoi area per Meyer et al. (2003).
+         For a non-obtuse triangle, each vertex gets its Voronoi
+         region: A_vor(v0) = (1/8)(|e01|^2 cot(angle at v2)
+                                  + |e02|^2 cot(angle at v1)).
+         For an obtuse triangle, the obtuse vertex gets half the
+         triangle area; the other two split the remaining half. *)
       faceArea := TriMesh.GetFaceInfo(mesh, f).area;
-      area[v0] := area[v0] + faceArea / 3.0d0;
-      area[v1] := area[v1] + faceArea / 3.0d0;
-      area[v2] := area[v2] + faceArea / 3.0d0;
+      VAR
+        dot0 := Vec3.Dot(Vec3.Sub(p1, p0), Vec3.Sub(p2, p0));
+        dot1 := Vec3.Dot(Vec3.Sub(p0, p1), Vec3.Sub(p2, p1));
+        dot2 := Vec3.Dot(Vec3.Sub(p0, p2), Vec3.Sub(p1, p2));
+      BEGIN
+        IF dot0 < 0.0d0 THEN
+          (* Obtuse at v0 *)
+          area[v0] := area[v0] + faceArea / 2.0d0;
+          area[v1] := area[v1] + faceArea / 4.0d0;
+          area[v2] := area[v2] + faceArea / 4.0d0;
+        ELSIF dot1 < 0.0d0 THEN
+          (* Obtuse at v1 *)
+          area[v0] := area[v0] + faceArea / 4.0d0;
+          area[v1] := area[v1] + faceArea / 2.0d0;
+          area[v2] := area[v2] + faceArea / 4.0d0;
+        ELSIF dot2 < 0.0d0 THEN
+          (* Obtuse at v2 *)
+          area[v0] := area[v0] + faceArea / 4.0d0;
+          area[v1] := area[v1] + faceArea / 4.0d0;
+          area[v2] := area[v2] + faceArea / 2.0d0;
+        ELSE
+          (* Non-obtuse: Voronoi area *)
+          VAR
+            e01sq := Vec3.LengthSq(Vec3.Sub(p1, p0));
+            e02sq := Vec3.LengthSq(Vec3.Sub(p2, p0));
+            e12sq := Vec3.LengthSq(Vec3.Sub(p2, p1));
+          BEGIN
+            area[v0] := area[v0]
+              + (e01sq * cotC + e02sq * cotB) / 8.0d0;
+            area[v1] := area[v1]
+              + (e01sq * cotC + e12sq * cotA) / 8.0d0;
+            area[v2] := area[v2]
+              + (e02sq * cotB + e12sq * cotA) / 8.0d0;
+          END;
+        END;
+      END;
     END;
 
     (* Normalize: H = (1 / 2A) * sum_cotangent_weighted_diffs *)
