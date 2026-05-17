@@ -31,6 +31,7 @@ PROCEDURE Run() =
     maxTilt := 30.0d0;
     nCells : CARDINAL := 16384;
     nLevels : CARDINAL := 4;
+    xyScale : LONGREAL := 0.001d0;  (* nm to um by default *)
   BEGIN
     IF Params.Count < 2 THEN
       Wr.PutText(Stdio.stderr,
@@ -42,7 +43,9 @@ PROCEDURE Run() =
         "  -angle <degrees>    normal angle threshold (default 15)\n" &
         "  -minverts <n>       minimum region size (default 100)\n" &
         "  -maxtilt <degrees>  max tilt from vertical (default 30)\n" &
-        "  -threshold <sigma>  anomaly threshold (default 3.0)\n");
+        "  -threshold <sigma>  anomaly threshold (default 3.0)\n" &
+        "  -scale <factor>     xy scale to microns (default 0.001 = nm)\n" &
+        "                      use 1.0 if input is already in microns\n");
       Process.Exit(1);
     END;
 
@@ -66,6 +69,8 @@ PROCEDURE Run() =
             INC(i); maxTilt := ScanLR(Params.Get(i));
           ELSIF Text.Equal(arg, "-threshold") AND i + 1 < Params.Count THEN
             INC(i); anomalyThresh := ScanLR(Params.Get(i));
+          ELSIF Text.Equal(arg, "-scale") AND i + 1 < Params.Count THEN
+            INC(i); xyScale := ScanLR(Params.Get(i));
           ELSE
             path := arg;
           END;
@@ -91,7 +96,7 @@ PROCEDURE Run() =
     Put("  total area: "); PutLR(TriMesh.TotalArea(mesh)); PutLn();
 
     IF doContour THEN
-      DoContour(mesh, contourOut, nCells, nLevels);
+      DoContour(mesh, contourOut, nCells, nLevels, xyScale);
     ELSIF doSegment THEN
       DoSegmentation(mesh, angleThresh, anomalyThresh, minVerts, maxTilt);
     ELSE
@@ -100,7 +105,8 @@ PROCEDURE Run() =
   END Run;
 
 PROCEDURE DoContour(mesh: TriMesh.T; outDir: TEXT;
-                    nCells, nLevels: CARDINAL) =
+                    nCells, nLevels: CARDINAL;
+                    xyScale: LONGREAL) =
   <*FATAL HeightGrid.GridError*>
   VAR
     facet  : Facet.T;
@@ -138,9 +144,9 @@ PROCEDURE DoContour(mesh: TriMesh.T; outDir: TEXT;
       BEGIN
         HeightGrid.GetBounds(hg, xMin, xMax, yMin, yMax);
 
-        (* nm to microns *)
+        (* Scale to microns for display; curvature to 1/mm *)
         VAR
-          s  := 0.001d0;
+          s  := xyScale;
           mk := HeightGrid.GetMask(hg);
         BEGIN
           FOR k := 0 TO nLevels - 1 DO
@@ -155,10 +161,10 @@ PROCEDURE DoContour(mesh: TriMesh.T; outDir: TEXT;
 
           VAR curvFile := baseName & "_curvature.dat"; BEGIN
             Put("  writing " & curvFile & "\n");
-            (* curvature is 1/nm, scale to 1/mm for display *)
+            (* curvature is 1/input_unit, scale to 1/mm for display *)
             HeightGrid.WriteGrid(curvSmooth, curvFile,
                                  xMin, xMax, yMin, yMax,
-                                 xyScale := s, zScale := 1.0d6,
+                                 xyScale := s, zScale := 1.0d3 / s,
                                  mask := mk);
           END;
 
@@ -407,7 +413,7 @@ PROCEDURE WriteAnomalyFile(path: TEXT; curv: Curv.T;
       Wr.PutText(wr, Fmt.LongReal(a.x * xyScale) & " "
                     & Fmt.LongReal(a.y * xyScale) & " "
                     & Fmt.LongReal(a.height * xyScale) & " "
-                    & Fmt.LongReal(a.curvature * 1.0d6) & "\n");
+                    & Fmt.LongReal(a.curvature * 1.0d3 / xyScale) & "\n");
     END;
     Wr.Close(wr);
   END WriteAnomalyFile;

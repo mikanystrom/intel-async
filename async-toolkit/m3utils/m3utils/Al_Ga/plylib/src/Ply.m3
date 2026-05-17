@@ -24,9 +24,12 @@ PROCEDURE ReadHeader(rd: Rd.T): Header RAISES {ParseError, Rd.Failure} =
       END;
 
       line := Rd.GetLine(rd);
-      IF NOT Text.Equal(line, "format binary_little_endian 1.0") THEN
-        RAISE ParseError("only binary_little_endian 1.0 supported, got: "
-                           & line);
+      IF Text.Equal(line, "format binary_little_endian 1.0") THEN
+        h.format := Format.BinaryLittleEndian;
+      ELSIF Text.Equal(line, "format ascii 1.0") THEN
+        h.format := Format.Ascii;
+      ELSE
+        RAISE ParseError("unsupported format: " & line);
       END;
 
       LOOP
@@ -91,16 +94,79 @@ PROCEDURE ReadHeader(rd: Rd.T): Header RAISES {ParseError, Rd.Failure} =
 
 PROCEDURE ReadData(rd: Rd.T; READONLY h: Header): T
     RAISES {ParseError, Rd.Failure} =
+  VAR m: T;
+  BEGIN
+    m.header := h;
+    m.vertices := NEW(Vertices, h.nVertices * h.nFloatProps);
+    m.faces := NEW(Faces, h.nFaces * 3);
+
+    IF h.format = Format.Ascii THEN
+      ReadDataAscii(rd, h, m);
+    ELSE
+      ReadDataBinary(rd, h, m);
+    END;
+    RETURN m;
+  END ReadData;
+
+PROCEDURE ReadDataAscii(rd: Rd.T; READONLY h: Header; VAR m: T)
+    RAISES {ParseError, Rd.Failure} =
   VAR
-    m         : T;
-    nVFloats  : CARDINAL := h.nVertices * h.nFloatProps;
+    line : TEXT;
+    trd  : TextRd.T;
+    floatPos : CARDINAL := 0;
+    val  : REAL;
+    n, idx : INTEGER;
+  BEGIN
+    TRY
+      (* Read vertex data: one line per vertex, space-separated values *)
+      FOR i := 0 TO h.nVertices - 1 DO
+        line := Rd.GetLine(rd);
+        trd := TextRd.New(line);
+        FOR j := 0 TO h.nAllProps - 1 DO
+          IF h.properties[j].kind = PropKind.Float THEN
+            Lex.Skip(trd);
+            val := Lex.Real(trd);
+            m.vertices[floatPos] := val;
+            INC(floatPos);
+          ELSE
+            (* uchar: read and discard *)
+            Lex.Skip(trd);
+            EVAL Lex.Int(trd);
+          END;
+        END;
+      END;
+
+      (* Read face data: "3 v0 v1 v2" per line *)
+      FOR i := 0 TO h.nFaces - 1 DO
+        line := Rd.GetLine(rd);
+        trd := TextRd.New(line);
+        Lex.Skip(trd);
+        n := Lex.Int(trd);
+        IF n # 3 THEN
+          RAISE ParseError("face " & Fmt.Int(i) & " has " & Fmt.Int(n)
+                             & " vertices (only triangles supported)");
+        END;
+        FOR j := 0 TO 2 DO
+          Lex.Skip(trd);
+          idx := Lex.Int(trd);
+          m.faces[3 * i + j] := idx;
+        END;
+      END;
+
+    EXCEPT
+    | Rd.EndOfFile =>
+        RAISE ParseError("unexpected end of file in ascii data");
+    | Lex.Error, FloatMode.Trap =>
+        RAISE ParseError("number parse error in ascii data");
+    END;
+  END ReadDataAscii;
+
+PROCEDURE ReadDataBinary(rd: Rd.T; READONLY h: Header; VAR m: T)
+    RAISES {ParseError, Rd.Failure} =
+  VAR
     buf4      : ARRAY [0..3] OF CHAR;
     faceCount : CHAR;
   BEGIN
-    m.header := h;
-    m.vertices := NEW(Vertices, nVFloats);
-    m.faces := NEW(Faces, h.nFaces * 3);
-
     TRY
       (* Read vertex data: nVertices rows of mixed properties *)
       VAR floatPos : CARDINAL := 0; BEGIN
@@ -111,7 +177,6 @@ PROCEDURE ReadData(rd: Rd.T; READONLY h: Header): T
               m.vertices[floatPos] := DecodeLEFloat(buf4);
               INC(floatPos);
             ELSE
-              (* uchar: skip 1 byte *)
               EVAL Rd.GetChar(rd);
             END;
           END;
@@ -137,9 +202,7 @@ PROCEDURE ReadData(rd: Rd.T; READONLY h: Header): T
     | Rd.EndOfFile =>
         RAISE ParseError("unexpected end of file in binary data");
     END;
-
-    RETURN m;
-  END ReadData;
+  END ReadDataBinary;
 
 PROCEDURE Read(rd: Rd.T): T RAISES {ParseError, Rd.Failure} =
   VAR h: Header;

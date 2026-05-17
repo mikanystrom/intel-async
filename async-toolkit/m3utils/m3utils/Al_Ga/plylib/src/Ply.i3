@@ -23,6 +23,7 @@ EXCEPTION
   ParseError(TEXT);
 
 TYPE
+  Format = {BinaryLittleEndian, Ascii};
   PropKind = {Float, Uchar};
 
   (* A single named vertex property as declared in the PLY header. *)
@@ -33,6 +34,7 @@ TYPE
   END;
 
   Header = RECORD
+    format       : Format;                    (* binary or ascii *)
     nVertices    : CARDINAL;                  (* vertex count *)
     nFaces       : CARDINAL;                  (* face count *)
     nFloatProps  : CARDINAL;                  (* float properties per vertex *)
